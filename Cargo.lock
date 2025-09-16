@@ -708,6 +708,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "http-error"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "http",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+]
+
+[[package]]
 name = "httparse"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
