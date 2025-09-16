@@ -351,6 +351,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "database"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "sqlx",
+ "tokio",
+]
+
+[[package]]
 name = "der"
 version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -433,6 +442,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "chrono",
+ "database",
  "rust_decimal",
  "serde",
  "sqlx",
