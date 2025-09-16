@@ -1,0 +1,25 @@
+[package]
+name = "http-error"
+version = "0.1.0"
+edition = "2024"
+description = "Erros HTTP padronizados (RFC 7807)"
+authors = ["Gabriel da Silva Andrade <andrade.gabriel2295@gmail.com>"]
+
+[features]
+default = []
+axum = ["dep:axum", "dep:http"]
+sqlx = ["dep:sqlx"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1" }
+http = { version = "1", optional = true }
+
+# Ative esta se usar Axum na app e quiser IntoResponse pronto
+axum = { version = "0.8", optional = true }
+
+# Ative esta se quiser mapeamento de sqlx::Error -> HttpError
+sqlx = { version = "0.8", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }

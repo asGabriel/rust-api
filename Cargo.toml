@@ -7,6 +7,7 @@ tokio = { version = "1.47.1", features = ["full"] }
 
 # Tools
 serde = { version = "1.0.219" }
+serde_json = { version = "1.0.140" }
 axum = { version = "0.8.4" }
 sqlx = { version = "0.8.6", features = [
     "postgres",
@@ -23,3 +24,4 @@ uuid = { version = "1.15.0", features = ["v4", "serde"] }
 
 ## libs
 database = { path = "lib/database" }
+http-error = { path = "lib/http-error", features = ["http", "axum", "sqlx"] }
