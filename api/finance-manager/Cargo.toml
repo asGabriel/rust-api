@@ -14,3 +14,4 @@ uuid = { workspace = true }
 
 ## libs
 database = { workspace = true }
+http-error = { workspace = true }

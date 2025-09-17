@@ -1,7 +1,7 @@
 #[cfg(feature = "sqlx")]
 use sqlx::{error::DatabaseError, Error};
 
-use crate::{HttpError, HttpErrorKind};
+use crate::HttpError;
 
 #[cfg(feature = "sqlx")]
 impl From<Error> for HttpError {
@@ -10,7 +10,7 @@ impl From<Error> for HttpError {
             Error::RowNotFound => {
                 // Deixe a camada de aplicação decidir a entidade/id quando possível.
                 // Aqui retornamos um 404 genérico.
-                HttpError::new(HttpErrorKind::NotFound, "Recurso não encontrado")
+                HttpError::not_found("Recurso", "não encontrado")
             }
             Error::Database(db_err) => map_database_error(db_err.as_ref()),
             _ => HttpError::internal("Erro de banco de dados").with_cause(err),

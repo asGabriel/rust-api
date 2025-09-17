@@ -7,6 +7,7 @@ authors = ["Gabriel da Silva Andrade <andrade.gabriel2295@gmail.com>"]
 
 [features]
 default = []
+http = ["dep:http"]
 axum = ["dep:axum", "dep:http"]
 sqlx = ["dep:sqlx"]
 

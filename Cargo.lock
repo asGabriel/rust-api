@@ -443,6 +443,7 @@ dependencies = [
  "axum",
  "chrono",
  "database",
+ "http-error",
  "rust_decimal",
  "serde",
  "sqlx",
