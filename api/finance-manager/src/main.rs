@@ -12,6 +12,8 @@ async fn main() {
     let db_conection = DbPool::new().await;
     let pool = db_conection.get_connection();
 
+    sqlx::migrate!("../../migrations").run(pool).await.unwrap();
+
     let payment_handler = PaymentHandlerImpl {
         pool: pool.clone(),
         payment_repository: Arc::new(PaymentRepositoryImpl),
