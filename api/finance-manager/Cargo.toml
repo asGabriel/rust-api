@@ -11,6 +11,7 @@ sqlx = { workspace = true }
 chrono = { workspace = true }
 rust_decimal = { workspace = true }
 uuid = { workspace = true }
+async-trait = { workspace = true }
 
 ## libs
 database = { workspace = true }

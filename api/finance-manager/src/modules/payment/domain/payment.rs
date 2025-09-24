@@ -6,20 +6,28 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Payment {
-    pub id: Uuid,
-    pub debt_id: Uuid,
-    pub account_id: Uuid,
+    /// Unique identifier
+    id: Uuid,
+    /// Unique identifier of the debt
+    /// The debt that the payment belongs to
+    debt_id: Uuid,
+    /// Unique identifier of the account
+    /// The account that the payment belongs to
+    settlement_account_id: Uuid,
 
     /// The total amount of the payment
-    pub total_amount: Decimal,
-    /// The discount amount of the payment
-    pub discount_amount: Decimal,
+    total_amount: Decimal,
     /// The principal amount of the payment (amortized amount)
-    pub principal_amount: Decimal,
+    principal_amount: Decimal,
+    /// The discount amount of the payment
+    discount_amount: Decimal,
+    /// The fine amount of the payment
+    fine_amount: Decimal,
     /// The date of the payment
-    pub date: DateTime<Utc>,
+    date: DateTime<Utc>,
 
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub deleted_at: Option<DateTime<Utc>>,
+    /// The date of the creation of the payment
+    created_at: DateTime<Utc>,
+    /// The date of the last update of the payment
+    updated_at: Option<DateTime<Utc>>,
 }
