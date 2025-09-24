@@ -2,11 +2,11 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::{Pool, Postgres};
 
 #[derive(Debug, Clone)]
-pub struct PgPool {
+pub struct DbPool {
     pool: Pool<Postgres>,
 }
 
-impl PgPool {
+impl DbPool {
     pub async fn new() -> Self {
         const MAX_CONNECTIONS: u32 = 5;
 
@@ -24,5 +24,9 @@ impl PgPool {
 
     pub fn get_connection(&self) -> &Pool<Postgres> {
         &self.pool
+    }
+
+    pub async fn close(&self) {
+        self.pool.close().await;
     }
 }

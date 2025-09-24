@@ -5,7 +5,7 @@ use axum::{
 };
 
 #[cfg(feature = "http")]
-use http::{header, HeaderValue, StatusCode};
+use http::{header, HeaderValue};
 
 use crate::HttpError;
 

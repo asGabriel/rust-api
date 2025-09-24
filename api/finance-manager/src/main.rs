@@ -1,21 +1,35 @@
-// use finance_manager::modules::payment::*;
+use std::sync::Arc;
 
-use database::PgPool;
+use axum::Router;
+use database::DbPool;
+use finance_manager::modules::{
+    payment::{handler::payment::PaymentHandlerImpl, repository::payment::PaymentRepositoryImpl},
+    routes::{self, AppState},
+};
 
 #[tokio::main]
-async fn main() -> Result<(), sqlx::Error> {
-    println!("Hello, world!");
-
-    let db_conection = PgPool::new().await;
-
+async fn main() {
+    let db_conection = DbPool::new().await;
     let pool = db_conection.get_connection();
 
-    let row: (i64,) = sqlx::query_as("SELECT $1")
-        .bind(150_i64)
-        .fetch_one(pool)
-        .await?;
+    let payment_handler = PaymentHandlerImpl {
+        pool: pool.clone(),
+        payment_repository: Arc::new(PaymentRepositoryImpl),
+    };
 
-    println!("row: {:?}", row);
+    let app_state = AppState {
+        db_pool: pool.clone(),
+        payment_handler: Arc::new(payment_handler),
+    };
 
-    Ok(())
+    let app: Router = routes::configure_services().with_state(app_state);
+
+    let port = std::env::var("PORT").expect("Could not fetch port data.");
+    let url = format!("0.0.0.0:{}", port);
+
+    let listener = tokio::net::TcpListener::bind(url).await.unwrap();
+    axum::serve(listener, app).await.unwrap();
+
+    db_conection.close().await;
+
 }
