@@ -1,8 +1,8 @@
-use http_error::HttpResult;
 use async_trait::async_trait;
+use http_error::HttpResult;
 use sqlx::{Pool, Postgres};
 
-use crate::modules::payment::domain::payment::Payment;
+use crate::modules::finance_manager::domain::payment::Payment;
 
 pub type DynPaymentRepository = dyn PaymentRepository + Send + Sync;
 

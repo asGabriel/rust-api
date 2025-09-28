@@ -1,5 +1,5 @@
 #[cfg(feature = "sqlx")]
-use sqlx::{error::DatabaseError, Error};
+use sqlx::{Error, error::DatabaseError};
 
 use crate::HttpError;
 
@@ -26,9 +26,7 @@ fn map_database_error(db_err: &(dyn DatabaseError + 'static)) -> HttpError {
 
     if let Some(code) = code.as_deref() {
         match code {
-            "23505" => {
-                HttpError::conflict("Violação de unicidade").with_meta(meta_code(code))
-            }
+            "23505" => HttpError::conflict("Violação de unicidade").with_meta(meta_code(code)),
             "23503" => {
                 HttpError::bad_request("Violação de chave estrangeira").with_meta(meta_code(code))
             }

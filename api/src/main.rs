@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
-use axum::Router;
-use database::DbPool;
-use finance_manager::modules::{
-    payment::{handler::payment::PaymentHandlerImpl, repository::payment::PaymentRepositoryImpl},
+use api::modules::{
+    finance_manager::{
+        handler::payment::PaymentHandlerImpl, repository::payment::PaymentRepositoryImpl,
+    },
     routes::{self, AppState},
 };
+use axum::Router;
+use database::DbPool;
 
 #[tokio::main]
 async fn main() {
@@ -33,5 +35,4 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 
     db_conection.close().await;
-
 }

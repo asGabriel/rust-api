@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use http_error::HttpResult;
 use sqlx::{Pool, Postgres};
 
-use crate::modules::payment::{
+use crate::modules::finance_manager::{
     domain::account::BankAccount, repository::account::dto::BankAccountDto,
 };
 
@@ -26,7 +26,8 @@ impl FinancialInstrumentRepository for FinancialInstrumentRepositoryImpl {
     ) -> HttpResult<BankAccount> {
         let payload = BankAccountDto::from(financial_instrument);
 
-        let result = sqlx::query!(r#"
+        let result = sqlx::query!(
+            r#"
             INSERT INTO finance_manager.account (id, name, owner, created_at, updated_at)
             VALUES ($1, $2, $3, $4, $5)
             RETURNING id, name, owner, created_at, updated_at
@@ -47,7 +48,7 @@ impl FinancialInstrumentRepository for FinancialInstrumentRepositoryImpl {
             created_at: result.created_at,
             updated_at: result.updated_at,
         };
-        
+
         Ok(BankAccount::from(dto))
     }
 }

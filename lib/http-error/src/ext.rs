@@ -64,10 +64,17 @@ impl<T, E> ResultHttpExt<T, E> for Result<T, E> {
     }
 }
 
-pub fn validation_errors(pairs: impl IntoIterator<Item = (impl AsRef<str>, impl Display)>) -> HttpError {
+pub fn validation_errors(
+    pairs: impl IntoIterator<Item = (impl AsRef<str>, impl Display)>,
+) -> HttpError {
     let map: serde_json::Map<String, serde_json::Value> = pairs
         .into_iter()
-        .map(|(f, m)| (f.as_ref().to_string(), serde_json::Value::String(m.to_string())))
+        .map(|(f, m)| {
+            (
+                f.as_ref().to_string(),
+                serde_json::Value::String(m.to_string()),
+            )
+        })
         .collect();
 
     HttpError::unprocessable(serde_json::Value::Object(map))

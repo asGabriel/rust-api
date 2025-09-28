@@ -3,9 +3,7 @@ use std::sync::Arc;
 use axum::Router;
 use sqlx::{Pool, Postgres};
 
-use crate::modules::payment::handler::payment::DynPaymentHandler;
-
-pub mod payment;
+use crate::modules::finance_manager::{self, handler::payment::DynPaymentHandler};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -14,5 +12,5 @@ pub struct AppState {
 }
 
 pub fn configure_services() -> Router<AppState> {
-    Router::new().merge(payment::configure_routes())
+    Router::new().merge(finance_manager::routes::payment::configure_routes())
 }
