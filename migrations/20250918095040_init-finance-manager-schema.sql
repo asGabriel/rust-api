@@ -27,8 +27,9 @@ CREATE TABLE finance_manager.payment (
     debt_id UUID NOT NULL REFERENCES finance_manager.debt(id),
     account_id UUID NOT NULL REFERENCES finance_manager.account(id),
     total_amount DECIMAL(10, 2) NOT NULL,
-    discount_amount DECIMAL(10, 2) NOT NULL,
     principal_amount DECIMAL(10, 2) NOT NULL,
+    discount_amount DECIMAL(10, 2) NOT NULL,
+    payment_date TIMESTAMP NOT NULL,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NULL
 );

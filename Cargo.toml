@@ -26,3 +26,4 @@ uuid = { version = "1.15.0", features = ["v4", "serde"] }
 ## libs
 database = { path = "lib/database" }
 http-error = { path = "lib/http-error", features = ["http", "axum", "sqlx"] }
+util = { path = "lib/util" }

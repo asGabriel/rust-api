@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use api::modules::{
     finance_manager::{
-        handler::payment::PaymentHandlerImpl, repository::payment::PaymentRepositoryImpl,
+        handler::payment::PaymentHandlerImpl, repository::payment::PaymentRepositoryImpl, FinanceManagerState,
     },
     routes::{self, AppState},
 };
@@ -14,16 +14,14 @@ async fn main() {
     let db_conection = DbPool::new().await;
     let pool = db_conection.get_connection();
 
-    sqlx::migrate!().run(pool).await.unwrap();
-
-    let payment_handler = PaymentHandlerImpl {
-        pool: pool.clone(),
-        payment_repository: Arc::new(PaymentRepositoryImpl),
+    let finance_manager_state = FinanceManagerState {
+        payment_handler: Arc::new(PaymentHandlerImpl {
+            payment_repository: Arc::new(PaymentRepositoryImpl::new(pool)),
+        }),
     };
 
     let app_state = AppState {
-        db_pool: pool.clone(),
-        payment_handler: Arc::new(payment_handler),
+        finance_manager_state: Arc::new(finance_manager_state),
     };
 
     let app: Router = routes::configure_services().with_state(app_state);
