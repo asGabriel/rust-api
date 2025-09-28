@@ -2,11 +2,9 @@ use std::sync::Arc;
 
 use crate::modules::finance_manager::handler::payment::DynPaymentHandler;
 
-pub mod domain;
-pub mod handler;
-pub mod repository;
+pub mod gateway;
 pub mod routes;
 
-pub struct FinanceManagerState {
+pub struct TelegramBotState {
     pub payment_handler: Arc<DynPaymentHandler>,
 }

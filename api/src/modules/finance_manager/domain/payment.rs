@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use util::{from_row_constructor, getters};
 use uuid::Uuid;
-use util::{getters, from_row_constructor};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -81,5 +81,4 @@ impl Payment {
             updated_at: None,
         }
     }
-
 }

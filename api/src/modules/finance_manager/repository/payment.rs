@@ -2,7 +2,9 @@ use async_trait::async_trait;
 use http_error::HttpResult;
 use sqlx::{Pool, Postgres};
 
-use crate::modules::finance_manager::{domain::payment::Payment, repository::payment::dto::PaymentDto};
+use crate::modules::finance_manager::{
+    domain::payment::Payment, repository::payment::dto::PaymentDto,
+};
 
 pub type DynPaymentRepository = dyn PaymentRepository + Send + Sync;
 
@@ -34,19 +36,19 @@ impl PaymentRepository for PaymentRepositoryImpl {
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 RETURNING id, debt_id, account_id, total_amount, principal_amount, discount_amount, payment_date, created_at, updated_at
             "#,
-            payload.id, 
-            payload.debt_id, 
-            payload.account_id, 
-            payload.total_amount, 
+            payload.id,
+            payload.debt_id,
+            payload.account_id,
+            payload.total_amount,
             payload.principal_amount,
-            payload.discount_amount, 
-            payload.payment_date, 
-            payload.created_at, 
+            payload.discount_amount,
+            payload.payment_date,
+            payload.created_at,
             payload.updated_at,
         )
         .fetch_one(&self.pool)
         .await?;
-        
+
         Ok(Payment::from(result))
     }
 }
@@ -55,8 +57,8 @@ pub mod dto {
     use chrono::NaiveDateTime;
     use rust_decimal::Decimal;
     use serde::{Deserialize, Serialize};
-    use uuid::Uuid;
     use sqlx::FromRow;
+    use uuid::Uuid;
 
     use crate::modules::finance_manager::domain::payment::Payment;
 
