@@ -1,0 +1,80 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT * FROM finance_manager.debt",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "account_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "total_amount",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 4,
+        "name": "paid_amount",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 5,
+        "name": "discount_amount",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 6,
+        "name": "remaining_amount",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 7,
+        "name": "due_date",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 8,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_at",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "fadf82015e4ef5bbd20e733fb1ea4463041bbb5e8600b1909aba313c858af30b"
+}

@@ -22,6 +22,12 @@ target
 
 
 # Added by cargo
-
 /target
+
+# Environment files
+env.dev
+env.prod
+*.env
+
+# Others
 anotations.txt
