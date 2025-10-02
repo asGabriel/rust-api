@@ -1,0 +1,20 @@
+[package]
+name = "api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true }
+axum = { workspace = true }
+serde = { workspace = true }
+sqlx = { workspace = true }
+chrono = { workspace = true }
+rust_decimal = { workspace = true }
+uuid = { workspace = true }
+async-trait = { workspace = true }
+
+## libs
+database = { workspace = true }
+http-error = { workspace = true }
+util = { workspace = true }
+telegram_api = { workspace = true }

@@ -16,6 +16,9 @@ impl DbPool {
         Self {
             pool: PgPoolOptions::new()
                 .max_connections(MAX_CONNECTIONS)
+                .acquire_timeout(std::time::Duration::from_secs(30))
+                .idle_timeout(std::time::Duration::from_secs(600))
+                .max_lifetime(std::time::Duration::from_secs(1800))
                 .connect(&url)
                 .await
                 .expect("Failed to connect to database"),

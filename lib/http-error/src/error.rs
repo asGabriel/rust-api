@@ -75,7 +75,7 @@ pub struct HttpError {
     pub meta: Option<serde_json::Value>,
 }
 
-pub type HttpResult<T> = Result<T, HttpError>;
+pub type HttpResult<T> = Result<T, Box<HttpError>>;
 
 impl HttpError {
     fn new(kind: HttpErrorKind, message: impl Into<Cow<'static, str>>) -> Self {
@@ -148,7 +148,10 @@ impl HttpError {
 
     pub fn to_problem_details(&self) -> ProblemDetails {
         ProblemDetails {
-            r#type: self.problem_type.clone().unwrap_or_else(|| "about:blank".to_string()),
+            r#type: self
+                .problem_type
+                .clone()
+                .unwrap_or_else(|| "about:blank".to_string()),
             title: self.kind.title().to_string(),
             status: self.status_u16(),
             detail: Some(self.message.to_string()),
@@ -193,7 +196,13 @@ impl HttpError {
 
 impl fmt::Display for HttpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} ({}): {}", self.kind.title(), self.status_u16(), self.message)
+        write!(
+            f,
+            "{} ({}): {}",
+            self.kind.title(),
+            self.status_u16(),
+            self.message
+        )
     }
 }
 

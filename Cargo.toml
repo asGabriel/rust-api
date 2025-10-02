@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["api/*", "lib/*"]
+members = ["api", "lib/*"]
 
 [workspace.dependencies]
 tokio = { version = "1.47.1", features = ["full"] }
@@ -26,3 +26,5 @@ uuid = { version = "1.15.0", features = ["v4", "serde"] }
 ## libs
 database = { path = "lib/database" }
 http-error = { path = "lib/http-error", features = ["http", "axum", "sqlx"] }
+util = { path = "lib/util" }
+telegram_api = { path = "lib/telegram_api" }
