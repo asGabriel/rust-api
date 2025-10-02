@@ -2,11 +2,15 @@ use std::sync::Arc;
 
 use api::modules::{
     finance_manager::{
-        handler::payment::PaymentHandlerImpl, repository::payment::PaymentRepositoryImpl,
+        handler::{account::AccountHandlerImpl, debt::DebtHandlerImpl, payment::PaymentHandlerImpl},
+        repository::{
+            account::AccountRepositoryImpl, debt::DebtRepositoryImpl,
+            payment::PaymentRepositoryImpl,
+        },
         FinanceManagerState,
     },
     routes::{self, AppState},
-    telegram_bot::TelegramBotState,
+    webhook_bot::WebhookBotState,
 };
 use axum::Router;
 use database::DbPool;
@@ -20,9 +24,16 @@ async fn main() {
         payment_handler: Arc::new(PaymentHandlerImpl {
             payment_repository: Arc::new(PaymentRepositoryImpl::new(pool)),
         }),
+        debt_handler: Arc::new(DebtHandlerImpl {
+            debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
+            account_repository: Arc::new(AccountRepositoryImpl::new(pool)),
+        }),
+        account_handler: Arc::new(AccountHandlerImpl {
+            account_repository: Arc::new(AccountRepositoryImpl::new(pool)),
+        }),
     };
 
-    let telegram_bot_state = TelegramBotState {
+    let telegram_bot_state = WebhookBotState {
         payment_handler: Arc::new(PaymentHandlerImpl {
             payment_repository: Arc::new(PaymentRepositoryImpl::new(pool)),
         }),

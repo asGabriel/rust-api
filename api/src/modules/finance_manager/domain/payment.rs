@@ -32,6 +32,29 @@ pub struct Payment {
     updated_at: Option<DateTime<Utc>>,
 }
 
+impl Payment {
+    pub fn new(
+        debt_id: Uuid,
+        account_id: Uuid,
+        total_amount: Decimal,
+        principal_amount: Decimal,
+        discount_amount: Decimal,
+        payment_date: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            debt_id,
+            account_id,
+            total_amount,
+            principal_amount,
+            discount_amount,
+            payment_date,
+            created_at: Utc::now(),
+            updated_at: None,
+        }
+    }
+}
+
 getters! {
     Payment {
         id: Uuid,
@@ -57,28 +80,5 @@ from_row_constructor! {
         payment_date: DateTime<Utc>,
         created_at: DateTime<Utc>,
         updated_at: Option<DateTime<Utc>>,
-    }
-}
-
-impl Payment {
-    pub fn new(
-        debt_id: Uuid,
-        account_id: Uuid,
-        total_amount: Decimal,
-        principal_amount: Decimal,
-        discount_amount: Decimal,
-        payment_date: DateTime<Utc>,
-    ) -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            debt_id,
-            account_id,
-            total_amount,
-            principal_amount,
-            discount_amount,
-            payment_date,
-            created_at: Utc::now(),
-            updated_at: None,
-        }
     }
 }

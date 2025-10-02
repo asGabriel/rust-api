@@ -1,32 +1,49 @@
 use async_trait::async_trait;
 use http_error::HttpResult;
 use sqlx::{Pool, Postgres};
+use uuid::Uuid;
 
 use crate::modules::finance_manager::{
     domain::account::BankAccount, repository::account::dto::BankAccountDto,
 };
 
 #[async_trait]
-pub trait FinancialInstrumentRepository {
-    async fn create(
-        &self,
-        pool: &Pool<Postgres>,
-        financial_instrument: BankAccount,
-    ) -> HttpResult<BankAccount>;
+pub trait AccountRepository {
+    async fn get_by_id(&self, id: Uuid) -> HttpResult<Option<BankAccount>>;
+
+    async fn insert(&self, account: BankAccount) -> HttpResult<BankAccount>;
 }
 
-pub struct FinancialInstrumentRepositoryImpl;
+pub type DynAccountRepository = dyn AccountRepository + Send + Sync;
+pub struct AccountRepositoryImpl {
+    pool: Pool<Postgres>,
+}
+
+impl AccountRepositoryImpl {
+    pub fn new(pool: &Pool<Postgres>) -> Self {
+        Self { pool: pool.clone() }
+    }
+}
 
 #[async_trait]
-impl FinancialInstrumentRepository for FinancialInstrumentRepositoryImpl {
-    async fn create(
-        &self,
-        pool: &Pool<Postgres>,
-        financial_instrument: BankAccount,
-    ) -> HttpResult<BankAccount> {
-        let payload = BankAccountDto::from(financial_instrument);
+impl AccountRepository for AccountRepositoryImpl {
+    async fn get_by_id(&self, id: Uuid) -> HttpResult<Option<BankAccount>> {
+        let result = sqlx::query_as!(
+            BankAccountDto,
+            r#"SELECT * FROM finance_manager.account WHERE id = $1"#,
+            id,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
 
-        let result = sqlx::query!(
+        Ok(result.map(BankAccount::from))
+    }
+
+    async fn insert(&self, account: BankAccount) -> HttpResult<BankAccount> {
+        let payload = BankAccountDto::from(account);
+
+        let result = sqlx::query_as!(
+            BankAccountDto,
             r#"
             INSERT INTO finance_manager.account (id, name, owner, created_at, updated_at)
             VALUES ($1, $2, $3, $4, $5)
@@ -38,18 +55,10 @@ impl FinancialInstrumentRepository for FinancialInstrumentRepositoryImpl {
             payload.created_at,
             payload.updated_at,
         )
-        .fetch_one(pool)
+        .fetch_one(&self.pool)
         .await?;
 
-        let dto = BankAccountDto {
-            id: result.id,
-            name: result.name,
-            owner: result.owner,
-            created_at: result.created_at,
-            updated_at: result.updated_at,
-        };
-
-        Ok(BankAccount::from(dto))
+        Ok(BankAccount::from(result))
     }
 }
 

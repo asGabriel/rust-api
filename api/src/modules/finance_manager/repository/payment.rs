@@ -63,7 +63,6 @@ pub mod dto {
     use crate::modules::finance_manager::domain::payment::Payment;
 
     #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-    #[serde(rename_all = "camelCase")]
     pub struct PaymentDto {
         pub id: Uuid,
         pub debt_id: Uuid,

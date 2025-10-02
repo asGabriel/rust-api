@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use util::getters;
 use uuid::Uuid;
 
 use crate::modules::finance_manager::repository::account::dto::BankAccountDto;
@@ -17,6 +18,29 @@ pub struct BankAccount {
     created_at: DateTime<Utc>,
     /// The date of the last update of the bank account
     updated_at: Option<DateTime<Utc>>,
+}
+
+impl BankAccount {
+    pub fn new(name: String, owner: String) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            name,
+            owner,
+            created_at: Utc::now(),
+            updated_at: None,
+        }
+    }
+}
+
+
+getters! {
+    BankAccount {
+        id: Uuid,
+        name: String,
+        owner: String,
+        created_at: DateTime<Utc>,
+        updated_at: Option<DateTime<Utc>>,
+    }
 }
 
 impl From<BankAccount> for BankAccountDto {
@@ -42,3 +66,4 @@ impl From<BankAccountDto> for BankAccount {
         }
     }
 }
+
