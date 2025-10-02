@@ -10,6 +10,13 @@ use http::{HeaderValue, header};
 use crate::HttpError;
 
 #[cfg(feature = "axum")]
+impl IntoResponse for Box<HttpError> {
+    fn into_response(self) -> Response {
+        (*self).into_response()
+    }
+}
+
+#[cfg(feature = "axum")]
 impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
         #[cfg(feature = "http")]
@@ -24,11 +31,11 @@ impl IntoResponse for HttpError {
         let mut res = (status, Json(body)).into_response();
 
         #[cfg(feature = "http")]
-        if let Some(tid) = self.trace_id.as_deref() {
-            if let Ok(val) = HeaderValue::from_str(tid) {
-                res.headers_mut()
-                    .insert(header::HeaderName::from_static("x-trace-id"), val);
-            }
+        if let Some(tid) = self.trace_id.as_deref()
+            && let Ok(val) = HeaderValue::from_str(tid)
+        {
+            res.headers_mut()
+                .insert(header::HeaderName::from_static("x-trace-id"), val);
         }
 
         res

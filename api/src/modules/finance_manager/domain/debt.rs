@@ -53,7 +53,9 @@ impl Debt {
             total_amount,
             paid_amount: paid_amount.unwrap_or(Decimal::ZERO),
             discount_amount: discount_amount.unwrap_or(Decimal::ZERO),
-            remaining_amount: total_amount - paid_amount.unwrap_or(Decimal::ZERO) - discount_amount.unwrap_or(Decimal::ZERO),
+            remaining_amount: total_amount
+                - paid_amount.unwrap_or(Decimal::ZERO)
+                - discount_amount.unwrap_or(Decimal::ZERO),
             due_date,
             status: DebtStatus::default(),
             created_at: Utc::now(),

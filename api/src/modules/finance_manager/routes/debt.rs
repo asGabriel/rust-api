@@ -24,7 +24,7 @@ async fn create_debt(
         .debt_handler
         .create_debt(request)
         .await?;
-    
+
     Ok(Json(debt))
 }
 

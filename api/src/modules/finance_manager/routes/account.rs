@@ -16,6 +16,6 @@ async fn create_account(
         .account_handler
         .create_account(request)
         .await?;
-    
+
     Ok(Json(account))
 }

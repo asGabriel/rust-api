@@ -32,7 +32,6 @@ impl BankAccount {
     }
 }
 
-
 getters! {
     BankAccount {
         id: Uuid,
@@ -66,4 +65,3 @@ impl From<BankAccountDto> for BankAccount {
         }
     }
 }
-

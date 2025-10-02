@@ -75,7 +75,7 @@ pub struct HttpError {
     pub meta: Option<serde_json::Value>,
 }
 
-pub type HttpResult<T> = Result<T, HttpError>;
+pub type HttpResult<T> = Result<T, Box<HttpError>>;
 
 impl HttpError {
     fn new(kind: HttpErrorKind, message: impl Into<Cow<'static, str>>) -> Self {

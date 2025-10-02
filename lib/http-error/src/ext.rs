@@ -9,11 +9,11 @@ pub trait OptionHttpExt<T> {
 
 impl<T> OptionHttpExt<T> for Option<T> {
     fn or_not_found(self, entity: impl AsRef<str>, id: impl ToString) -> HttpResult<T> {
-        self.ok_or_else(|| HttpError::not_found(entity, id))
+        self.ok_or_else(|| Box::new(HttpError::not_found(entity, id)))
     }
 
     fn or_bad_request(self, msg: impl Into<String>) -> HttpResult<T> {
-        self.ok_or_else(|| HttpError::bad_request(msg.into()))
+        self.ok_or_else(|| Box::new(HttpError::bad_request(msg.into())))
     }
 }
 
@@ -37,14 +37,14 @@ impl<T, E> ResultHttpExt<T, E> for Result<T, E> {
     where
         E: std::error::Error + Send + Sync + 'static,
     {
-        self.map_err(|e| HttpError::internal("Erro interno").with_cause(e))
+        self.map_err(|e| Box::new(HttpError::internal("Erro interno").with_cause(e)))
     }
 
     fn map_err_with<F>(self, f: F) -> HttpResult<T>
     where
         F: FnOnce(E) -> HttpError,
     {
-        self.map_err(f)
+        self.map_err(|e| Box::new(f(e)))
     }
 
     fn conflict_if(self, predicate: bool, msg: impl Into<String>) -> HttpResult<T>
@@ -54,12 +54,12 @@ impl<T, E> ResultHttpExt<T, E> for Result<T, E> {
         match self {
             Ok(v) => {
                 if predicate {
-                    Err(HttpError::conflict(msg.into()))
+                    Err(Box::new(HttpError::conflict(msg.into())))
                 } else {
                     Ok(v)
                 }
             }
-            Err(e) => Err(HttpError::internal("Erro interno").with_cause(e)),
+            Err(e) => Err(Box::new(HttpError::internal("Erro interno").with_cause(e))),
         }
     }
 }

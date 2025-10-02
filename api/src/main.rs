@@ -1,8 +1,11 @@
 use std::sync::Arc;
 
 use api::modules::{
+    chat_bot::ChatBotState,
     finance_manager::{
-        handler::{account::AccountHandlerImpl, debt::DebtHandlerImpl, payment::PaymentHandlerImpl},
+        handler::{
+            account::AccountHandlerImpl, debt::DebtHandlerImpl, payment::PaymentHandlerImpl,
+        },
         repository::{
             account::AccountRepositoryImpl, debt::DebtRepositoryImpl,
             payment::PaymentRepositoryImpl,
@@ -10,7 +13,6 @@ use api::modules::{
         FinanceManagerState,
     },
     routes::{self, AppState},
-    webhook_bot::WebhookBotState,
 };
 use axum::Router;
 use database::DbPool;
@@ -33,7 +35,7 @@ async fn main() {
         }),
     };
 
-    let telegram_bot_state = WebhookBotState {
+    let telegram_bot_state = ChatBotState {
         payment_handler: Arc::new(PaymentHandlerImpl {
             payment_repository: Arc::new(PaymentRepositoryImpl::new(pool)),
         }),

@@ -5,7 +5,10 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::modules::finance_manager::{domain::debt::{Debt, DebtFilters, DebtStatus}, repository::{account::DynAccountRepository, debt::DynDebtRepository}};
+use crate::modules::finance_manager::{
+    domain::debt::{Debt, DebtFilters, DebtStatus},
+    repository::{account::DynAccountRepository, debt::DynDebtRepository},
+};
 use std::sync::Arc;
 
 pub type DynDebtHandler = dyn DebtHandler + Send + Sync;
@@ -24,16 +27,23 @@ pub struct DebtHandlerImpl {
 #[async_trait]
 impl DebtHandler for DebtHandlerImpl {
     async fn create_debt(&self, request: CreateDebtRequest) -> HttpResult<Debt> {
-        let account = self.account_repository.get_by_id(request.account_id).await?.or_not_found("account", request.account_id)?;
+        let account = self
+            .account_repository
+            .get_by_id(request.account_id)
+            .await?
+            .or_not_found("account", request.account_id)?;
 
-        let debt = self.debt_repository.insert(Debt::new(
-            *account.id(),
-            request.description,
-            request.total_amount,
-            request.paid_amount,
-            request.discount_amount,
-            request.due_date,
-        )).await?;
+        let debt = self
+            .debt_repository
+            .insert(Debt::new(
+                *account.id(),
+                request.description,
+                request.total_amount,
+                request.paid_amount,
+                request.discount_amount,
+                request.due_date,
+            ))
+            .await?;
 
         Ok(debt)
     }

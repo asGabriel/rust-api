@@ -3,7 +3,9 @@ use std::sync::Arc;
 use axum::Router;
 
 use crate::modules::{
-    finance_manager::handler::{account::DynAccountHandler, debt::DynDebtHandler, payment::DynPaymentHandler},
+    finance_manager::handler::{
+        account::DynAccountHandler, debt::DynDebtHandler, payment::DynPaymentHandler,
+    },
     routes::AppState,
 };
 

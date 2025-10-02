@@ -16,7 +16,7 @@ CREATE TABLE finance_manager.debt (
     paid_amount DECIMAL(10, 2) NOT NULL,
     discount_amount DECIMAL(10, 2) NOT NULL,
     remaining_amount DECIMAL(10, 2) NOT NULL,
-    due_date TIMESTAMP NOT NULL,
+    due_date DATE NOT NULL,
     status TEXT NOT NULL,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NULL

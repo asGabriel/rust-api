@@ -1,3 +1,3 @@
-pub mod payment;
-pub mod debt;
 pub mod account;
+pub mod debt;
+pub mod payment;

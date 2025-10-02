@@ -4,7 +4,9 @@ use async_trait::async_trait;
 use http_error::HttpResult;
 use serde::{Deserialize, Serialize};
 
-use crate::modules::finance_manager::{domain::account::{BankAccount}, repository::account::DynAccountRepository};
+use crate::modules::finance_manager::{
+    domain::account::BankAccount, repository::account::DynAccountRepository,
+};
 
 pub type DynAccountHandler = dyn AccountHandler + Send + Sync;
 
@@ -24,7 +26,6 @@ impl AccountHandler for AccountHandlerImpl {
         self.account_repository.insert(bank_account).await
     }
 }
-
 
 // Use cases
 

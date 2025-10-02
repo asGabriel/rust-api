@@ -38,6 +38,13 @@ fn map_database_error(db_err: &(dyn DatabaseError + 'static)) -> HttpError {
 }
 
 #[cfg(feature = "sqlx")]
+impl From<Error> for Box<HttpError> {
+    fn from(err: Error) -> Self {
+        Box::new(HttpError::from(err))
+    }
+}
+
+#[cfg(feature = "sqlx")]
 fn meta_code(code: &str) -> serde_json::Value {
     serde_json::json!({ "sqlstate": code })
 }
