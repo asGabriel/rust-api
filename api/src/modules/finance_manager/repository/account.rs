@@ -11,6 +11,9 @@ use crate::modules::finance_manager::{
 pub trait AccountRepository {
     async fn get_by_id(&self, id: Uuid) -> HttpResult<Option<BankAccount>>;
 
+    // TODO: Add filters
+    async fn list(&self) -> HttpResult<Vec<BankAccount>>;
+
     async fn insert(&self, account: BankAccount) -> HttpResult<BankAccount>;
 }
 
@@ -28,7 +31,7 @@ impl AccountRepositoryImpl {
 #[async_trait]
 impl AccountRepository for AccountRepositoryImpl {
     async fn get_by_id(&self, id: Uuid) -> HttpResult<Option<BankAccount>> {
-        let result = sqlx::query_as!(
+        let result: Option<BankAccountDto> = sqlx::query_as!(
             BankAccountDto,
             r#"SELECT * FROM finance_manager.account WHERE id = $1"#,
             id,
@@ -37,6 +40,17 @@ impl AccountRepository for AccountRepositoryImpl {
         .await?;
 
         Ok(result.map(BankAccount::from))
+    }
+
+    async fn list(&self) -> HttpResult<Vec<BankAccount>> {
+        let results = sqlx::query_as!(
+            BankAccountDto,
+            r#"SELECT * FROM finance_manager.account ORDER BY created_at DESC"#
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(results.into_iter().map(BankAccount::from).collect())
     }
 
     async fn insert(&self, account: BankAccount) -> HttpResult<BankAccount> {

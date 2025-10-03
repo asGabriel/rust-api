@@ -29,7 +29,7 @@ impl DebtRepository for DebtRepositoryImpl {
     async fn insert(&self, debt: Debt) -> HttpResult<Debt> {
         let debt_dto = entity::DebtEntity::from(debt);
 
-        let debt_dto = sqlx::query_as!(
+        let debt_dto: entity::DebtEntity = sqlx::query_as!(
             entity::DebtEntity,
             r#"
             INSERT INTO finance_manager.debt (
@@ -64,7 +64,7 @@ impl DebtRepository for DebtRepositoryImpl {
     }
 
     async fn list(&self, _filters: DebtFilters) -> HttpResult<Vec<Debt>> {
-        let debt_dtos = sqlx::query_as!(entity::DebtEntity, "SELECT * FROM finance_manager.debt")
+        let debt_dtos: Vec<entity::DebtEntity> = sqlx::query_as!(entity::DebtEntity, "SELECT * FROM finance_manager.debt")
             .fetch_all(&self.pool)
             .await?;
 
