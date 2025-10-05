@@ -1,9 +1,7 @@
 # Makefile para API Rust
 .PHONY: help dev prod build build-release clean test fmt clippy migrate run-dev run-prod
 
-# Incluir configurações dos arquivos
--include env.dev
--include env.prod
+# Incluir configurações dos arquivos (apenas quando necessário)
 
 # Variáveis padrão (caso os arquivos não existam)
 DEV_CONFIG_FILE := env.dev
@@ -57,19 +55,35 @@ build-release: ## 🔨 Compila em modo release
 	cargo build --release
 
 # Desenvolvimento
-run-dev: ## 🏃 Apenas executa sem recompilar (dev)
-	@echo "🏃 Executando API (desenvolvimento)..."
-	PORT=$(DEV_PORT) \
-	DATABASE_URL=$(DEV_DATABASE_URL) \
-	RUST_LOG=$(DEV_RUST_LOG) \
-	ENVIRONMENT=$(DEV_ENVIRONMENT)
+run-dev: ## 🔧 Carrega variáveis de ambiente para desenvolvimento
+	@echo "🔧 Carregando variáveis de ambiente (desenvolvimento)..."
+	@if [ -f $(DEV_CONFIG_FILE) ]; then \
+		echo "📋 Variáveis carregadas de $(DEV_CONFIG_FILE):"; \
+		cat $(DEV_CONFIG_FILE); \
+		echo ""; \
+		echo "✅ Para aplicar as variáveis, execute:"; \
+		echo "   export \$$(grep -v '^#' $(DEV_CONFIG_FILE) | xargs)"; \
+		echo "   # ou"; \
+		echo "   source <(sed 's/^/export /' $(DEV_CONFIG_FILE))"; \
+	else \
+		echo "❌ Arquivo $(DEV_CONFIG_FILE) não encontrado!"; \
+		exit 1; \
+	fi
 
-run-prod: ## 🏃 Apenas executa sem recompilar (prod)
-	@echo "🏃 Executando API (produção)..."
-	PORT=$(PROD_PORT) \
-	DATABASE_URL=$(PROD_DATABASE_URL) \
-	RUST_LOG=$(PROD_RUST_LOG) \
-	ENVIRONMENT=production
+run-prod: ## 🚀 Carrega variáveis de ambiente para produção
+	@echo "🚀 Carregando variáveis de ambiente (produção)..."
+	@if [ -f $(PROD_CONFIG_FILE) ]; then \
+		echo "📋 Variáveis carregadas de $(PROD_CONFIG_FILE):"; \
+		cat $(PROD_CONFIG_FILE); \
+		echo ""; \
+		echo "✅ Para aplicar as variáveis, execute:"; \
+		echo "   export \$$(grep -v '^#' $(PROD_CONFIG_FILE) | xargs)"; \
+		echo "   # ou"; \
+		echo "   source <(sed 's/^/export /' $(PROD_CONFIG_FILE))"; \
+	else \
+		echo "❌ Arquivo $(PROD_CONFIG_FILE) não encontrado!"; \
+		exit 1; \
+	fi
 
 # Utilitários
 test: ## 🧪 Executa todos os testes

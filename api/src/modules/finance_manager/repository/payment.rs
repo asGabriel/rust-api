@@ -33,7 +33,7 @@ impl PaymentRepository for PaymentRepositoryImpl {
             PaymentDto,
             r#"
                 INSERT INTO finance_manager.payment (id, debt_id, account_id, total_amount, principal_amount, discount_amount, payment_date, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                VALUES ($1, $2, $3, $4, $5, $6, $7::DATE, $8, $9)
                 RETURNING id, debt_id, account_id, total_amount, principal_amount, discount_amount, payment_date, created_at, updated_at
             "#,
             payload.id,
@@ -54,7 +54,7 @@ impl PaymentRepository for PaymentRepositoryImpl {
 }
 
 pub mod dto {
-    use chrono::NaiveDateTime;
+    use chrono::{NaiveDate, NaiveDateTime};
     use rust_decimal::Decimal;
     use serde::{Deserialize, Serialize};
     use sqlx::FromRow;
@@ -70,7 +70,7 @@ pub mod dto {
         pub total_amount: Decimal,
         pub discount_amount: Decimal,
         pub principal_amount: Decimal,
-        pub payment_date: NaiveDateTime,
+        pub payment_date: NaiveDate,
         pub created_at: NaiveDateTime,
         pub updated_at: Option<NaiveDateTime>,
     }
@@ -84,7 +84,7 @@ pub mod dto {
                 total_amount: *payment.total_amount(),
                 discount_amount: *payment.discount_amount(),
                 principal_amount: *payment.principal_amount(),
-                payment_date: payment.payment_date().naive_utc(),
+                payment_date: payment.payment_date().clone(),
                 created_at: payment.created_at().naive_utc(),
                 updated_at: payment.updated_at().map(|dt| dt.naive_utc()),
             }
@@ -100,7 +100,7 @@ pub mod dto {
                 dto.total_amount,
                 dto.principal_amount,
                 dto.discount_amount,
-                dto.payment_date.and_utc(),
+                dto.payment_date,
                 dto.created_at.and_utc(),
                 dto.updated_at.map(|dt| dt.and_utc()),
             )

@@ -4,7 +4,12 @@ use http_error::HttpResult;
 use crate::modules::{finance_manager::handler::account::CreateAccountRequest, routes::AppState};
 
 pub fn configure_routes() -> Router<AppState> {
-    Router::new().nest("/account", Router::new().route("/", post(create_account)))
+    Router::new().nest(
+        "/account",
+        Router::new()
+            .route("/", post(create_account))
+            .route("/list", post(list_accounts)),
+    )
 }
 
 async fn create_account(
@@ -18,4 +23,14 @@ async fn create_account(
         .await?;
 
     Ok(Json(account))
+}
+
+async fn list_accounts(state: State<AppState>) -> HttpResult<impl IntoResponse> {
+    let accounts = state
+        .finance_manager_state
+        .account_handler
+        .list_accounts()
+        .await?;
+
+    Ok(Json(accounts))
 }
