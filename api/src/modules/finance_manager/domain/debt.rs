@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 use util::{from_row_constructor, getters};
 use uuid::Uuid;
 
+use crate::modules::finance_manager::domain::payment::Payment;
+
+pub mod generator;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Debt {
@@ -61,6 +65,17 @@ impl Debt {
             created_at: Utc::now(),
             updated_at: None,
         }
+    }
+
+    pub fn paid(&mut self, payment: Payment) {
+        self.paid_amount += payment.principal_amount();
+
+        self.recalculate_remaining_amount();
+        self.updated_at = Some(Utc::now());
+    }
+
+    fn recalculate_remaining_amount(&mut self) {
+        self.remaining_amount = self.total_amount - self.paid_amount - self.discount_amount;
     }
 }
 

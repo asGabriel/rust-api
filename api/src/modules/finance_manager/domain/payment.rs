@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use util::{from_row_constructor, getters};
@@ -24,7 +24,7 @@ pub struct Payment {
     /// The discount amount of the payment
     discount_amount: Decimal,
     /// The date of the payment
-    payment_date: DateTime<Utc>,
+    payment_date: NaiveDate,
 
     /// The date of the creation of the payment
     created_at: DateTime<Utc>,
@@ -38,8 +38,8 @@ impl Payment {
         account_id: Uuid,
         total_amount: Decimal,
         principal_amount: Decimal,
-        discount_amount: Decimal,
-        payment_date: DateTime<Utc>,
+        discount_amount: Option<Decimal>,
+        payment_date: NaiveDate,
     ) -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -47,7 +47,7 @@ impl Payment {
             account_id,
             total_amount,
             principal_amount,
-            discount_amount,
+            discount_amount: discount_amount.unwrap_or(Decimal::ZERO),
             payment_date,
             created_at: Utc::now(),
             updated_at: None,
@@ -63,7 +63,7 @@ getters! {
         total_amount: Decimal,
         principal_amount: Decimal,
         discount_amount: Decimal,
-        payment_date: DateTime<Utc>,
+        payment_date: NaiveDate,
         created_at: DateTime<Utc>,
         updated_at: Option<DateTime<Utc>>,
     }
@@ -77,7 +77,7 @@ from_row_constructor! {
         total_amount: Decimal,
         principal_amount: Decimal,
         discount_amount: Decimal,
-        payment_date: DateTime<Utc>,
+        payment_date: NaiveDate,
         created_at: DateTime<Utc>,
         updated_at: Option<DateTime<Utc>>,
     }

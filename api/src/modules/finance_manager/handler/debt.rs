@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::modules::finance_manager::{
-    domain::debt::{Debt, DebtFilters, DebtStatus},
+    domain::debt::{generator::DebtGenerator, Debt, DebtFilters, DebtStatus},
     repository::{account::DynAccountRepository, debt::DynDebtRepository},
 };
 use std::sync::Arc;
@@ -27,23 +27,22 @@ pub struct DebtHandlerImpl {
 #[async_trait]
 impl DebtHandler for DebtHandlerImpl {
     async fn create_debt(&self, request: CreateDebtRequest) -> HttpResult<Debt> {
-        let account = self
+        let _account = self
             .account_repository
             .get_by_id(request.account_id)
             .await?
             .or_not_found("account", request.account_id)?;
 
-        let debt = self
-            .debt_repository
-            .insert(Debt::new(
-                *account.id(),
-                request.description,
-                request.total_amount,
-                request.paid_amount,
-                request.discount_amount,
-                request.due_date,
-            ))
-            .await?;
+        let debt_generator = DebtGenerator { request };
+
+        let mut debt = debt_generator.generate_debt_from_request();
+
+        if debt_generator.is_paid() {
+            let payment = debt_generator.generate_payment_from_debt(&debt);
+            debt.paid(payment);
+        }
+
+        let debt = self.debt_repository.insert(debt).await?;
 
         Ok(debt)
     }
@@ -58,11 +57,22 @@ impl DebtHandler for DebtHandlerImpl {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateDebtRequest {
-    account_id: Uuid,
-    description: String,
-    total_amount: Decimal,
-    paid_amount: Option<Decimal>,
-    discount_amount: Option<Decimal>,
-    due_date: NaiveDate,
-    status: Option<DebtStatus>,
+    pub account_id: Uuid,
+    pub description: String,
+    pub total_amount: Decimal,
+    pub paid_amount: Option<Decimal>,
+    pub discount_amount: Option<Decimal>,
+    pub due_date: NaiveDate,
+    pub status: Option<DebtStatus>,
+    #[serde(flatten)]
+    pub configuration: DebtConfiguration,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebtConfiguration {
+    #[serde(default)]
+    pub is_paid: Option<bool>,
+    #[serde(default)]
+    pub installments: Option<u8>,
 }

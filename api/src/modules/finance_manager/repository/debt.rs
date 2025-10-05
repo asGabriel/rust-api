@@ -64,9 +64,10 @@ impl DebtRepository for DebtRepositoryImpl {
     }
 
     async fn list(&self, _filters: DebtFilters) -> HttpResult<Vec<Debt>> {
-        let debt_dtos: Vec<entity::DebtEntity> = sqlx::query_as!(entity::DebtEntity, "SELECT * FROM finance_manager.debt")
-            .fetch_all(&self.pool)
-            .await?;
+        let debt_dtos: Vec<entity::DebtEntity> =
+            sqlx::query_as!(entity::DebtEntity, "SELECT * FROM finance_manager.debt")
+                .fetch_all(&self.pool)
+                .await?;
 
         let debts = debt_dtos.into_iter().map(Debt::from).collect();
         Ok(debts)

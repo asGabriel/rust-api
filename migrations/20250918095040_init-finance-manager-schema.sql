@@ -29,7 +29,7 @@ CREATE TABLE finance_manager.payment (
     total_amount DECIMAL(10, 2) NOT NULL,
     principal_amount DECIMAL(10, 2) NOT NULL,
     discount_amount DECIMAL(10, 2) NOT NULL,
-    payment_date TIMESTAMP NOT NULL,
+    payment_date DATE NOT NULL,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NULL
 );
