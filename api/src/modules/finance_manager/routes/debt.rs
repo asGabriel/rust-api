@@ -3,7 +3,8 @@ use http_error::HttpResult;
 
 use crate::modules::{
     finance_manager::{domain::debt::DebtFilters, handler::debt::CreateDebtRequest},
-    routes::AppState,
+    worker::WorkerTopic,
+    AppState,
 };
 
 pub fn configure_routes() -> Router<AppState> {
@@ -24,6 +25,12 @@ async fn create_debt(
         .debt_handler
         .create_debt(request)
         .await?;
+
+    state.worker_state.notify(
+        WorkerTopic::DebtCreated,
+        "Nova dívida criada".to_string(),
+        serde_json::to_value(&debt).ok(),
+    );
 
     Ok(Json(debt))
 }

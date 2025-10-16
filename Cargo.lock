@@ -54,6 +54,7 @@ dependencies = [
  "http-error",
  "rust_decimal",
  "serde",
+ "serde_json",
  "sqlx",
  "telegram_api",
  "tokio",

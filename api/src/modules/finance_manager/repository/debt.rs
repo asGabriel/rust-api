@@ -29,8 +29,7 @@ impl DebtRepository for DebtRepositoryImpl {
     async fn insert(&self, debt: Debt) -> HttpResult<Debt> {
         let debt_dto = entity::DebtEntity::from(debt);
 
-        let debt_dto: entity::DebtEntity = sqlx::query_as!(
-            entity::DebtEntity,
+        let debt_dto: entity::DebtEntity = sqlx::query_as::<_, entity::DebtEntity>(
             r#"
             INSERT INTO finance_manager.debt (
                 id, 
@@ -42,21 +41,21 @@ impl DebtRepository for DebtRepositoryImpl {
                 remaining_amount, 
                 due_date, status, created_at, updated_at) 
             VALUES 
-                ($1, $2, $3, $4, $5, $6, $7, $8::DATE, $9, $10, $11)
+                ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING *
         "#,
-            debt_dto.id,
-            debt_dto.account_id,
-            debt_dto.description,
-            debt_dto.total_amount,
-            debt_dto.paid_amount,
-            debt_dto.discount_amount,
-            debt_dto.remaining_amount,
-            debt_dto.due_date,
-            debt_dto.status,
-            debt_dto.created_at,
-            debt_dto.updated_at
         )
+        .bind(debt_dto.id)
+        .bind(debt_dto.account_id)
+        .bind(debt_dto.description)
+        .bind(debt_dto.total_amount)
+        .bind(debt_dto.paid_amount)
+        .bind(debt_dto.discount_amount)
+        .bind(debt_dto.remaining_amount)
+        .bind(debt_dto.due_date)
+        .bind(debt_dto.status)
+        .bind(debt_dto.created_at)
+        .bind(debt_dto.updated_at)
         .fetch_one(&self.pool)
         .await?;
 
@@ -65,7 +64,7 @@ impl DebtRepository for DebtRepositoryImpl {
 
     async fn list(&self, _filters: DebtFilters) -> HttpResult<Vec<Debt>> {
         let debt_dtos: Vec<entity::DebtEntity> =
-            sqlx::query_as!(entity::DebtEntity, "SELECT * FROM finance_manager.debt")
+            sqlx::query_as::<_, entity::DebtEntity>("SELECT * FROM finance_manager.debt")
                 .fetch_all(&self.pool)
                 .await?;
 

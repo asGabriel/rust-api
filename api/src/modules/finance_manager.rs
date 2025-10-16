@@ -6,7 +6,7 @@ use crate::modules::{
     finance_manager::handler::{
         account::DynAccountHandler, debt::DynDebtHandler, payment::DynPaymentHandler,
     },
-    routes::AppState,
+    AppState,
 };
 
 pub mod domain;
