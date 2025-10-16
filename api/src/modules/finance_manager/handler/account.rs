@@ -4,9 +4,9 @@ use async_trait::async_trait;
 use http_error::HttpResult;
 use serde::{Deserialize, Serialize};
 
-use crate::modules::finance_manager::{
+use crate::modules::{finance_manager::{
     domain::account::BankAccount, repository::account::DynAccountRepository,
-};
+}, worker::WorkerState};
 
 pub type DynAccountHandler = dyn AccountHandler + Send + Sync;
 
@@ -18,6 +18,7 @@ pub trait AccountHandler {
 }
 
 pub struct AccountHandlerImpl {
+    pub worker_state: Arc<WorkerState>,
     pub account_repository: Arc<DynAccountRepository>,
 }
 

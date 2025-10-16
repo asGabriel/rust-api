@@ -1,7 +1,7 @@
 use axum::{extract::State, response::IntoResponse, routing::get, Json, Router};
 use http_error::HttpResult;
 
-use crate::modules::routes::AppState;
+use crate::modules::AppState;
 
 pub fn configure_routes() -> Router<AppState> {
     Router::new().nest("/payment", Router::new().route("/", get(get_payment)))

@@ -4,7 +4,7 @@ use telegram_api::TelegramUpdate;
 
 use crate::modules::{
     chat_bot::domain::{ChatCommand, ChatCommandType},
-    routes::AppState,
+    AppState,
 };
 
 pub fn configure_routes() -> Router<AppState> {

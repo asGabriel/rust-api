@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
 use api::modules::{
-    chat_bot::ChatBotState,
-    finance_manager::{
+    chat_bot::ChatBotState, finance_manager::{
         handler::{
             account::AccountHandlerImpl, debt::DebtHandlerImpl, payment::PaymentHandlerImpl,
         },
@@ -11,8 +10,7 @@ use api::modules::{
             payment::PaymentRepositoryImpl,
         },
         FinanceManagerState,
-    },
-    routes::{self, AppState},
+    }, worker::WorkerState, routes::{self}, AppState
 };
 use axum::Router;
 use database::DbPool;
@@ -21,6 +19,8 @@ use database::DbPool;
 async fn main() {
     let db_conection = DbPool::new().await;
     let pool = db_conection.get_connection();
+    
+    let worker_state = WorkerState::new(pool.clone()).start();
 
     let finance_manager_state = FinanceManagerState {
         payment_handler: Arc::new(PaymentHandlerImpl {
@@ -31,6 +31,7 @@ async fn main() {
             account_repository: Arc::new(AccountRepositoryImpl::new(pool)),
         }),
         account_handler: Arc::new(AccountHandlerImpl {
+            worker_state: worker_state.clone(),
             account_repository: Arc::new(AccountRepositoryImpl::new(pool)),
         }),
     };
@@ -41,7 +42,9 @@ async fn main() {
         }),
     };
 
+
     let app_state = AppState {
+        worker_state,
         finance_manager_state: Arc::new(finance_manager_state),
         telegram_bot_state: Arc::new(telegram_bot_state),
     };

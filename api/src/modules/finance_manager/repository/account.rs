@@ -31,11 +31,10 @@ impl AccountRepositoryImpl {
 #[async_trait]
 impl AccountRepository for AccountRepositoryImpl {
     async fn get_by_id(&self, id: Uuid) -> HttpResult<Option<BankAccount>> {
-        let result: Option<BankAccountDto> = sqlx::query_as!(
-            BankAccountDto,
+        let result: Option<BankAccountDto> = sqlx::query_as::<_, BankAccountDto>(
             r#"SELECT * FROM finance_manager.account WHERE id = $1"#,
-            id,
         )
+        .bind(id)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -43,9 +42,8 @@ impl AccountRepository for AccountRepositoryImpl {
     }
 
     async fn list(&self) -> HttpResult<Vec<BankAccount>> {
-        let results = sqlx::query_as!(
-            BankAccountDto,
-            r#"SELECT * FROM finance_manager.account ORDER BY created_at DESC"#
+        let results: Vec<BankAccountDto> = sqlx::query_as::<_, BankAccountDto>(
+            r#"SELECT * FROM finance_manager.account ORDER BY created_at DESC"#,
         )
         .fetch_all(&self.pool)
         .await?;
@@ -56,19 +54,18 @@ impl AccountRepository for AccountRepositoryImpl {
     async fn insert(&self, account: BankAccount) -> HttpResult<BankAccount> {
         let payload = BankAccountDto::from(account);
 
-        let result = sqlx::query_as!(
-            BankAccountDto,
+        let result = sqlx::query_as::<_, BankAccountDto>(
             r#"
             INSERT INTO finance_manager.account (id, name, owner, created_at, updated_at)
             VALUES ($1, $2, $3, $4, $5)
             RETURNING id, name, owner, created_at, updated_at
         "#,
-            payload.id,
-            payload.name,
-            payload.owner,
-            payload.created_at,
-            payload.updated_at,
         )
+        .bind(payload.id)
+        .bind(payload.name)
+        .bind(payload.owner)
+        .bind(payload.created_at)
+        .bind(payload.updated_at)
         .fetch_one(&self.pool)
         .await?;
 
@@ -79,9 +76,10 @@ impl AccountRepository for AccountRepositoryImpl {
 pub mod dto {
     use chrono::NaiveDateTime;
     use serde::{Deserialize, Serialize};
+    use sqlx::FromRow;
     use uuid::Uuid;
 
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
     #[serde(rename_all = "camelCase")]
     pub struct BankAccountDto {
         pub id: Uuid,
