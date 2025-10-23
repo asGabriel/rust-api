@@ -119,6 +119,15 @@ impl HttpError {
     pub fn internal(msg: impl Into<Cow<'static, str>>) -> Self {
         Self::new(HttpErrorKind::Internal, msg)
     }
+    pub fn bad_gateway(msg: impl Into<Cow<'static, str>>) -> Self {
+        Self::new(HttpErrorKind::BadGateway, msg)
+    }
+    pub fn service_unavailable(msg: impl Into<Cow<'static, str>>) -> Self {
+        Self::new(HttpErrorKind::ServiceUnavailable, msg)
+    }
+    pub fn gateway_timeout(msg: impl Into<Cow<'static, str>>) -> Self {
+        Self::new(HttpErrorKind::GatewayTimeout, msg)
+    }
 
     // Builders
     pub fn with_details(mut self, details: serde_json::Value) -> Self {

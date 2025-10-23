@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use api::modules::{
-    chat_bot::ChatBotState,
+    chat_bot::{gateway::TelegramGateway, handler::ChatBotHandlerImpl, ChatBotState},
     finance_manager::{
         handler::{
             account::AccountHandlerImpl, debt::DebtHandlerImpl, payment::PaymentHandlerImpl,
@@ -35,15 +35,23 @@ async fn main() {
         }),
     };
 
-    let telegram_bot_state = ChatBotState {
+    let chat_bot_state = ChatBotState {
+        chat_bot_handler: Arc::new(ChatBotHandlerImpl {
+            debt_handler: Arc::new(DebtHandlerImpl {
+                debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
+                account_repository: Arc::new(AccountRepositoryImpl::new(pool)),
+            }),
+            telegram_gateway: TelegramGateway::new(),
+        }),
         payment_handler: Arc::new(PaymentHandlerImpl {
             payment_repository: Arc::new(PaymentRepositoryImpl::new(pool)),
         }),
+        telegram_gateway: TelegramGateway::new(),
     };
 
     let app_state = AppState {
         finance_manager_state: Arc::new(finance_manager_state),
-        telegram_bot_state: Arc::new(telegram_bot_state),
+        chat_bot_state: Arc::new(chat_bot_state),
     };
 
     let app: Router = routes::configure_services().with_state(app_state);

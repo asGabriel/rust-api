@@ -1,6 +1,8 @@
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Pool, Postgres};
 
+pub mod query;
+
 #[derive(Debug, Clone)]
 pub struct DbPool {
     pool: Pool<Postgres>,

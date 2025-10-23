@@ -28,7 +28,7 @@ impl DebtGenerator {
         self.request.configuration.is_paid.unwrap_or(false)
     }
 
-    pub fn generate_payment_from_debt(&self, debt: &Debt) -> Payment {
+    pub fn paid(&self, debt: &Debt) -> Payment {
         Payment::new(
             *debt.id(),
             debt.account_id,

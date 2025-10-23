@@ -1,10 +1,13 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use std::fmt::Write;
 use util::{from_row_constructor, getters};
 use uuid::Uuid;
 
-use crate::modules::finance_manager::domain::payment::Payment;
+use crate::modules::{
+    chat_bot::formatter::ChatFormatterUtils, finance_manager::domain::payment::Payment,
+};
 
 pub mod generator;
 
@@ -160,4 +163,129 @@ from_row_constructor! {
 pub struct DebtFilters {
     ids: Option<Vec<Uuid>>,
     statuses: Option<Vec<DebtStatus>>,
+    start_date: Option<NaiveDate>,
+    end_date: Option<NaiveDate>,
+}
+
+getters!(
+    DebtFilters {
+        ids: Option<Vec<Uuid>>,
+        statuses: Option<Vec<DebtStatus>>,
+        start_date: Option<NaiveDate>,
+        end_date: Option<NaiveDate>,
+    }
+);
+
+impl DebtFilters {
+    pub fn new() -> Self {
+        Self {
+            ..Default::default()
+        }
+    }
+
+    pub fn with_statuses(mut self, statuses: Vec<DebtStatus>) -> Self {
+        self.statuses = Some(statuses);
+        self
+    }
+
+    pub fn with_ids(mut self, ids: Vec<Uuid>) -> Self {
+        self.ids = Some(ids);
+        self
+    }
+
+    pub fn with_start_date(mut self, start_date: NaiveDate) -> Self {
+        self.start_date = Some(start_date);
+        self
+    }
+
+    pub fn with_end_date(mut self, end_date: NaiveDate) -> Self {
+        self.end_date = Some(end_date);
+        self
+    }
+}
+
+impl crate::modules::chat_bot::formatter::ChatFormatter for Debt {
+    /// Formats a single debt for chat display
+    fn format_for_chat(&self) -> String {
+        let mut output = String::new();
+
+        writeln!(output, "💰 *Debt: {}*", self.description()).unwrap();
+        writeln!(
+            output,
+            "📅 Due Date: {}",
+            ChatFormatterUtils::format_date(self.due_date())
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "💵 Total Amount: {}",
+            ChatFormatterUtils::format_currency(self.total_amount())
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "✅ Paid Amount: {}",
+            ChatFormatterUtils::format_currency(self.paid_amount())
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "🎯 Remaining Amount: {}",
+            ChatFormatterUtils::format_currency(self.remaining_amount())
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "📊 Status: {}",
+            ChatFormatterUtils::format_debt_status(self.status())
+        )
+        .unwrap();
+
+        if let Some(updated_at) = self.updated_at() {
+            writeln!(
+                output,
+                "🔄 Last Updated: {}",
+                ChatFormatterUtils::format_datetime(updated_at)
+            )
+            .unwrap();
+        }
+
+        output
+    }
+
+    /// Formats debt list for chat display
+    fn format_list_for_chat(items: &[Self]) -> String {
+        if items.is_empty() {
+            return "📝 *No debts found*".to_string();
+        }
+
+        let mut output = String::new();
+        writeln!(output, "📋 *Debt List ({})*", items.len()).unwrap();
+        writeln!(output, "{}", ChatFormatterUtils::separator()).unwrap();
+
+        for (index, debt) in items.iter().enumerate() {
+            writeln!(output, "\n{}. {}", index + 1, debt.description()).unwrap();
+            writeln!(
+                output,
+                "   💵 {} | 📅 {} | {}",
+                ChatFormatterUtils::format_currency(debt.remaining_amount()),
+                ChatFormatterUtils::format_date(debt.due_date()),
+                ChatFormatterUtils::format_debt_status(debt.status())
+            )
+            .unwrap();
+        }
+
+        // Summary
+        let total_remaining: Decimal = items.iter().map(|d| *d.remaining_amount()).sum();
+
+        writeln!(output, "\n{}", ChatFormatterUtils::separator()).unwrap();
+        writeln!(
+            output,
+            "💼 *Total Outstanding: {}*",
+            ChatFormatterUtils::format_currency(&total_remaining)
+        )
+        .unwrap();
+
+        output
+    }
 }
