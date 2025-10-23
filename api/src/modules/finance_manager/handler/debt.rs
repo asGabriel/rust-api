@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use chrono::{NaiveDate, Utc};
 use http_error::{ext::OptionHttpExt, HttpResult};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -38,7 +38,7 @@ impl DebtHandler for DebtHandlerImpl {
         let mut debt = debt_generator.generate_debt_from_request();
 
         if debt_generator.is_paid() {
-            let payment = debt_generator.generate_payment_from_debt(&debt);
+            let payment = debt_generator.paid(&debt);
             debt.paid(payment);
         }
 
@@ -66,6 +66,24 @@ pub struct CreateDebtRequest {
     pub status: Option<DebtStatus>,
     #[serde(flatten)]
     pub configuration: DebtConfiguration,
+}
+
+impl CreateDebtRequest {
+    pub fn new(account_id: Uuid, description: String, total_amount: Decimal, due_date: Option<NaiveDate>) -> Self {
+        Self {
+            account_id,
+            description,
+            total_amount,
+            paid_amount: None,
+            discount_amount: None,
+            due_date: due_date.unwrap_or(Utc::now().date_naive()),
+            status: Some(DebtStatus::Unpaid),
+            configuration: DebtConfiguration {
+                is_paid: None,
+                installments: None,
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

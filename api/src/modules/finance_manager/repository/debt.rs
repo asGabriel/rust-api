@@ -1,6 +1,7 @@
 use async_trait::async_trait;
+use database::push_filter;
 use http_error::HttpResult;
-use sqlx::{Pool, Postgres};
+use sqlx::{Pool, Postgres, QueryBuilder, Row};
 
 use crate::modules::finance_manager::domain::debt::{Debt, DebtFilters};
 
@@ -63,11 +64,38 @@ impl DebtRepository for DebtRepositoryImpl {
         Ok(Debt::from(debt_dto))
     }
 
-    async fn list(&self, _filters: DebtFilters) -> HttpResult<Vec<Debt>> {
-        let debt_dtos: Vec<entity::DebtEntity> =
-            sqlx::query_as!(entity::DebtEntity, "SELECT * FROM finance_manager.debt")
-                .fetch_all(&self.pool)
-                .await?;
+    async fn list(&self, filters: DebtFilters) -> HttpResult<Vec<Debt>> {
+        let mut query = QueryBuilder::new("SELECT * FROM finance_manager.debt");
+        let mut has_where = false;
+
+        if let Some(ids) = filters.ids() {
+            push_filter!(query, &mut has_where, "id IN ($1)", ids);
+        }
+
+        if let Some(statuses) = filters.statuses() {
+            let status_strings: Vec<String> = statuses.iter().map(|s| s.clone().into()).collect();
+            push_filter!(query, &mut has_where, "status IN ($1)", status_strings);
+        }
+
+        let query = query.build();
+        let rows = query.fetch_all(&self.pool).await?;
+
+        let debt_dtos: Vec<entity::DebtEntity> = rows
+            .into_iter()
+            .map(|row| entity::DebtEntity {
+                id: row.get("id"),
+                account_id: row.get("account_id"),
+                description: row.get("description"),
+                total_amount: row.get("total_amount"),
+                paid_amount: row.get("paid_amount"),
+                discount_amount: row.get("discount_amount"),
+                remaining_amount: row.get("remaining_amount"),
+                due_date: row.get("due_date"),
+                status: row.get("status"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            })
+            .collect();
 
         let debts = debt_dtos.into_iter().map(Debt::from).collect();
         Ok(debts)
