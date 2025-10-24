@@ -7,7 +7,6 @@ use crate::modules::{
 use self::gateway::DynTelegramApiGateway;
 
 pub mod domain;
-pub mod formatter;
 pub mod gateway;
 pub mod handler;
 pub mod routes;

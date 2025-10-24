@@ -6,7 +6,10 @@ use util::{from_row_constructor, getters};
 use uuid::Uuid;
 
 use crate::{
-    modules::{chat_bot::formatter::ChatFormatterUtils, finance_manager::domain::payment::Payment},
+    modules::{
+        chat_bot::domain::formatter::{ChatFormatter, ChatFormatterUtils},
+        finance_manager::domain::payment::Payment,
+    },
     utils::generate_random_identification,
 };
 
@@ -213,7 +216,7 @@ impl DebtFilters {
     }
 }
 
-impl crate::modules::chat_bot::formatter::ChatFormatter for Debt {
+impl ChatFormatter for Debt {
     /// Formats a single debt for chat display
     fn format_for_chat(&self) -> String {
         let mut output = String::new();

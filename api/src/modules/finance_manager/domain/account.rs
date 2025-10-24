@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 use util::{from_row_constructor, getters};
 use uuid::Uuid;
 
-use crate::utils::generate_random_identification;
+use crate::{
+    modules::chat_bot::domain::formatter::ChatFormatter, utils::generate_random_identification,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -57,5 +59,30 @@ from_row_constructor! {
         identification: String,
         created_at: DateTime<Utc>,
         updated_at: Option<DateTime<Utc>>,
+    }
+}
+
+impl ChatFormatter for BankAccount {
+    fn format_for_chat(&self) -> String {
+        format!(
+            "🏦 *Account: {}*\n🆔 ID: {}\n👤 Owner: {}",
+            self.name(),
+            self.identification(),
+            self.owner()
+        )
+    }
+
+    fn format_list_for_chat(items: &[Self]) -> String {
+        let mut output = format!("📋 *Account List ({})*", items.len());
+
+        for account in items.iter() {
+            output.push_str(&format!(
+                "\n🆔 *{}* - {}",
+                account.identification(),
+                account.name()
+            ));
+        }
+
+        output
     }
 }

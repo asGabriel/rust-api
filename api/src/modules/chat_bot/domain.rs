@@ -1,13 +1,15 @@
 use http_error::{HttpError, HttpResult};
 use serde::{Deserialize, Serialize};
 
-use crate::modules::chat_bot::domain::new_debt::NewDebtData;
+use crate::modules::chat_bot::domain::debt::NewDebtData;
 
-pub mod new_debt;
+pub mod debt;
+pub mod formatter;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChatCommandType {
     ListDebts,
+    ListAccounts,
     NewDebt(NewDebtData),
     Unknown(String),
 }

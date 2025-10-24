@@ -1,6 +1,6 @@
 use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::post, Json, Router};
 use http_error::HttpResult;
-use telegram_api::domain::telegram_update::TelegramUpdate;
+use telegram_api::domain::{send_message::SendMessageRequest, telegram_update::TelegramUpdate};
 
 use crate::modules::{chat_bot::domain::ChatCommand, routes::AppState};
 
@@ -30,6 +30,14 @@ pub async fn handle_events(
                     .await?;
             } else {
                 println!("Mensagem não é um comando válido: {}", text);
+                state
+                    .chat_bot_state
+                    .telegram_gateway
+                    .send_message(SendMessageRequest {
+                        chat_id: message.chat.id,
+                        text: "Mensagem não é um comando válido".to_string(),
+                    })
+                    .await?;
             }
         }
     }

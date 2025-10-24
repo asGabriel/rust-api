@@ -11,10 +11,7 @@ use crate::modules::finance_manager::{
 pub trait AccountRepository {
     async fn get_by_id(&self, id: Uuid) -> HttpResult<Option<BankAccount>>;
 
-    async fn get_by_identification(
-        &self,
-        identification: String,
-    ) -> HttpResult<Option<BankAccount>>;
+    async fn get_by_identification(&self, identification: &str) -> HttpResult<Option<BankAccount>>;
 
     // TODO: Add filters
     async fn list(&self) -> HttpResult<Vec<BankAccount>>;
@@ -35,10 +32,7 @@ impl AccountRepositoryImpl {
 
 #[async_trait]
 impl AccountRepository for AccountRepositoryImpl {
-    async fn get_by_identification(
-        &self,
-        identification: String,
-    ) -> HttpResult<Option<BankAccount>> {
+    async fn get_by_identification(&self, identification: &str) -> HttpResult<Option<BankAccount>> {
         let result: Option<BankAccountEntity> = sqlx::query_as!(
             BankAccountEntity,
             r#"SELECT * FROM finance_manager.account WHERE identification = $1"#,
