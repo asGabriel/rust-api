@@ -5,8 +5,9 @@ use std::fmt::Write;
 use util::{from_row_constructor, getters};
 use uuid::Uuid;
 
-use crate::modules::{
-    chat_bot::formatter::ChatFormatterUtils, finance_manager::domain::payment::Payment,
+use crate::{
+    modules::{chat_bot::formatter::ChatFormatterUtils, finance_manager::domain::payment::Payment},
+    utils::generate_random_identification,
 };
 
 pub mod generator;
@@ -19,6 +20,8 @@ pub struct Debt {
     /// Unique identifier of the account
     /// The account that the debt belongs to
     account_id: Uuid,
+    /// The identification of the debt for human readability
+    identification: String,
 
     /// The description of the debt
     description: String,
@@ -53,9 +56,13 @@ impl Debt {
         discount_amount: Option<Decimal>,
         due_date: NaiveDate,
     ) -> Self {
+        let uuid = Uuid::new_v4();
+        let identification = generate_random_identification(uuid);
+
         Self {
-            id: Uuid::new_v4(),
+            id: uuid,
             account_id,
+            identification,
             description,
             total_amount,
             paid_amount: paid_amount.unwrap_or(Decimal::ZERO),
@@ -130,6 +137,7 @@ getters!(
     Debt {
         id: Uuid,
         account_id: Uuid,
+        identification: String,
         description: String,
         total_amount: Decimal,
         paid_amount: Decimal,
@@ -146,6 +154,7 @@ from_row_constructor! {
     Debt {
         id: Uuid,
         account_id: Uuid,
+        identification: String,
         description: String,
         total_amount: Decimal,
         paid_amount: Decimal,
@@ -210,6 +219,7 @@ impl crate::modules::chat_bot::formatter::ChatFormatter for Debt {
         let mut output = String::new();
 
         writeln!(output, "💰 *Debt: {}*", self.description()).unwrap();
+        writeln!(output, "🆔 ID: {}", self.identification()).unwrap();
         writeln!(
             output,
             "📅 Due Date: {}",
@@ -261,10 +271,15 @@ impl crate::modules::chat_bot::formatter::ChatFormatter for Debt {
 
         let mut output = String::new();
         writeln!(output, "📋 *Debt List ({})*", items.len()).unwrap();
-        writeln!(output, "{}", ChatFormatterUtils::separator()).unwrap();
 
-        for (index, debt) in items.iter().enumerate() {
-            writeln!(output, "\n{}. {}", index + 1, debt.description()).unwrap();
+        for debt in items.iter() {
+            writeln!(
+                output,
+                "\n🆔 *{}* - {}",
+                debt.identification(),
+                debt.description()
+            )
+            .unwrap();
             writeln!(
                 output,
                 "   💵 {} | 📅 {} | {}",
@@ -278,10 +293,9 @@ impl crate::modules::chat_bot::formatter::ChatFormatter for Debt {
         // Summary
         let total_remaining: Decimal = items.iter().map(|d| *d.remaining_amount()).sum();
 
-        writeln!(output, "\n{}", ChatFormatterUtils::separator()).unwrap();
         writeln!(
             output,
-            "💼 *Total Outstanding: {}*",
+            "\n💼 *Total Outstanding: {}*",
             ChatFormatterUtils::format_currency(&total_remaining)
         )
         .unwrap();

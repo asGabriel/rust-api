@@ -33,7 +33,7 @@ impl AccountHandler for AccountHandlerImpl {
     }
 }
 
-// Use cases
+// USE CASES
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
