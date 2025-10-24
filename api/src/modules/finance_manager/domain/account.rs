@@ -1,9 +1,9 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use util::getters;
+use util::{from_row_constructor, getters};
 use uuid::Uuid;
 
-use crate::modules::finance_manager::repository::account::dto::BankAccountDto;
+use crate::utils::generate_random_identification;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -14,6 +14,8 @@ pub struct BankAccount {
     name: String,
     /// The owner of the bank account
     owner: String,
+    /// The identification of the account; It's a human readable identifier for the account.
+    identification: String,
     /// The date of the creation of the bank account
     created_at: DateTime<Utc>,
     /// The date of the last update of the bank account
@@ -22,10 +24,14 @@ pub struct BankAccount {
 
 impl BankAccount {
     pub fn new(name: String, owner: String) -> Self {
+        let uuid = Uuid::new_v4();
+        let identification = generate_random_identification(uuid);
+
         Self {
-            id: Uuid::new_v4(),
+            id: uuid,
             name,
             owner,
+            identification,
             created_at: Utc::now(),
             updated_at: None,
         }
@@ -37,31 +43,19 @@ getters! {
         id: Uuid,
         name: String,
         owner: String,
+        identification: String,
         created_at: DateTime<Utc>,
         updated_at: Option<DateTime<Utc>>,
     }
 }
 
-impl From<BankAccount> for BankAccountDto {
-    fn from(bank_account: BankAccount) -> Self {
-        BankAccountDto {
-            id: bank_account.id,
-            name: bank_account.name,
-            owner: bank_account.owner,
-            created_at: bank_account.created_at.naive_utc(),
-            updated_at: bank_account.updated_at.map(|dt| dt.naive_utc()),
-        }
-    }
-}
-
-impl From<BankAccountDto> for BankAccount {
-    fn from(dto: BankAccountDto) -> Self {
-        BankAccount {
-            id: dto.id,
-            name: dto.name,
-            owner: dto.owner,
-            created_at: dto.created_at.and_utc(),
-            updated_at: dto.updated_at.map(|dt| dt.and_utc()),
-        }
+from_row_constructor! {
+    BankAccount {
+        id: Uuid,
+        name: String,
+        owner: String,
+        identification: String,
+        created_at: DateTime<Utc>,
+        updated_at: Option<DateTime<Utc>>,
     }
 }

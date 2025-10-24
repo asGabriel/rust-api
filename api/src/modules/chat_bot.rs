@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use crate::modules::{chat_bot::handler::DynChatBotHandler, finance_manager::handler::payment::DynPaymentHandler};
+use crate::modules::{
+    chat_bot::handler::DynChatBotHandler, finance_manager::handler::payment::DynPaymentHandler,
+};
 
 use self::gateway::DynTelegramApiGateway;
 

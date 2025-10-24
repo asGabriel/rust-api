@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT * FROM finance_manager.account ORDER BY created_at DESC",
+  "query": "\n            INSERT INTO finance_manager.account (id, name, owner, identification, created_at, updated_at)\n            VALUES ($1, $2, $3, $4, $5, $6)\n            RETURNING id, name, owner, identification, created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -35,7 +35,14 @@
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamp",
+        "Timestamp"
+      ]
     },
     "nullable": [
       false,
@@ -46,5 +53,5 @@
       true
     ]
   },
-  "hash": "72daaf439c857c823e7e687ec87e1160bab4bb2794627a3d80ff507c914b7247"
+  "hash": "5e4d931491dec349e3401ddb447bedf4411074c5d9cfa892709ac27344cd5754"
 }

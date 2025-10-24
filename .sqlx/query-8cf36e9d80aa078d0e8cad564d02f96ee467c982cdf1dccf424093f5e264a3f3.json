@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO finance_manager.account (id, name, owner, created_at, updated_at)\n            VALUES ($1, $2, $3, $4, $5)\n            RETURNING id, name, owner, created_at, updated_at\n        ",
+  "query": "SELECT * FROM finance_manager.account WHERE identification = $1",
   "describe": {
     "columns": [
       {
@@ -20,22 +20,23 @@
       },
       {
         "ordinal": 3,
+        "name": "identification",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
         "name": "created_at",
         "type_info": "Timestamp"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "updated_at",
         "type_info": "Timestamp"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text",
-        "Text",
-        "Timestamp",
-        "Timestamp"
+        "Text"
       ]
     },
     "nullable": [
@@ -43,8 +44,9 @@
       false,
       false,
       false,
+      false,
       true
     ]
   },
-  "hash": "05998bce76dfc6b7ae1dbda5a04925fc068df4c9731fbcebc3152622d38cce83"
+  "hash": "8cf36e9d80aa078d0e8cad564d02f96ee467c982cdf1dccf424093f5e264a3f3"
 }

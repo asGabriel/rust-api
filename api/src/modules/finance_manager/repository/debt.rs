@@ -36,18 +36,24 @@ impl DebtRepository for DebtRepositoryImpl {
             INSERT INTO finance_manager.debt (
                 id, 
                 account_id, 
+                identification,
                 description, 
                 total_amount, 
                 paid_amount, 
                 discount_amount, 
                 remaining_amount, 
-                due_date, status, created_at, updated_at) 
+                due_date,
+                status,
+                created_at,
+                updated_at
+            ) 
             VALUES 
-                ($1, $2, $3, $4, $5, $6, $7, $8::DATE, $9, $10, $11)
+                ($1, $2, $3, $4, $5, $6, $7, $8, $9::DATE, $10, $11, $12)
             RETURNING *
         "#,
             debt_dto.id,
             debt_dto.account_id,
+            debt_dto.identification,
             debt_dto.description,
             debt_dto.total_amount,
             debt_dto.paid_amount,
@@ -85,6 +91,7 @@ impl DebtRepository for DebtRepositoryImpl {
             .map(|row| entity::DebtEntity {
                 id: row.get("id"),
                 account_id: row.get("account_id"),
+                identification: row.get("identification"),
                 description: row.get("description"),
                 total_amount: row.get("total_amount"),
                 paid_amount: row.get("paid_amount"),
@@ -115,6 +122,7 @@ pub mod entity {
     pub struct DebtEntity {
         pub id: Uuid,
         pub account_id: Uuid,
+        pub identification: String,
         pub description: String,
         pub total_amount: Decimal,
         pub paid_amount: Decimal,
@@ -131,6 +139,7 @@ pub mod entity {
             DebtEntity {
                 id: *debt.id(),
                 account_id: *debt.account_id(),
+                identification: debt.identification().clone(),
                 description: debt.description().clone(),
                 total_amount: *debt.total_amount(),
                 paid_amount: *debt.paid_amount(),
@@ -149,6 +158,7 @@ pub mod entity {
             Debt::from_row(
                 dto.id,
                 dto.account_id,
+                dto.identification,
                 dto.description,
                 dto.total_amount,
                 dto.paid_amount,
