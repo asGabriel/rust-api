@@ -80,15 +80,26 @@ impl Debt {
         }
     }
 
-    pub fn paid(&mut self, payment: Payment) {
+    pub fn payment_created(&mut self, payment: &Payment) {
         self.paid_amount += payment.principal_amount();
 
         self.recalculate_remaining_amount();
+        self.recalculate_status();
         self.updated_at = Some(Utc::now());
     }
 
     fn recalculate_remaining_amount(&mut self) {
         self.remaining_amount = self.total_amount - self.paid_amount - self.discount_amount;
+    }
+
+    fn recalculate_status(&mut self) {
+        if self.paid_amount == self.total_amount || self.paid_amount > self.total_amount {
+            self.status = DebtStatus::Settled;
+        } else if self.remaining_amount > Decimal::ZERO {
+            self.status = DebtStatus::PartiallyPaid;
+        } else {
+            self.status = DebtStatus::Unpaid;
+        }
     }
 }
 
