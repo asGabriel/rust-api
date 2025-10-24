@@ -47,6 +47,10 @@ impl ChatCommand {
                 Err(_) => return None,
             },
             "contas" | "accounts" => ChatCommandType::ListAccounts,
+            "pagamento" | "payment" | "baixa" => match NewPaymentData::try_from(&parameters) {
+                Ok(data) => ChatCommandType::NewPayment(data),
+                Err(_) => return None,
+            },
             _ => ChatCommandType::Unknown(command_str),
         };
 
