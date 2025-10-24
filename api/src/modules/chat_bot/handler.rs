@@ -128,14 +128,20 @@ impl ChatBotHandler for ChatBotHandlerImpl {
             }
             ChatCommandType::NewDebt(debt) => {
                 if let Err(e) = self.handle_new_debt(debt, chat_id).await {
-                    return Err(e);
+                    self.telegram_gateway.send_message(SendMessageRequest {
+                        chat_id,
+                        text: format!("Erro ao criar débito: {}", e),
+                    }).await?;
                 }
 
                 Ok(())
             }
             ChatCommandType::NewPayment(payment) => {
                 if let Err(e) = self.handle_new_payment(payment, chat_id).await {
-                    return Err(e);
+                    self.telegram_gateway.send_message(SendMessageRequest {
+                        chat_id,
+                        text: format!("Erro ao criar pagamento: {}", e),
+                    }).await?;
                 }
 
                 Ok(())
