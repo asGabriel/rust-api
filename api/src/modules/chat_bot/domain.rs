@@ -1,9 +1,10 @@
 use http_error::{HttpError, HttpResult};
 use serde::{Deserialize, Serialize};
 
-use crate::modules::chat_bot::domain::debt::NewDebtData;
+use crate::modules::chat_bot::domain::{debt::NewDebtData, payment::NewPaymentData};
 
 pub mod debt;
+pub mod payment;
 pub mod formatter;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -11,6 +12,7 @@ pub enum ChatCommandType {
     ListDebts,
     ListAccounts,
     NewDebt(NewDebtData),
+    NewPayment(NewPaymentData),
     Unknown(String),
 }
 
@@ -44,6 +46,7 @@ impl ChatCommand {
                 Ok(data) => ChatCommandType::NewDebt(data),
                 Err(_) => return None,
             },
+            "contas" | "accounts" => ChatCommandType::ListAccounts,
             _ => ChatCommandType::Unknown(command_str),
         };
 

@@ -25,6 +25,7 @@ async fn main() {
     let finance_manager_state = FinanceManagerState {
         payment_handler: Arc::new(PaymentHandlerImpl {
             payment_repository: Arc::new(PaymentRepositoryImpl::new(pool)),
+            debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
         }),
         debt_handler: Arc::new(DebtHandlerImpl {
             debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
@@ -37,6 +38,10 @@ async fn main() {
 
     let chat_bot_state = ChatBotState {
         chat_bot_handler: Arc::new(ChatBotHandlerImpl {
+            payment_handler: Arc::new(PaymentHandlerImpl {
+                payment_repository: Arc::new(PaymentRepositoryImpl::new(pool)),
+                debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
+            }),
             debt_handler: Arc::new(DebtHandlerImpl {
                 debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
                 account_repository: Arc::new(AccountRepositoryImpl::new(pool)),
@@ -48,6 +53,7 @@ async fn main() {
         }),
         payment_handler: Arc::new(PaymentHandlerImpl {
             payment_repository: Arc::new(PaymentRepositoryImpl::new(pool)),
+            debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
         }),
         telegram_gateway: TelegramGateway::new(),
     };

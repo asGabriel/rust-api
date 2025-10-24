@@ -6,7 +6,10 @@ use telegram_api::domain::send_message::SendMessageRequest;
 
 use crate::modules::{
     chat_bot::{
-        domain::{debt::NewDebtData, formatter::ChatFormatter, ChatCommand, ChatCommandType},
+        domain::{
+            debt::NewDebtData, formatter::ChatFormatter, payment::NewPaymentData, ChatCommand,
+            ChatCommandType,
+        },
         gateway::DynTelegramApiGateway,
     },
     finance_manager::{
@@ -14,6 +17,9 @@ use crate::modules::{
         handler::{
             account::DynAccountHandler,
             debt::{CreateDebtRequest, DynDebtHandler},
+            payment::{use_cases::{
+                CreatePaymentRequest, PaymentBasicData, PaymentRequestFromIdentification,
+            }, DynPaymentHandler},
         },
     },
 };
@@ -29,6 +35,7 @@ pub struct ChatBotHandlerImpl {
     pub telegram_gateway: Arc<DynTelegramApiGateway>,
     pub debt_handler: Arc<DynDebtHandler>,
     pub account_handler: Arc<DynAccountHandler>,
+    pub payment_handler: Arc<DynPaymentHandler>,
 }
 
 impl ChatBotHandlerImpl {
@@ -71,6 +78,28 @@ impl ChatBotHandlerImpl {
         Ok(())
     }
 
+    async fn handle_new_payment(&self, payment: NewPaymentData, chat_id: i64) -> HttpResult<()> {
+        self.payment_handler
+            .create_payment(CreatePaymentRequest::PaymentRequestFromIdentification(
+                PaymentRequestFromIdentification {
+                    debt_identification: payment.debt_identification,
+                    payment_basic_data: PaymentBasicData {
+                        amount: payment.amount,
+                        discount_amount: payment.discount_amount,
+                        payment_date: payment
+                            .payment_date
+                            .unwrap_or(chrono::Utc::now().date_naive()),
+                    },
+                },
+            ))
+            .await?;
+
+        let message = format!("Payment created successfully.");
+        self.send_message(chat_id, message).await?;
+
+        Ok(())
+    }
+
     async fn send_message(&self, chat_id: i64, message: String) -> HttpResult<()> {
         self.telegram_gateway
             .send_message(SendMessageRequest {
@@ -99,6 +128,13 @@ impl ChatBotHandler for ChatBotHandlerImpl {
             }
             ChatCommandType::NewDebt(debt) => {
                 if let Err(e) = self.handle_new_debt(debt, chat_id).await {
+                    return Err(e);
+                }
+
+                Ok(())
+            }
+            ChatCommandType::NewPayment(payment) => {
+                if let Err(e) = self.handle_new_payment(payment, chat_id).await {
                     return Err(e);
                 }
 

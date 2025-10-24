@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use database::push_filter;
-use http_error::HttpResult;
+use http_error::{ext::OptionHttpExt, HttpResult};
 use sqlx::{Pool, Postgres, QueryBuilder, Row};
+use uuid::Uuid;
 
 use crate::modules::finance_manager::domain::debt::{Debt, DebtFilters};
 
@@ -10,6 +11,12 @@ pub trait DebtRepository {
     async fn list(&self, filters: DebtFilters) -> HttpResult<Vec<Debt>>;
 
     async fn insert(&self, debt: Debt) -> HttpResult<Debt>;
+
+    async fn get_by_identification(&self, identification: &str) -> HttpResult<Option<Debt>>;
+
+    async fn get_by_id(&self, id: Uuid) -> HttpResult<Option<Debt>>;
+
+    async fn update(&self, debt: Debt) -> HttpResult<Debt>;
 }
 
 pub type DynDebtRepository = dyn DebtRepository + Send + Sync;
@@ -27,6 +34,69 @@ impl DebtRepositoryImpl {
 
 #[async_trait]
 impl DebtRepository for DebtRepositoryImpl {
+    async fn update(&self, debt: Debt) -> HttpResult<Debt> {
+        let debt_dto = entity::DebtEntity::from(debt);
+
+        let debt_dto = sqlx::query_as!(
+            entity::DebtEntity,
+            r#"
+            UPDATE finance_manager.debt SET 
+                account_id = $1, 
+                identification = $2, 
+                description = $3, 
+                total_amount = $4, 
+                paid_amount = $5, 
+                discount_amount = $6, 
+                remaining_amount = $7, 
+                due_date = $8, 
+                status = $9, 
+                updated_at = $10
+            WHERE id = $11 
+            RETURNING *
+            "#,
+            debt_dto.account_id,
+            debt_dto.identification,
+            debt_dto.description,
+            debt_dto.total_amount,
+            debt_dto.paid_amount,
+            debt_dto.discount_amount,
+            debt_dto.remaining_amount,
+            debt_dto.due_date,
+            debt_dto.status,
+            debt_dto.updated_at,
+            debt_dto.id,
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .or_not_found("debt", &debt_dto.id.to_string())?;
+
+        Ok(Debt::from(debt_dto))
+    }
+
+    async fn get_by_id(&self, id: Uuid) -> HttpResult<Option<Debt>> {
+        let debt: Option<entity::DebtEntity> = sqlx::query_as!(
+            entity::DebtEntity,
+            r#"SELECT * FROM finance_manager.debt WHERE id = $1"#,
+            id,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(debt.map(Debt::from))
+    }
+
+    async fn get_by_identification(&self, identification: &str) -> HttpResult<Option<Debt>> {
+        let debt: Option<entity::DebtEntity> = sqlx::query_as!(
+            entity::DebtEntity,
+            r#"SELECT * FROM finance_manager.debt WHERE identification = $1"#,
+            identification,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(debt.map(Debt::from))
+    }
+
     async fn insert(&self, debt: Debt) -> HttpResult<Debt> {
         let debt_dto = entity::DebtEntity::from(debt);
 
