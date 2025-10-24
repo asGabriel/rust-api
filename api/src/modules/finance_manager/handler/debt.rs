@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use chrono::{NaiveDate, Utc};
-use http_error::HttpResult;
+use http_error::{ext::OptionHttpExt, HttpResult};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
@@ -26,15 +26,13 @@ pub struct DebtHandlerImpl {
 #[async_trait]
 impl DebtHandler for DebtHandlerImpl {
     async fn create_debt(&self, request: CreateDebtRequest) -> HttpResult<Debt> {
-        // let _account = self
-        //     .account_repository
-        //     .get_by_id(request.account_id)
-        //     .await?
-        //     .or_not_found("account", request.account_id)?;
+        let account = self
+            .account_repository
+            .get_by_identification(&request.account_identification)
+            .await?
+            .or_not_found("account", &request.account_identification)?;
 
-        let debt_generator = DebtGenerator { request };
-
-        let debt = debt_generator.generate_debt_from_request();
+        let debt = DebtGenerator::generate_debt_from_request(request, *account.id());
 
         let debt = self.debt_repository.insert(debt).await?;
 

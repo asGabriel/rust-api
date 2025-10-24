@@ -6,13 +6,15 @@ use telegram_api::domain::send_message::SendMessageRequest;
 
 use crate::modules::{
     chat_bot::{
-        domain::{new_debt::NewDebtData, ChatCommand, ChatCommandType},
-        formatter::ChatFormatter,
+        domain::{debt::NewDebtData, formatter::ChatFormatter, ChatCommand, ChatCommandType},
         gateway::DynTelegramApiGateway,
     },
     finance_manager::{
-        domain::debt::{Debt, DebtFilters},
-        handler::debt::{CreateDebtRequest, DynDebtHandler},
+        domain::debt::DebtFilters,
+        handler::{
+            account::DynAccountHandler,
+            debt::{CreateDebtRequest, DynDebtHandler},
+        },
     },
 };
 
@@ -26,13 +28,14 @@ pub trait ChatBotHandler {
 pub struct ChatBotHandlerImpl {
     pub telegram_gateway: Arc<DynTelegramApiGateway>,
     pub debt_handler: Arc<DynDebtHandler>,
+    pub account_handler: Arc<DynAccountHandler>,
 }
 
 impl ChatBotHandlerImpl {
     pub async fn handle_list_debts(&self, chat_id: i64) -> HttpResult<()> {
         let debts = self.debt_handler.list_debts(DebtFilters::default()).await?;
 
-        let message = Debt::format_list_for_chat(&debts);
+        let message = ChatFormatter::format_list_for_chat(&debts);
 
         self.send_message(chat_id, message).await?;
 
@@ -58,6 +61,16 @@ impl ChatBotHandlerImpl {
         Ok(())
     }
 
+    async fn handle_list_accounts(&self, chat_id: i64) -> HttpResult<()> {
+        let accounts = self.account_handler.list_accounts().await?;
+
+        let message = ChatFormatter::format_list_for_chat(&accounts);
+
+        self.send_message(chat_id, message).await?;
+
+        Ok(())
+    }
+
     async fn send_message(&self, chat_id: i64, message: String) -> HttpResult<()> {
         self.telegram_gateway
             .send_message(SendMessageRequest {
@@ -76,6 +89,11 @@ impl ChatBotHandler for ChatBotHandlerImpl {
         match command.command_type {
             ChatCommandType::ListDebts => {
                 self.handle_list_debts(chat_id).await?;
+
+                Ok(())
+            }
+            ChatCommandType::ListAccounts => {
+                self.handle_list_accounts(chat_id).await?;
 
                 Ok(())
             }

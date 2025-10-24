@@ -41,6 +41,9 @@ async fn main() {
                 debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
                 account_repository: Arc::new(AccountRepositoryImpl::new(pool)),
             }),
+            account_handler: Arc::new(AccountHandlerImpl {
+                account_repository: Arc::new(AccountRepositoryImpl::new(pool)),
+            }),
             telegram_gateway: TelegramGateway::new(),
         }),
         payment_handler: Arc::new(PaymentHandlerImpl {
