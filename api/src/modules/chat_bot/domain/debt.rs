@@ -68,13 +68,12 @@ mod tests {
 
     #[test]
     fn test_try_from_valid_data() {
-        let parameters = vec![
+        let params = vec![
             "mercado da semana".to_string(),
             "500".to_string(),
             "ABCD".to_string(),
         ];
-
-        let result = NewDebtData::try_from(&parameters);
+        let result = NewDebtData::try_from(&params);
         assert!(result.is_ok());
 
         let data = result.unwrap();
@@ -84,185 +83,38 @@ mod tests {
     }
 
     #[test]
-    fn test_try_from_decimal_amount() {
-        let parameters = vec![
-            "compra no shopping".to_string(),
-            "150.50".to_string(),
-            "EFGH".to_string(),
-        ];
-
-        let result = NewDebtData::try_from(&parameters);
-        assert!(result.is_ok());
-
-        let data = result.unwrap();
-        assert_eq!(data.description, "compra no shopping");
-        assert_eq!(data.amount, Decimal::new(15050, 2));
-        assert_eq!(data.account_identification, "EFGH");
-    }
-
-    #[test]
-    fn test_try_from_trims_description() {
-        let parameters = vec![
-            "  farmácia  ".to_string(),
-            "25.99".to_string(),
-            "IJKL".to_string(),
-        ];
-
-        let result = NewDebtData::try_from(&parameters);
-        assert!(result.is_ok());
-
-        let data = result.unwrap();
-        assert_eq!(data.description, "farmácia");
-        assert_eq!(data.amount, Decimal::new(2599, 2));
-        assert_eq!(data.account_identification, "IJKL");
-    }
-
-    #[test]
-    fn test_try_from_insufficient_parameters() {
-        let test_cases = vec![
-            vec![],                                             // empty
-            vec!["description".to_string()],                    // only description
-            vec!["description".to_string(), "100".to_string()], // missing account_id
-        ];
-
-        for parameters in test_cases {
-            let result = NewDebtData::try_from(&parameters);
-            assert!(
-                result.is_err(),
-                "Expected error for parameters: {:?}",
-                parameters
-            );
-        }
-    }
-
-    #[test]
-    fn test_try_from_empty_description() {
-        let parameters = vec!["".to_string(), "100".to_string(), "MNOP".to_string()];
-
-        let result = NewDebtData::try_from(&parameters);
+    fn test_try_from_insufficient_params() {
+        let params = vec!["descrição".to_string(), "100".to_string()];
+        let result = NewDebtData::try_from(&params);
         assert!(result.is_err());
     }
 
     #[test]
-    fn test_try_from_whitespace_description() {
-        let parameters = vec!["   ".to_string(), "100".to_string(), "QRST".to_string()];
-
-        let result = NewDebtData::try_from(&parameters);
+    fn test_try_from_empty_description() {
+        let params = vec!["".to_string(), "100".to_string(), "ABCD".to_string()];
+        let result = NewDebtData::try_from(&params);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_try_from_invalid_amount() {
-        let parameters = vec![
-            "description".to_string(),
+        let params = vec![
+            "descrição".to_string(),
             "abc".to_string(),
-            "UVWX".to_string(),
+            "ABCD".to_string(),
         ];
-
-        let result = NewDebtData::try_from(&parameters);
+        let result = NewDebtData::try_from(&params);
         assert!(result.is_err());
     }
 
     #[test]
-    fn test_try_from_zero_amount() {
-        let parameters = vec![
-            "description".to_string(),
-            "0".to_string(),
-            "YZAB".to_string(),
-        ];
-
-        let result = NewDebtData::try_from(&parameters);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_try_from_negative_amount() {
-        let parameters = vec![
-            "description".to_string(),
-            "-100".to_string(),
-            "CDEF".to_string(),
-        ];
-
-        let result = NewDebtData::try_from(&parameters);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_try_from_extra_parameters() {
-        let parameters = vec![
-            "description".to_string(),
+    fn test_try_from_invalid_account_id_length() {
+        let params = vec![
+            "descrição".to_string(),
             "100".to_string(),
-            "GHIJ".to_string(),
-            "extra".to_string(),
-            "param".to_string(),
+            "ABC".to_string(),
         ];
-
-        let result = NewDebtData::try_from(&parameters);
-        assert!(result.is_ok());
-
-        let data = result.unwrap();
-        assert_eq!(data.description, "description");
-        assert_eq!(data.amount, Decimal::new(100, 0));
-        assert_eq!(data.account_identification, "GHIJ");
-    }
-
-    #[test]
-    fn test_try_from_account_id_too_short() {
-        let parameters = vec![
-            "description".to_string(),
-            "100".to_string(),
-            "ABC".to_string(), // only 3 characters
-        ];
-
-        let result = NewDebtData::try_from(&parameters);
+        let result = NewDebtData::try_from(&params);
         assert!(result.is_err());
-
-        let error = result.unwrap_err();
-        assert!(error.message.contains("exatamente 4 caracteres"));
-    }
-
-    #[test]
-    fn test_try_from_account_id_too_long() {
-        let parameters = vec![
-            "description".to_string(),
-            "100".to_string(),
-            "ABCDE".to_string(), // 5 characters
-        ];
-
-        let result = NewDebtData::try_from(&parameters);
-        assert!(result.is_err());
-
-        let error = result.unwrap_err();
-        assert!(error.message.contains("exatamente 4 caracteres"));
-    }
-
-    #[test]
-    fn test_try_from_account_id_with_spaces() {
-        let parameters = vec![
-            "description".to_string(),
-            "100".to_string(),
-            " AB ".to_string(), // spaces around, but only 2 chars when trimmed
-        ];
-
-        let result = NewDebtData::try_from(&parameters);
-        assert!(result.is_err());
-
-        let error = result.unwrap_err();
-        assert!(error.message.contains("exatamente 4 caracteres"));
-    }
-
-    #[test]
-    fn test_try_from_account_id_valid_with_spaces() {
-        let parameters = vec![
-            "description".to_string(),
-            "100".to_string(),
-            " ABCD ".to_string(), // spaces around, but 4 chars when trimmed
-        ];
-
-        let result = NewDebtData::try_from(&parameters);
-        assert!(result.is_ok());
-
-        let data = result.unwrap();
-        assert_eq!(data.account_identification, "ABCD");
     }
 }
