@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use http_error::HttpResult;
-use sqlx::{Pool, Postgres};
+use sqlx::{Pool, Postgres, Row};
 use uuid::Uuid;
 
 use crate::modules::finance_manager::{
@@ -33,36 +33,70 @@ impl AccountRepositoryImpl {
 #[async_trait]
 impl AccountRepository for AccountRepositoryImpl {
     async fn get_by_identification(&self, identification: &str) -> HttpResult<Option<BankAccount>> {
-        let result: Option<BankAccountEntity> = sqlx::query_as!(
-            BankAccountEntity,
-            r#"SELECT * FROM finance_manager.account WHERE identification = $1"#,
-            identification,
+        let identification_num: i32 = identification.parse().map_err(|_| {
+            http_error::HttpError::bad_request(format!(
+                "Invalid identification format: {}",
+                identification
+            ))
+        })?;
+
+        let row = sqlx::query(
+            r#"SELECT id, name, owner, identification, created_at, updated_at FROM finance_manager.account WHERE identification = $1"#
         )
+        .bind(identification_num)
         .fetch_optional(&self.pool)
         .await?;
+
+        let result = row.map(|r| BankAccountEntity {
+            id: r.get("id"),
+            name: r.get("name"),
+            owner: r.get("owner"),
+            identification: r.get::<i32, _>("identification").to_string(),
+            created_at: r.get("created_at"),
+            updated_at: r.get("updated_at"),
+        });
 
         Ok(result.map(BankAccount::from))
     }
 
     async fn get_by_id(&self, id: Uuid) -> HttpResult<Option<BankAccount>> {
-        let result: Option<BankAccountEntity> = sqlx::query_as!(
-            BankAccountEntity,
-            r#"SELECT * FROM finance_manager.account WHERE id = $1"#,
-            id,
+        let row = sqlx::query(
+            r#"SELECT id, name, owner, identification, created_at, updated_at FROM finance_manager.account WHERE id = $1"#
         )
+        .bind(id)
         .fetch_optional(&self.pool)
         .await?;
+
+        let result = row.map(|r| BankAccountEntity {
+            id: r.get("id"),
+            name: r.get("name"),
+            owner: r.get("owner"),
+            identification: r.get::<i32, _>("identification").to_string(),
+            created_at: r.get("created_at"),
+            updated_at: r.get("updated_at"),
+        });
 
         Ok(result.map(BankAccount::from))
     }
 
     async fn list(&self) -> HttpResult<Vec<BankAccount>> {
-        let results = sqlx::query_as!(
-            BankAccountEntity,
-            r#"SELECT * FROM finance_manager.account ORDER BY created_at DESC"#
+        let rows = sqlx::query(
+            r#"SELECT id, name, owner, identification, created_at, updated_at FROM finance_manager.account ORDER BY created_at DESC"#
         )
         .fetch_all(&self.pool)
         .await?;
+
+        let results: Vec<BankAccountEntity> = rows
+            .into_iter()
+            .map(|r| BankAccountEntity {
+                id: r.get("id"),
+                name: r.get("name"),
+                owner: r.get("owner"),
+                identification: r.get::<i32, _>("identification").to_string(),
+                created_at: r.get("created_at"),
+                updated_at: r.get("updated_at"),
+            })
+            .collect();
 
         Ok(results.into_iter().map(BankAccount::from).collect())
     }
@@ -70,22 +104,29 @@ impl AccountRepository for AccountRepositoryImpl {
     async fn insert(&self, account: BankAccount) -> HttpResult<BankAccount> {
         let payload = BankAccountEntity::from(account);
 
-        let result = sqlx::query_as!(
-            BankAccountEntity,
+        let row = sqlx::query(
             r#"
-            INSERT INTO finance_manager.account (id, name, owner, identification, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO finance_manager.account (id, name, owner, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5)
             RETURNING id, name, owner, identification, created_at, updated_at
         "#,
-            payload.id,
-            payload.name,
-            payload.owner,
-            payload.identification,
-            payload.created_at,
-            payload.updated_at,
         )
+        .bind(payload.id)
+        .bind(payload.name)
+        .bind(payload.owner)
+        .bind(payload.created_at)
+        .bind(payload.updated_at)
         .fetch_one(&self.pool)
         .await?;
+
+        let result = BankAccountEntity {
+            id: row.get("id"),
+            name: row.get("name"),
+            owner: row.get("owner"),
+            identification: row.get::<i32, _>("identification").to_string(),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+        };
 
         Ok(BankAccount::from(result))
     }

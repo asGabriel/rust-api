@@ -3,9 +3,7 @@ use serde::{Deserialize, Serialize};
 use util::{from_row_constructor, getters};
 use uuid::Uuid;
 
-use crate::{
-    modules::chat_bot::domain::formatter::ChatFormatter, utils::generate_random_identification,
-};
+use crate::modules::chat_bot::domain::formatter::ChatFormatter;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,13 +25,12 @@ pub struct BankAccount {
 impl BankAccount {
     pub fn new(name: String, owner: String) -> Self {
         let uuid = Uuid::new_v4();
-        let identification = generate_random_identification(uuid);
 
         Self {
             id: uuid,
             name,
             owner,
-            identification,
+            identification: String::new(), // Will be set by database autoincrement
             created_at: Utc::now(),
             updated_at: None,
         }

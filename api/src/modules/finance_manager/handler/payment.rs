@@ -5,7 +5,7 @@ use http_error::{ext::OptionHttpExt, HttpResult};
 
 use crate::modules::finance_manager::{
     domain::payment::Payment,
-    handler::payment::use_cases::CreatePaymentRequest,
+    handler::{debt::DynDebtHandler, payment::use_cases::CreatePaymentRequest},
     repository::{debt::DynDebtRepository, payment::DynPaymentRepository},
 };
 
@@ -20,12 +20,14 @@ pub trait PaymentHandler {
 pub struct PaymentHandlerImpl {
     pub payment_repository: Arc<DynPaymentRepository>,
     pub debt_repository: Arc<DynDebtRepository>,
+    // TODO: remove this dependency when the event is built
+    pub debt_handler: Arc<DynDebtHandler>,
 }
 
 #[async_trait]
 impl PaymentHandler for PaymentHandlerImpl {
     async fn create_payment(&self, request: CreatePaymentRequest) -> HttpResult<Payment> {
-        let (mut debt, payment_data) = match request {
+        let (debt, payment_data) = match request {
             CreatePaymentRequest::PaymentRequestFromIdentification(data) => (
                 self.debt_repository
                     .get_by_identification(&data.debt_identification)
@@ -35,7 +37,7 @@ impl PaymentHandler for PaymentHandlerImpl {
             ),
             CreatePaymentRequest::PaymentRequestFromUuid(data) => (
                 self.debt_repository
-                    .get_by_id(data.debt_id)
+                    .get_by_id(&data.debt_id)
                     .await?
                     .or_not_found("debt", &data.debt_id.to_string())?,
                 data.payment_basic_data,
@@ -52,10 +54,9 @@ impl PaymentHandler for PaymentHandlerImpl {
         );
 
         let payment = self.payment_repository.insert(payment).await?;
-        
+
         // TODO: dispatch payment.created event
-        debt.payment_created(&payment);
-        self.debt_repository.update(debt).await?;
+        self.debt_handler.payment_created_event(&payment).await?;
 
         Ok(payment)
     }
@@ -68,7 +69,7 @@ pub mod use_cases {
     use uuid::Uuid;
 
     #[derive(Debug, Clone, Deserialize, Serialize)]
-    #[serde(rename_all = "camelCase")]
+    #[serde(untagged)]
     pub enum CreatePaymentRequest {
         PaymentRequestFromIdentification(PaymentRequestFromIdentification),
         PaymentRequestFromUuid(PaymentRequestFromUuid),

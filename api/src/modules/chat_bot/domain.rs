@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use crate::modules::chat_bot::domain::{debt::NewDebtData, payment::NewPaymentData};
 
 pub mod debt;
-pub mod payment;
 pub mod formatter;
+pub mod payment;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChatCommandType {

@@ -5,12 +5,9 @@ use std::fmt::Write;
 use util::{from_row_constructor, getters};
 use uuid::Uuid;
 
-use crate::{
-    modules::{
-        chat_bot::domain::formatter::{ChatFormatter, ChatFormatterUtils},
-        finance_manager::domain::payment::Payment,
-    },
-    utils::generate_random_identification,
+use crate::modules::{
+    chat_bot::domain::formatter::{ChatFormatter, ChatFormatterUtils},
+    finance_manager::domain::payment::Payment,
 };
 
 pub mod generator;
@@ -60,12 +57,11 @@ impl Debt {
         due_date: NaiveDate,
     ) -> Self {
         let uuid = Uuid::new_v4();
-        let identification = generate_random_identification(uuid);
 
         Self {
             id: uuid,
             account_id,
-            identification,
+            identification: String::new(), // database auto increment
             description,
             total_amount,
             paid_amount: paid_amount.unwrap_or(Decimal::ZERO),
@@ -143,6 +139,16 @@ impl From<DebtStatus> for String {
             DebtStatus::Unpaid => "UNPAID".to_string(),
             DebtStatus::PartiallyPaid => "PARTIALLY_PAID".to_string(),
             DebtStatus::Settled => "SETTLED".to_string(),
+        }
+    }
+}
+
+impl DebtStatus {
+    pub fn emoji(&self) -> &'static str {
+        match self {
+            DebtStatus::Unpaid => "🔴",
+            DebtStatus::PartiallyPaid => "🟡",
+            DebtStatus::Settled => "🟢",
         }
     }
 }
@@ -232,7 +238,7 @@ impl ChatFormatter for Debt {
     fn format_for_chat(&self) -> String {
         let mut output = String::new();
 
-        writeln!(output, "💰 *Debt: {}*", self.description()).unwrap();
+        writeln!(output, "💰 Débitos de {}", self.description()).unwrap();
         writeln!(output, "🆔 ID: {}", self.identification()).unwrap();
         writeln!(
             output,
@@ -280,26 +286,26 @@ impl ChatFormatter for Debt {
     /// Formats debt list for chat display
     fn format_list_for_chat(items: &[Self]) -> String {
         if items.is_empty() {
-            return "📝 *No debts found*".to_string();
+            return "📝 Nenhum débito encontrado".to_string();
         }
 
         let mut output = String::new();
-        writeln!(output, "📋 *Debt List ({})*", items.len()).unwrap();
+        writeln!(output, "📋 Lista de débitos").unwrap();
 
         for debt in items.iter() {
             writeln!(
                 output,
-                "\n🆔 *{}* - {}",
+                "\n{} {} - {}",
+                debt.status().emoji(),
                 debt.identification(),
                 debt.description()
             )
             .unwrap();
             writeln!(
                 output,
-                "   💵 {} | 📅 {} | {}",
+                "💵 {} | 📅 {}",
                 ChatFormatterUtils::format_currency(debt.remaining_amount()),
-                ChatFormatterUtils::format_date(debt.due_date()),
-                ChatFormatterUtils::format_debt_status(debt.status())
+                ChatFormatterUtils::format_date(debt.due_date())
             )
             .unwrap();
         }
@@ -309,7 +315,7 @@ impl ChatFormatter for Debt {
 
         writeln!(
             output,
-            "\n💼 *Total Outstanding: {}*",
+            "\n💼 Total em aberto: {}",
             ChatFormatterUtils::format_currency(&total_remaining)
         )
         .unwrap();
