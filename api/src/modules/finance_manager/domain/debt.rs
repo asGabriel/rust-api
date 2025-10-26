@@ -77,7 +77,7 @@ impl Debt {
     }
 
     pub fn payment_created(&mut self, payment: &Payment) {
-        self.paid_amount += payment.principal_amount();
+        self.paid_amount += payment.amount();
 
         self.recalculate_remaining_amount();
         self.recalculate_status();

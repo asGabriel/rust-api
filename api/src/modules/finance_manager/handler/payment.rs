@@ -44,21 +44,16 @@ impl PaymentHandler for PaymentHandlerImpl {
             ),
         };
 
-        let payment = Payment::new(
-            *debt.id(),
-            *debt.account_id(),
-            payment_data.amount,
-            payment_data.amount,
-            payment_data.discount_amount,
-            payment_data.payment_date,
-        );
+        let payment = Payment::new(&debt, &payment_data);
 
-        let payment = self.payment_repository.insert(payment).await?;
+        let payment_created = self.payment_repository.insert(payment).await?;
 
         // TODO: dispatch payment.created event
-        self.debt_handler.payment_created_event(&payment).await?;
+        self.debt_handler
+            .payment_created_event(&payment_created)
+            .await?;
 
-        Ok(payment)
+        Ok(payment_created)
     }
 }
 
@@ -67,6 +62,8 @@ pub mod use_cases {
     use rust_decimal::Decimal;
     use serde::{Deserialize, Serialize};
     use uuid::Uuid;
+
+    use crate::modules::finance_manager::domain::debt::Debt;
 
     #[derive(Debug, Clone, Deserialize, Serialize)]
     #[serde(untagged)]
@@ -95,7 +92,12 @@ pub mod use_cases {
     #[serde(rename_all = "camelCase")]
     pub struct PaymentBasicData {
         pub payment_date: NaiveDate,
-        pub amount: Decimal,
-        pub discount_amount: Option<Decimal>,
+        pub amount: Option<Decimal>,
+    }
+
+    impl PaymentBasicData {
+        pub fn amount(&self, debt: &Debt) -> Decimal {
+            self.amount.unwrap_or(*debt.remaining_amount())
+        }
     }
 }

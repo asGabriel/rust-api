@@ -4,11 +4,11 @@ use api::modules::{
     chat_bot::{gateway::TelegramGateway, handler::ChatBotHandlerImpl, ChatBotState},
     finance_manager::{
         handler::{
-            account::AccountHandlerImpl, debt::DebtHandlerImpl, payment::PaymentHandlerImpl,
+            account::AccountHandlerImpl, debt::DebtHandlerImpl, payment::PaymentHandlerImpl, recurrence::RecurrenceHandlerImpl,
         },
         repository::{
             account::AccountRepositoryImpl, debt::DebtRepositoryImpl,
-            payment::PaymentRepositoryImpl,
+            payment::PaymentRepositoryImpl, recurrence::RecurrenceRepositoryImpl,
         },
         FinanceManagerState,
     },
@@ -27,12 +27,14 @@ async fn main() {
     let payment_handler = build_payment_handler(pool);
     let debt_handler = build_debt_handler(pool);
     let account_handler = build_account_handler(pool);
+    let recurrence_handler = build_recurrence_handler(pool);
 
     // Build states
     let finance_manager_state = FinanceManagerState {
         payment_handler: Arc::new(payment_handler.clone()),
         debt_handler: Arc::new(debt_handler.clone()),
         account_handler: Arc::new(account_handler.clone()),
+        recurrence_handler: Arc::new(recurrence_handler.clone()),
     };
 
     let chat_bot_state = ChatBotState {
@@ -82,6 +84,13 @@ fn build_debt_handler(pool: &Pool<Postgres>) -> DebtHandlerImpl {
 
 fn build_account_handler(pool: &Pool<Postgres>) -> AccountHandlerImpl {
     AccountHandlerImpl {
+        account_repository: Arc::new(AccountRepositoryImpl::new(pool)),
+    }
+}
+
+fn build_recurrence_handler(pool: &Pool<Postgres>) -> RecurrenceHandlerImpl {
+    RecurrenceHandlerImpl {
+        recurrence_repository: Arc::new(RecurrenceRepositoryImpl::new(pool)),
         account_repository: Arc::new(AccountRepositoryImpl::new(pool)),
     }
 }

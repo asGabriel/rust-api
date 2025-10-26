@@ -15,8 +15,11 @@ pub async fn handle_events(
     state: State<AppState>,
     Json(payload): Json<TelegramUpdate>,
 ) -> HttpResult<impl IntoResponse> {
-    println!("Telegram update: {:?}", payload);
-    println!("Message: {:?}", payload.get_message());
+    println!(
+        "Message received from Telegram: {:?}, update_id: {}",
+        payload.get_message(),
+        payload.update_id
+    );
 
     // TODO: receber a mensagem salvar o payload e retornar um ok rapidamente;
     // Implementar alguma mensageria para processar a mensagem em background;

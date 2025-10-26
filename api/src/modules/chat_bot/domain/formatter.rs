@@ -1,3 +1,5 @@
+use chrono::{Datelike, NaiveDate, Utc};
+use http_error::HttpResult;
 use rust_decimal::Decimal;
 
 /// Trait for formatting data for chat display
@@ -67,5 +69,83 @@ impl ChatFormatterUtils {
             .map(|(i, item)| format!("{}. {}", i + 1, formatter(item)))
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    /// Parse a friendly date string into NaiveDate
+    /// Supports:
+    /// - "dd/mm/yyyy" or "dd/mm" (assumes current year)
+    /// - "dd-mm-yyyy" or "dd-mm"
+    /// - "dd.mm.yyyy" or "dd.mm"
+    /// - "hoje" or "today"
+    /// - "amanhã" or "tomorrow"
+    /// - "+n" or "em-n-dias" (n days from today)
+    pub fn parse_friendly_date(input: &str) -> HttpResult<NaiveDate> {
+        use http_error::HttpError;
+
+        let input = input.trim().to_lowercase();
+
+        // Special keywords
+        match input.as_str() {
+            "hoje" | "today" => return Ok(Utc::now().date_naive()),
+            "amanhã" | "tomorrow" => {
+                return Ok(Utc::now().date_naive() + chrono::Duration::days(1));
+            }
+            _ => {}
+        }
+
+        // "+n" or "em-n-dias" format
+        if input.starts_with('+') {
+            if let Ok(days) = input[1..].trim().parse::<i64>() {
+                return Ok(Utc::now().date_naive() + chrono::Duration::days(days));
+            }
+        }
+
+        if input.starts_with("em-") && input.ends_with("-dias") {
+            let days_str = &input[3..input.len() - 5];
+            if let Ok(days) = days_str.parse::<i64>() {
+                return Ok(Utc::now().date_naive() + chrono::Duration::days(days));
+            }
+        }
+
+        // Try parsing as dd/mm/yyyy, dd-mm-yyyy, or dd.mm.yyyy
+        let parts: Vec<&str> = input.split(|c| c == '/' || c == '-' || c == '.').collect();
+        if parts.len() >= 2 {
+            let day: u32 = parts[0].parse().map_err(|_| {
+                Box::new(HttpError::bad_request(format!(
+                    "Data inválida: dia '{}'",
+                    parts[0]
+                )))
+            })?;
+            let month: u32 = parts[1].parse().map_err(|_| {
+                Box::new(HttpError::bad_request(format!(
+                    "Data inválida: mês '{}'",
+                    parts[1]
+                )))
+            })?;
+            let year = if parts.len() >= 3 {
+                parts[2].parse().map_err(|_| {
+                    Box::new(HttpError::bad_request(format!(
+                        "Data inválida: ano '{}'",
+                        parts[2]
+                    )))
+                })?
+            } else {
+                Utc::now().year()
+            };
+
+            if let Some(date) = NaiveDate::from_ymd_opt(year, month, day) {
+                return Ok(date);
+            }
+        }
+
+        // Try parsing as ISO format (yyyy-mm-dd)
+        if let Ok(date) = input.parse::<NaiveDate>() {
+            return Ok(date);
+        }
+
+        Err(Box::new(HttpError::bad_request(format!(
+            "Data inválida: '{}'. Formatos aceitos: dd/mm/yyyy, dd/mm, hoje, amanhã, +n dias",
+            input
+        ))))
     }
 }

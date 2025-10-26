@@ -31,17 +31,23 @@ impl PaymentRepository for PaymentRepositoryImpl {
 
         let row = sqlx::query(
             r#"
-                INSERT INTO finance_manager.payment (id, debt_id, account_id, total_amount, principal_amount, discount_amount, payment_date, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                RETURNING id, debt_id, account_id, total_amount, principal_amount, discount_amount, payment_date, created_at, updated_at
+                INSERT INTO finance_manager.payment (
+                    id,
+                    debt_id,
+                    account_id,
+                    amount,
+                    payment_date,
+                    created_at,
+                    updated_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                RETURNING id, debt_id, account_id, amount, payment_date, created_at, updated_at
             "#
         )
         .bind(payload.id)
         .bind(payload.debt_id)
         .bind(payload.account_id)
-        .bind(payload.total_amount)
-        .bind(payload.principal_amount)
-        .bind(payload.discount_amount)
+        .bind(payload.amount)
         .bind(payload.payment_date)
         .bind(payload.created_at)
         .bind(payload.updated_at)
@@ -52,9 +58,7 @@ impl PaymentRepository for PaymentRepositoryImpl {
             id: row.get("id"),
             debt_id: row.get("debt_id"),
             account_id: row.get("account_id"),
-            total_amount: row.get("total_amount"),
-            principal_amount: row.get("principal_amount"),
-            discount_amount: row.get("discount_amount"),
+            amount: row.get("amount"),
             payment_date: row.get("payment_date"),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
@@ -77,9 +81,7 @@ pub mod dto {
         pub id: Uuid,
         pub debt_id: Uuid,
         pub account_id: Uuid,
-        pub total_amount: Decimal,
-        pub discount_amount: Decimal,
-        pub principal_amount: Decimal,
+        pub amount: Decimal,
         pub payment_date: NaiveDate,
         pub created_at: NaiveDateTime,
         pub updated_at: Option<NaiveDateTime>,
@@ -91,9 +93,7 @@ pub mod dto {
                 id: *payment.id(),
                 debt_id: *payment.debt_id(),
                 account_id: *payment.account_id(),
-                total_amount: *payment.total_amount(),
-                discount_amount: *payment.discount_amount(),
-                principal_amount: *payment.principal_amount(),
+                amount: *payment.amount(),
                 payment_date: payment.payment_date().clone(),
                 created_at: payment.created_at().naive_utc(),
                 updated_at: payment.updated_at().map(|dt| dt.naive_utc()),
@@ -107,9 +107,7 @@ pub mod dto {
                 dto.id,
                 dto.debt_id,
                 dto.account_id,
-                dto.total_amount,
-                dto.principal_amount,
-                dto.discount_amount,
+                dto.amount,
                 dto.payment_date,
                 dto.created_at.and_utc(),
                 dto.updated_at.map(|dt| dt.and_utc()),
