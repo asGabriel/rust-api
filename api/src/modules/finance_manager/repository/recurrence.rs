@@ -34,7 +34,7 @@ impl RecurrenceRepository for RecurrenceRepositoryImpl {
             sqlx::query(r#"SELECT * FROM finance_manager.recurrence ORDER BY created_at DESC"#)
                 .fetch_all(&self.pool)
                 .await?;
-            
+
         let results: Vec<RecurrenceEntity> = rows
             .into_iter()
             .map(|r| RecurrenceEntity {

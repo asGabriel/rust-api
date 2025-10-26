@@ -4,7 +4,8 @@ use api::modules::{
     chat_bot::{gateway::TelegramGateway, handler::ChatBotHandlerImpl, ChatBotState},
     finance_manager::{
         handler::{
-            account::AccountHandlerImpl, debt::DebtHandlerImpl, payment::PaymentHandlerImpl, recurrence::RecurrenceHandlerImpl,
+            account::AccountHandlerImpl, debt::DebtHandlerImpl, payment::PaymentHandlerImpl,
+            recurrence::RecurrenceHandlerImpl,
         },
         repository::{
             account::AccountRepositoryImpl, debt::DebtRepositoryImpl,

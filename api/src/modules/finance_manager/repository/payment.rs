@@ -42,7 +42,7 @@ impl PaymentRepository for PaymentRepositoryImpl {
                 )
                 VALUES ($1, $2, $3, $4, $5, $6, $7)
                 RETURNING id, debt_id, account_id, amount, payment_date, created_at, updated_at
-            "#
+            "#,
         )
         .bind(payload.id)
         .bind(payload.debt_id)

@@ -18,7 +18,10 @@ pub struct RecurrenceHandlerImpl {
 }
 
 impl RecurrenceHandlerImpl {
-    pub fn new(recurrence_repository: Arc<DynRecurrenceRepository>, account_repository: Arc<DynAccountRepository>) -> Self {
+    pub fn new(
+        recurrence_repository: Arc<DynRecurrenceRepository>,
+        account_repository: Arc<DynAccountRepository>,
+    ) -> Self {
         Self {
             recurrence_repository,
             account_repository,
