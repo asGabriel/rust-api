@@ -88,7 +88,6 @@ impl ChatBotHandlerImpl {
                     debt_identification: payment.debt_identification,
                     payment_basic_data: PaymentBasicData {
                         amount: payment.amount,
-                        discount_amount: payment.discount_amount,
                         payment_date: payment
                             .payment_date
                             .unwrap_or(chrono::Utc::now().date_naive()),
@@ -119,7 +118,7 @@ impl ChatBotHandlerImpl {
 impl ChatBotHandler for ChatBotHandlerImpl {
     async fn handle_command(&self, command: ChatCommand, chat_id: i64) -> HttpResult<()> {
         match command.command_type {
-            ChatCommandType::ListDebts => {
+            ChatCommandType::Summary => {
                 self.handle_list_debts(chat_id).await?;
 
                 Ok(())

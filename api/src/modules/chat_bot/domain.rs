@@ -7,13 +7,80 @@ pub mod debt;
 pub mod formatter;
 pub mod payment;
 
+/// Trait for command recognition
+trait CommandMatcher {
+    fn matches(&self, input: &str) -> bool;
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChatCommandType {
-    ListDebts,
+    Summary,
     ListAccounts,
     NewDebt(NewDebtData),
     NewPayment(NewPaymentData),
     Unknown(String),
+}
+
+impl ChatCommandType {
+    fn try_from_str(command_str: &str, parameters: &[String]) -> HttpResult<Self> {
+        let command_str_lower = command_str.to_lowercase();
+
+        match () {
+            _ if SummaryCommand.matches(&command_str_lower) => Ok(ChatCommandType::Summary),
+            _ if ListAccountsCommand.matches(&command_str_lower) => {
+                Ok(ChatCommandType::ListAccounts)
+            }
+            _ if NewDebtCommand.matches(&command_str_lower) => {
+                Ok(ChatCommandType::NewDebt(NewDebtData::try_from(parameters)?))
+            }
+            _ if NewPaymentCommand.matches(&command_str_lower) => Ok(ChatCommandType::NewPayment(
+                NewPaymentData::try_from(parameters)?,
+            )),
+            _ => Err(Box::new(HttpError::bad_request(format!(
+                "Comando desconhecido: '{}'",
+                command_str_lower
+            )))),
+        }
+    }
+}
+
+// Command variants
+struct SummaryCommand;
+struct ListAccountsCommand;
+struct NewDebtCommand;
+struct NewPaymentCommand;
+
+impl CommandMatcher for SummaryCommand {
+    fn matches(&self, input: &str) -> bool {
+        matches!(
+            input,
+            "resumo" | "summary" | "debitos" | "débitos" | "lista-debitos"
+        )
+    }
+}
+
+impl CommandMatcher for ListAccountsCommand {
+    fn matches(&self, input: &str) -> bool {
+        matches!(input, "contas" | "accounts" | "lista-contas")
+    }
+}
+
+impl CommandMatcher for NewDebtCommand {
+    fn matches(&self, input: &str) -> bool {
+        matches!(
+            input,
+            "nova-despesa" | "nova-conta" | "novo" | "despesa" | "new-debt" | "new"
+        )
+    }
+}
+
+impl CommandMatcher for NewPaymentCommand {
+    fn matches(&self, input: &str) -> bool {
+        matches!(
+            input,
+            "novo-pagamento" | "novo-payment" | "pagamento" | "payment" | "baixa" | "pagar"
+        )
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,34 +92,22 @@ pub struct ChatCommand {
 
 impl ChatCommand {
     /// Parse a message and extract the command.
+    /// Returns None if the message is not a command or parsing fails.
     pub fn from_message(text: &str) -> Option<Self> {
         let text = text.trim();
 
-        if !text.starts_with('/') {
-            return None;
-        }
+        // Split by '!' and remove spaces around
+        let parts: Vec<String> = text.split('!').map(|s| s.trim().to_string()).collect();
 
-        let parts: Vec<&str> = text[1..].split("!").collect();
         if parts.is_empty() {
             return None;
         }
 
         let command_str = parts[0].to_lowercase();
-        let parameters: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
+        let parameters: Vec<String> = parts[1..].to_vec();
 
-        let command_type = match command_str.as_str() {
-            "debitos" | "debts" | "débitos" => ChatCommandType::ListDebts,
-            "novo" | "new" => match NewDebtData::try_from(&parameters) {
-                Ok(data) => ChatCommandType::NewDebt(data),
-                Err(_) => return None,
-            },
-            "contas" | "accounts" => ChatCommandType::ListAccounts,
-            "pagamento" | "payment" | "baixa" => match NewPaymentData::try_from(&parameters) {
-                Ok(data) => ChatCommandType::NewPayment(data),
-                Err(_) => return None,
-            },
-            _ => ChatCommandType::Unknown(command_str),
-        };
+        // Silently fail on errors
+        let command_type = ChatCommandType::try_from_str(&command_str, &parameters).ok()?;
 
         Some(ChatCommand {
             command_type,
@@ -66,30 +121,19 @@ impl ChatCommand {
     pub fn from_message_with_errors(text: &str) -> HttpResult<Self> {
         let text = text.trim();
 
-        if !text.starts_with('/') {
-            return Err(Box::new(HttpError::bad_request(
-                "Comando deve começar com '/'",
-            )));
-        }
+        // Split by '!' and remove spaces around
+        let parts: Vec<String> = text.split('!').map(|s| s.trim().to_string()).collect();
 
-        let parts: Vec<&str> = text[1..].split("!").collect();
         if parts.is_empty() {
             return Err(Box::new(HttpError::bad_request(
-                "Comando inválido: formato esperado /comando!param1!param2",
+                "Comando inválido: formato esperado comando!param1!param2",
             )));
         }
 
         let command_str = parts[0].to_lowercase();
-        let parameters: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
+        let parameters: Vec<String> = parts[1..].to_vec();
 
-        let command_type = match command_str.as_str() {
-            "debitos" | "debts" | "débitos" => ChatCommandType::ListDebts,
-            "novo" | "new" => {
-                let data = NewDebtData::try_from(&parameters)?;
-                ChatCommandType::NewDebt(data)
-            }
-            _ => ChatCommandType::Unknown(command_str),
-        };
+        let command_type = ChatCommandType::try_from_str(&command_str, &parameters)?;
 
         Ok(ChatCommand {
             command_type,
@@ -104,8 +148,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_from_message_with_errors_valid_new_debt() {
-        let result = ChatCommand::from_message_with_errors("/novo!mercado da semana!500!ABCD");
+    fn test_from_message_with_errors_valid_new_debt_nova_conta() {
+        let result = ChatCommand::from_message_with_errors("nova-conta!mercado da semana!500!ABCD");
         assert!(result.is_ok());
 
         let command = result.unwrap();
@@ -120,8 +164,24 @@ mod tests {
     }
 
     #[test]
+    fn test_from_message_with_errors_valid_new_debt_nova_despesa() {
+        let result = ChatCommand::from_message_with_errors("nova-despesa!mercado!500!ABCD");
+        assert!(result.is_ok());
+
+        let command = result.unwrap();
+        match command.command_type {
+            ChatCommandType::NewDebt(data) => {
+                assert_eq!(data.description, "mercado");
+                assert_eq!(data.amount, rust_decimal::Decimal::new(500, 0));
+                assert_eq!(data.account_identification, "ABCD");
+            }
+            _ => panic!("Expected NewDebt command type"),
+        }
+    }
+
+    #[test]
     fn test_from_message_with_errors_invalid_new_debt() {
-        let result = ChatCommand::from_message_with_errors("/novo!mercado da semana!abc!ABCD");
+        let result = ChatCommand::from_message_with_errors("nova-conta!mercado da semana!abc!ABCD");
         assert!(result.is_err());
 
         let error = result.unwrap_err();
@@ -130,7 +190,7 @@ mod tests {
 
     #[test]
     fn test_from_message_with_errors_empty_description() {
-        let result = ChatCommand::from_message_with_errors("/novo!!500!ABCD");
+        let result = ChatCommand::from_message_with_errors("nova-conta!!500!ABCD");
         assert!(result.is_err());
 
         let error = result.unwrap_err();
@@ -139,7 +199,7 @@ mod tests {
 
     #[test]
     fn test_from_message_with_errors_insufficient_params() {
-        let result = ChatCommand::from_message_with_errors("/novo!descrição!100");
+        let result = ChatCommand::from_message_with_errors("nova-conta!descrição!100");
         assert!(result.is_err());
 
         let error = result.unwrap_err();
@@ -147,20 +207,41 @@ mod tests {
     }
 
     #[test]
-    fn test_from_message_with_errors_invalid_command_format() {
-        let result = ChatCommand::from_message_with_errors("hello world");
-        assert!(result.is_err());
-
-        let error = result.unwrap_err();
-        assert!(error.message.contains("deve começar com '/'"));
+    fn test_from_message_with_errors_spaces_around_exclamation() {
+        let result = ChatCommand::from_message_with_errors("nova-conta !mercado!500!ABCD");
+        assert!(result.is_ok()); // Should handle spaces correctly
     }
 
     #[test]
     fn test_from_message_with_errors_invalid_account_id() {
-        let result = ChatCommand::from_message_with_errors("/novo!descrição!100!ABC");
+        let result = ChatCommand::from_message_with_errors("nova-conta!descrição!100!ABC");
         assert!(result.is_err());
 
         let error = result.unwrap_err();
-        assert!(error.message.contains("exatamente 4 caracteres"));
+        assert!(error.message.contains("4 caracteres"));
+    }
+
+    #[test]
+    fn test_from_message_valid_summary() {
+        let result = ChatCommand::from_message("resumo");
+        assert!(result.is_some());
+
+        let command = result.unwrap();
+        match command.command_type {
+            ChatCommandType::Summary => {}
+            _ => panic!("Expected Summary command type"),
+        }
+    }
+
+    #[test]
+    fn test_from_message_valid_list_accounts() {
+        let result = ChatCommand::from_message("contas");
+        assert!(result.is_some());
+
+        let command = result.unwrap();
+        match command.command_type {
+            ChatCommandType::ListAccounts => {}
+            _ => panic!("Expected ListAccounts command type"),
+        }
     }
 }
