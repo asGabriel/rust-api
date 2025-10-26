@@ -81,6 +81,12 @@ impl ChatBotHandlerImpl {
         Ok(())
     }
 
+    async fn handle_help(&self, chat_id: i64) -> HttpResult<()> {
+        let message = ChatCommand::get_help_message();
+        self.send_message(chat_id, message).await?;
+        Ok(())
+    }
+
     async fn handle_new_payment(&self, payment: NewPaymentData, chat_id: i64) -> HttpResult<()> {
         self.payment_handler
             .create_payment(CreatePaymentRequest::PaymentRequestFromIdentification(
@@ -118,6 +124,10 @@ impl ChatBotHandlerImpl {
 impl ChatBotHandler for ChatBotHandlerImpl {
     async fn handle_command(&self, command: ChatCommand, chat_id: i64) -> HttpResult<()> {
         match command.command_type {
+            ChatCommandType::Help => {
+                self.handle_help(chat_id).await?;
+                Ok(())
+            }
             ChatCommandType::Summary => {
                 self.handle_list_debts(chat_id).await?;
 

@@ -62,7 +62,7 @@ from_row_constructor! {
 impl ChatFormatter for BankAccount {
     fn format_for_chat(&self) -> String {
         format!(
-            "🏦 *Account: {}*\n🆔 ID: {}\n👤 Owner: {}",
+            "🏦 Conta: {}\n🆔 ID: {}\n👤 Dono: {}",
             self.name(),
             self.identification(),
             self.owner()
@@ -70,11 +70,11 @@ impl ChatFormatter for BankAccount {
     }
 
     fn format_list_for_chat(items: &[Self]) -> String {
-        let mut output = format!("📋 *Account List ({})*", items.len());
+        let mut output = format!("📋 Contas cadastradas ({})", items.len());
 
         for account in items.iter() {
             output.push_str(&format!(
-                "\n🆔 *{}* - {}",
+                "\n🆔 {} - {}",
                 account.identification(),
                 account.name()
             ));

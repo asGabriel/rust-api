@@ -15,7 +15,7 @@ impl NewDebtData {
     pub fn try_from(parameters: &[String]) -> HttpResult<Self> {
         if parameters.len() < 3 {
             return Err(Box::new(HttpError::bad_request(
-                "Comando 'novo' requer 3 parâmetros: descrição, valor e identificação da conta (4 caracteres). Exemplo: /novo!descricao!valor!ABCD",
+                "Comando 'novo' requer 3 parâmetros: descrição, valor e identificação da conta. Exemplo: /novo!descricao!valor!ABC123",
             )));
         }
 
@@ -44,14 +44,12 @@ impl NewDebtData {
             )));
         }
 
-        // Validate account identification
+        // Validate account identification is not empty
         let account_id_trimmed = account_id.trim();
-        if account_id_trimmed.len() != 4 {
-            return Err(Box::new(HttpError::bad_request(format!(
-                "Identificação da conta deve ter exatamente 4 caracteres. Recebido: '{}' ({} caracteres)",
-                account_id_trimmed,
-                account_id_trimmed.len()
-            ))));
+        if account_id_trimmed.is_empty() {
+            return Err(Box::new(HttpError::bad_request(
+                "Identificação da conta não pode estar vazia",
+            )));
         }
 
         Ok(NewDebtData {
@@ -108,13 +106,27 @@ mod tests {
     }
 
     #[test]
-    fn test_try_from_invalid_account_id_length() {
+    fn test_try_from_empty_account_id() {
+        let params = vec!["descrição".to_string(), "100".to_string(), "".to_string()];
+        let result = NewDebtData::try_from(&params);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_try_from_valid_account_id_single_char() {
+        let params = vec!["descrição".to_string(), "100".to_string(), "1".to_string()];
+        let result = NewDebtData::try_from(&params);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_try_from_valid_account_id_short() {
         let params = vec![
             "descrição".to_string(),
             "100".to_string(),
             "ABC".to_string(),
         ];
         let result = NewDebtData::try_from(&params);
-        assert!(result.is_err());
+        assert!(result.is_ok());
     }
 }

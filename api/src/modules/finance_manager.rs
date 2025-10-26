@@ -4,7 +4,8 @@ use axum::Router;
 
 use crate::modules::{
     finance_manager::handler::{
-        account::DynAccountHandler, debt::DynDebtHandler, payment::DynPaymentHandler, recurrence::DynRecurrenceHandler,
+        account::DynAccountHandler, debt::DynDebtHandler, payment::DynPaymentHandler,
+        recurrence::DynRecurrenceHandler,
     },
     routes::AppState,
 };

@@ -25,27 +25,31 @@ pub async fn handle_events(
     // Implementar alguma mensageria para processar a mensagem em background;
     if let Some(message) = payload.get_message() {
         if let Some(text) = message.get_text() {
-            if let Some(command) = ChatCommand::from_message(text) {
-                println!("Comando recebido: {:?}", command);
-                state
-                    .chat_bot_state
-                    .chat_bot_handler
-                    .handle_command(command, message.chat.id)
-                    .await?;
-            } else {
-                println!(
-                    "Comando inválido, chat_id: {} em {}",
-                    message.chat.id,
-                    Utc::now().format("%Y-%m-%d %H:%M:%S")
-                );
-                state
-                    .chat_bot_state
-                    .telegram_gateway
-                    .send_message(SendMessageRequest {
-                        chat_id: message.chat.id,
-                        text: "Comando inválido".to_string(),
-                    })
-                    .await?;
+            match ChatCommand::from_message(text) {
+                Ok(command) => {
+                    println!("Comando recebido: {:?}", command);
+                    state
+                        .chat_bot_state
+                        .chat_bot_handler
+                        .handle_command(command, message.chat.id)
+                        .await?;
+                }
+                Err(e) => {
+                    println!(
+                        "Erro ao processar comando: {}, chat_id: {} em {}",
+                        e,
+                        message.chat.id,
+                        Utc::now().format("%Y-%m-%d %H:%M:%S")
+                    );
+                    state
+                        .chat_bot_state
+                        .telegram_gateway
+                        .send_message(SendMessageRequest {
+                            chat_id: message.chat.id,
+                            text: format!("❌ {}", e.message),
+                        })
+                        .await?;
+                }
             }
         }
     }
