@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use http_error::HttpResult;
-use sqlx::{Pool, Postgres};
+use sqlx::{Pool, Postgres, Row};
 
 use crate::modules::finance_manager::{
     domain::payment::Payment, repository::payment::dto::PaymentDto,
@@ -29,25 +29,36 @@ impl PaymentRepository for PaymentRepositoryImpl {
     async fn insert(&self, payment: Payment) -> HttpResult<Payment> {
         let payload = PaymentDto::from(payment);
 
-        let result = sqlx::query_as!(
-            PaymentDto,
+        let row = sqlx::query(
             r#"
                 INSERT INTO finance_manager.payment (id, debt_id, account_id, total_amount, principal_amount, discount_amount, payment_date, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7::DATE, $8, $9)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 RETURNING id, debt_id, account_id, total_amount, principal_amount, discount_amount, payment_date, created_at, updated_at
-            "#,
-            payload.id,
-            payload.debt_id,
-            payload.account_id,
-            payload.total_amount,
-            payload.principal_amount,
-            payload.discount_amount,
-            payload.payment_date,
-            payload.created_at,
-            payload.updated_at,
+            "#
         )
+        .bind(payload.id)
+        .bind(payload.debt_id)
+        .bind(payload.account_id)
+        .bind(payload.total_amount)
+        .bind(payload.principal_amount)
+        .bind(payload.discount_amount)
+        .bind(payload.payment_date)
+        .bind(payload.created_at)
+        .bind(payload.updated_at)
         .fetch_one(&self.pool)
         .await?;
+
+        let result = PaymentDto {
+            id: row.get("id"),
+            debt_id: row.get("debt_id"),
+            account_id: row.get("account_id"),
+            total_amount: row.get("total_amount"),
+            principal_amount: row.get("principal_amount"),
+            discount_amount: row.get("discount_amount"),
+            payment_date: row.get("payment_date"),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+        };
 
         Ok(Payment::from(result))
     }
@@ -57,12 +68,11 @@ pub mod dto {
     use chrono::{NaiveDate, NaiveDateTime};
     use rust_decimal::Decimal;
     use serde::{Deserialize, Serialize};
-    use sqlx::FromRow;
     use uuid::Uuid;
 
     use crate::modules::finance_manager::domain::payment::Payment;
 
-    #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct PaymentDto {
         pub id: Uuid,
         pub debt_id: Uuid,
