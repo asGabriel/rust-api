@@ -82,4 +82,3 @@ from_row_constructor! {
         updated_at: Option<DateTime<Utc>>,
     }
 }
-

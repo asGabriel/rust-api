@@ -17,6 +17,7 @@ pub trait AccountHandler {
     async fn list_accounts(&self) -> HttpResult<Vec<BankAccount>>;
 }
 
+#[derive(Clone)]
 pub struct AccountHandlerImpl {
     pub account_repository: Arc<DynAccountRepository>,
 }

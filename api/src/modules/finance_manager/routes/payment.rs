@@ -1,12 +1,23 @@
-use axum::{extract::State, response::IntoResponse, routing::get, Json, Router};
+use axum::{extract::State, response::IntoResponse, routing::post, Json, Router};
 use http_error::HttpResult;
 
-use crate::modules::routes::AppState;
+use crate::modules::{
+    finance_manager::handler::payment::use_cases::CreatePaymentRequest, routes::AppState,
+};
 
 pub fn configure_routes() -> Router<AppState> {
-    Router::new().nest("/payment", Router::new().route("/", get(get_payment)))
+    Router::new().nest("/payment", Router::new().route("/", post(create_payment)))
 }
 
-async fn get_payment(_state: State<AppState>) -> HttpResult<impl IntoResponse> {
-    Ok(Json("OK"))
+async fn create_payment(
+    state: State<AppState>,
+    Json(request): Json<CreatePaymentRequest>,
+) -> HttpResult<impl IntoResponse> {
+    let payment = state
+        .finance_manager_state
+        .payment_handler
+        .create_payment(request)
+        .await?;
+
+    Ok(Json(payment))
 }

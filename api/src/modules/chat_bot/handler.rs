@@ -17,9 +17,12 @@ use crate::modules::{
         handler::{
             account::DynAccountHandler,
             debt::{CreateDebtRequest, DynDebtHandler},
-            payment::{use_cases::{
-                CreatePaymentRequest, PaymentBasicData, PaymentRequestFromIdentification,
-            }, DynPaymentHandler},
+            payment::{
+                use_cases::{
+                    CreatePaymentRequest, PaymentBasicData, PaymentRequestFromIdentification,
+                },
+                DynPaymentHandler,
+            },
         },
     },
 };
@@ -128,20 +131,24 @@ impl ChatBotHandler for ChatBotHandlerImpl {
             }
             ChatCommandType::NewDebt(debt) => {
                 if let Err(e) = self.handle_new_debt(debt, chat_id).await {
-                    self.telegram_gateway.send_message(SendMessageRequest {
-                        chat_id,
-                        text: format!("Erro ao criar débito: {}", e),
-                    }).await?;
+                    self.telegram_gateway
+                        .send_message(SendMessageRequest {
+                            chat_id,
+                            text: format!("Erro ao criar débito: {}", e),
+                        })
+                        .await?;
                 }
 
                 Ok(())
             }
             ChatCommandType::NewPayment(payment) => {
                 if let Err(e) = self.handle_new_payment(payment, chat_id).await {
-                    self.telegram_gateway.send_message(SendMessageRequest {
-                        chat_id,
-                        text: format!("Erro ao criar pagamento: {}", e),
-                    }).await?;
+                    self.telegram_gateway
+                        .send_message(SendMessageRequest {
+                            chat_id,
+                            text: format!("Erro ao criar pagamento: {}", e),
+                        })
+                        .await?;
                 }
 
                 Ok(())

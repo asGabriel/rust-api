@@ -5,7 +5,10 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use crate::modules::finance_manager::{
-    domain::debt::{generator::DebtGenerator, Debt, DebtFilters, DebtStatus},
+    domain::{
+        debt::{generator::DebtGenerator, Debt, DebtFilters, DebtStatus},
+        payment::Payment,
+    },
     repository::{account::DynAccountRepository, debt::DynDebtRepository},
 };
 use std::sync::Arc;
@@ -16,8 +19,11 @@ pub type DynDebtHandler = dyn DebtHandler + Send + Sync;
 pub trait DebtHandler {
     async fn list_debts(&self, filters: DebtFilters) -> HttpResult<Vec<Debt>>;
     async fn create_debt(&self, request: CreateDebtRequest) -> HttpResult<Debt>;
+    /// Handles the payment created event by updating the debt
+    async fn payment_created_event(&self, payment: &Payment) -> HttpResult<()>;
 }
 
+#[derive(Clone)]
 pub struct DebtHandlerImpl {
     pub debt_repository: Arc<DynDebtRepository>,
     pub account_repository: Arc<DynAccountRepository>,
@@ -25,6 +31,19 @@ pub struct DebtHandlerImpl {
 
 #[async_trait]
 impl DebtHandler for DebtHandlerImpl {
+    async fn payment_created_event(&self, payment: &Payment) -> HttpResult<()> {
+        let mut debt = self
+            .debt_repository
+            .get_by_id(payment.debt_id())
+            .await?
+            .or_not_found("debt", &payment.debt_id().to_string())?;
+
+        debt.payment_created(&payment);
+        self.debt_repository.update(debt).await?;
+
+        Ok(())
+    }
+
     async fn create_debt(&self, request: CreateDebtRequest) -> HttpResult<Debt> {
         let account = self
             .account_repository

@@ -14,7 +14,7 @@ pub trait DebtRepository {
 
     async fn get_by_identification(&self, identification: &str) -> HttpResult<Option<Debt>>;
 
-    async fn get_by_id(&self, id: Uuid) -> HttpResult<Option<Debt>>;
+    async fn get_by_id(&self, id: &Uuid) -> HttpResult<Option<Debt>>;
 
     async fn update(&self, debt: Debt) -> HttpResult<Debt>;
 }
@@ -85,7 +85,7 @@ impl DebtRepository for DebtRepositoryImpl {
         Ok(Debt::from(debt_dto))
     }
 
-    async fn get_by_id(&self, id: Uuid) -> HttpResult<Option<Debt>> {
+    async fn get_by_id(&self, id: &Uuid) -> HttpResult<Option<Debt>> {
         let row = sqlx::query(
             r#"SELECT id, account_id, identification, description, total_amount, paid_amount, discount_amount, remaining_amount, due_date, status, created_at, updated_at FROM finance_manager.debt WHERE id = $1"#
         )
