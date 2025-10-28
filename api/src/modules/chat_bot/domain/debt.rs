@@ -15,6 +15,10 @@ pub struct NewDebtData {
 }
 
 impl NewDebtData {
+    pub fn is_paid(&self) -> bool {
+        self.is_paid
+    }
+
     /// Try to create a NewDebtData from parameters.
     /// Supports flexible parameter format:
     /// - Strings = description

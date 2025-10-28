@@ -151,6 +151,14 @@ impl DebtStatus {
             DebtStatus::Settled => "🟢",
         }
     }
+
+    pub fn to_pt_br(&self) -> &'static str {
+        match self {
+            DebtStatus::Unpaid => "Em aberto",
+            DebtStatus::PartiallyPaid => "Parcialmente pago",
+            DebtStatus::Settled => "Pago",
+        }
+    }
 }
 
 getters!(

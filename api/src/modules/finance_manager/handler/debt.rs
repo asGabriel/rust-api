@@ -75,6 +75,7 @@ pub struct CreateDebtRequest {
     pub discount_amount: Option<Decimal>,
     pub due_date: NaiveDate,
     pub status: Option<DebtStatus>,
+    pub is_paid: bool,
 }
 
 impl CreateDebtRequest {
@@ -83,6 +84,7 @@ impl CreateDebtRequest {
         description: String,
         total_amount: Decimal,
         due_date: Option<NaiveDate>,
+        is_paid: Option<bool>,
     ) -> Self {
         Self {
             account_identification,
@@ -92,6 +94,7 @@ impl CreateDebtRequest {
             discount_amount: None,
             due_date: due_date.unwrap_or(Utc::now().date_naive()),
             status: Some(DebtStatus::Unpaid),
+            is_paid: is_paid.unwrap_or(false),
         }
     }
 }

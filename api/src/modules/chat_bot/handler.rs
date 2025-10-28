@@ -13,7 +13,7 @@ use crate::modules::{
         gateway::DynTelegramApiGateway,
     },
     finance_manager::{
-        domain::debt::DebtFilters,
+        domain::debt::{DebtFilters, DebtStatus},
         handler::{
             account::DynAccountHandler,
             debt::{CreateDebtRequest, DynDebtHandler},
@@ -52,33 +52,29 @@ impl ChatBotHandlerImpl {
         Ok(())
     }
 
-    async fn handle_new_debt(&self, debt: NewDebtData, chat_id: i64) -> HttpResult<()> {
-        let paid_amount = if debt.is_paid {
-            debt.amount
-        } else {
-            rust_decimal::Decimal::ZERO
-        };
-        let status = if debt.is_paid {
-            crate::modules::finance_manager::domain::debt::DebtStatus::Settled
-        } else {
-            crate::modules::finance_manager::domain::debt::DebtStatus::Unpaid
-        };
-
-        self.debt_handler
+    async fn handle_new_debt(&self, request: NewDebtData, chat_id: i64) -> HttpResult<()> {
+        let debt = self
+            .debt_handler
             .create_debt(CreateDebtRequest {
-                account_identification: debt.account_identification,
-                description: debt.description,
-                total_amount: debt.amount,
-                paid_amount: Some(paid_amount),
+                account_identification: request.account_identification.clone(),
+                description: request.description.clone(),
+                total_amount: request.amount,
+                paid_amount: None,
                 discount_amount: Some(rust_decimal::Decimal::ZERO),
-                due_date: debt
+                due_date: request
                     .due_date
                     .unwrap_or_else(|| chrono::Utc::now().date_naive()),
-                status: Some(status),
+                status: Some(DebtStatus::Unpaid),
+                is_paid: request.is_paid(),
             })
             .await?;
 
-        let message = format!("✅ Despesa criada com sucesso!");
+        let message = format!(
+            "✅ Despesa criada com sucesso! {}, {} - {}",
+            debt.description(),
+            debt.total_amount(),
+            debt.due_date().format("%d/%m/%Y"),
+        );
         self.send_message(chat_id, message).await?;
 
         Ok(())
