@@ -76,6 +76,10 @@ impl Debt {
         }
     }
 
+    pub fn is_paid(&self) -> bool {
+        self.paid_amount == self.total_amount || self.paid_amount > self.total_amount
+    }
+
     pub fn payment_created(&mut self, payment: &Payment) {
         self.paid_amount += payment.amount();
 
@@ -149,6 +153,14 @@ impl DebtStatus {
             DebtStatus::Unpaid => "🔴",
             DebtStatus::PartiallyPaid => "🟡",
             DebtStatus::Settled => "🟢",
+        }
+    }
+
+    pub fn to_pt_br(&self) -> &'static str {
+        match self {
+            DebtStatus::Unpaid => "Em aberto",
+            DebtStatus::PartiallyPaid => "Parcialmente pago",
+            DebtStatus::Settled => "Pago",
         }
     }
 }

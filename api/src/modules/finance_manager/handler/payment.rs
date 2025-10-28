@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use http_error::{ext::OptionHttpExt, HttpResult};
+use http_error::{ext::OptionHttpExt, HttpError, HttpResult};
 
 use crate::modules::finance_manager::{
     domain::payment::Payment,
@@ -44,13 +44,17 @@ impl PaymentHandler for PaymentHandlerImpl {
             ),
         };
 
+        if debt.is_paid() {
+            return Err(Box::new(HttpError::bad_request("Dívida já paga")));
+        }
+
         let payment = Payment::new(&debt, &payment_data);
 
         let payment_created = self.payment_repository.insert(payment).await?;
 
         // TODO: dispatch payment.created event
         self.debt_handler
-            .payment_created_event(&payment_created)
+            .debt_updated_event(&payment_created)
             .await?;
 
         Ok(payment_created)
