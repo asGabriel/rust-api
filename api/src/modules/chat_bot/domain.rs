@@ -6,6 +6,7 @@ use crate::modules::chat_bot::domain::{debt::NewDebtData, payment::NewPaymentDat
 pub mod debt;
 pub mod formatter;
 pub mod payment;
+pub mod utils;
 
 /// Trait for command recognition
 trait CommandMatcher {
@@ -97,29 +98,26 @@ impl ChatCommand {
             r#"📚 *Comandos Disponíveis*
 
 📊 *Consulta*
-• `resumo` ou `summary` - Lista todos os débitos pendentes
+• `resumo` - Lista todos os débitos pendentes
 
 💳 *Contas*
-• `contas` ou `accounts` - Lista todas as contas cadastradas
+• `contas` - Lista todas as contas cadastradas
 
 ➕ *Criar Despesa*
-• `nova-despesa!descrição!valor!conta`
-  - Exemplo: `nova-despesa!Almoço!30!CON1`
-  - Ou: `despesa!Lanche!20!ABC`
+• `despesa descrição valor c:N [d:data] [p:s]`
+  - Exemplo: `despesa natação 150 c:2`
+  - Exemplo: `despesa mercado 400 c:1 p:s`
+  - Com data: `despesa almoço 30 c:3 d:2025-01-15`
+  - Prefixos: c:=conta, d:=data, p:s=pago/p:n=não pago
 
 💰 *Registrar Pagamento*
-• `pagamento!identificação!valor`
-  - Exemplo: `pagamento!123!30`
-  - Pagamento completo: `pagamento!123`
+• `pagamento identificação [valor] [data]`
+  - Exemplo: `pagamento 123`
+  - Com valor: `pagamento 123 150`
+  - Com data: `pagamento 123 150 2025-01-15`
 
 ❓ *Ajuda*
 • `help`, `ajuda` ou `?` - Mostra esta mensagem
-
-📝 *Formato dos Comandos*
-Use `!` para separar os parâmetros
-Exemplos:
-• `nova-despesa!Mercado!150!CON1`
-• `pagamento!123!150!2025-01-15`
 "#
         )
     }
@@ -129,14 +127,14 @@ Exemplos:
     pub fn from_message(text: &str) -> HttpResult<Self> {
         let text = text.trim();
 
-        // Split by '!' and remove spaces around
-        let parts: Vec<String> = text.split('!').map(|s| s.trim().to_string()).collect();
-
-        if parts.is_empty() {
+        if text.is_empty() {
             return Err(Box::new(HttpError::bad_request(
-                "Comando inválido: formato esperado comando!param1!param2",
+                "Comando inválido: mensagem vazia",
             )));
         }
+
+        // Split by space
+        let parts: Vec<String> = text.split_whitespace().map(|s| s.to_string()).collect();
 
         let command_str = parts[0].to_lowercase();
         let parameters: Vec<String> = parts[1..].to_vec();
@@ -156,88 +154,86 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_from_message_valid_new_debt_nova_conta() {
-        let result = ChatCommand::from_message("nova-conta!mercado da semana!500!ABCD");
+    fn test_from_message_valid_new_debt_example1() {
+        let result = ChatCommand::from_message("despesa natação 150 c:2");
         assert!(result.is_ok());
 
         let command = result.unwrap();
         match command.command_type {
             ChatCommandType::NewDebt(data) => {
-                assert_eq!(data.description, "mercado da semana");
-                assert_eq!(data.amount, rust_decimal::Decimal::new(500, 0));
-                assert_eq!(data.account_identification, "ABCD");
+                assert_eq!(data.description, "natação");
+                assert_eq!(data.amount, rust_decimal::Decimal::new(150, 0));
+                assert_eq!(data.account_identification, "2");
+                assert_eq!(data.is_paid, false);
             }
             _ => panic!("Expected NewDebt command type"),
         }
     }
 
     #[test]
-    fn test_from_message_valid_new_debt_nova_despesa() {
-        let result = ChatCommand::from_message("nova-despesa!mercado!500!ABCD");
+    fn test_from_message_valid_new_debt_example2() {
+        let result = ChatCommand::from_message("despesa mercado 400 c:1 p:s");
         assert!(result.is_ok());
 
         let command = result.unwrap();
         match command.command_type {
             ChatCommandType::NewDebt(data) => {
                 assert_eq!(data.description, "mercado");
-                assert_eq!(data.amount, rust_decimal::Decimal::new(500, 0));
-                assert_eq!(data.account_identification, "ABCD");
+                assert_eq!(data.amount, rust_decimal::Decimal::new(400, 0));
+                assert_eq!(data.account_identification, "1");
+                assert_eq!(data.is_paid, true);
             }
             _ => panic!("Expected NewDebt command type"),
         }
     }
 
     #[test]
-    fn test_from_message_invalid_new_debt() {
-        let result = ChatCommand::from_message("nova-conta!mercado da semana!abc!ABCD");
-        assert!(result.is_err());
-
-        let error = result.unwrap_err();
-        assert!(error.message.contains("Valor inválido"));
-    }
-
-    #[test]
-    fn test_from_message_empty_description() {
-        let result = ChatCommand::from_message("nova-conta!!500!ABCD");
-        assert!(result.is_err());
-
-        let error = result.unwrap_err();
-        assert!(error.message.contains("Descrição não pode estar vazia"));
-    }
-
-    #[test]
-    fn test_from_message_insufficient_params() {
-        let result = ChatCommand::from_message("nova-conta!descrição!100");
-        assert!(result.is_err());
-
-        let error = result.unwrap_err();
-        assert!(error.message.contains("3 parâmetros"));
-    }
-
-    #[test]
-    fn test_from_message_spaces_around_exclamation() {
-        let result = ChatCommand::from_message("nova-conta !mercado!500!ABCD");
-        assert!(result.is_ok()); // Should handle spaces correctly
-    }
-
-    #[test]
-    fn test_from_message_empty_account_id() {
-        let result = ChatCommand::from_message("nova-conta!descrição!100!");
-        assert!(result.is_err());
-
-        let error = result.unwrap_err();
-        assert!(error.message.contains("vazia"));
-    }
-
-    #[test]
-    fn test_from_message_valid_short_account_id() {
-        let result = ChatCommand::from_message("nova-conta!descrição!100!ABC");
+    fn test_from_message_valid_new_debt_with_date() {
+        let result = ChatCommand::from_message("despesa almoço 30 c:3 d:2025-01-15");
         assert!(result.is_ok());
+
+        let command = result.unwrap();
+        match command.command_type {
+            ChatCommandType::NewDebt(data) => {
+                assert_eq!(data.description, "almoço");
+                assert_eq!(data.amount, rust_decimal::Decimal::new(30, 0));
+                assert_eq!(data.account_identification, "3");
+                assert!(data.due_date.is_some());
+            }
+            _ => panic!("Expected NewDebt command type"),
+        }
     }
 
     #[test]
-    fn test_from_message_valid_single_char_account_id() {
-        let result = ChatCommand::from_message("nova-conta!descrição!100!1");
+    fn test_from_message_invalid_amount() {
+        let result = ChatCommand::from_message("despesa mercado abc c:1");
+        assert!(result.is_err());
+
+        let error = result.unwrap_err();
+        assert!(error.message.contains("Valor"));
+    }
+
+    #[test]
+    fn test_from_message_missing_amount() {
+        let result = ChatCommand::from_message("despesa mercado c:1");
+        assert!(result.is_err());
+
+        let error = result.unwrap_err();
+        assert!(error.message.contains("obrigatório"));
+    }
+
+    #[test]
+    fn test_from_message_missing_account() {
+        let result = ChatCommand::from_message("despesa mercado 100");
+        assert!(result.is_err());
+
+        let error = result.unwrap_err();
+        assert!(error.message.contains("Conta"));
+    }
+
+    #[test]
+    fn test_from_message_valid_description_from_number() {
+        let result = ChatCommand::from_message("despesa mercado 100 c:1");
         assert!(result.is_ok());
     }
 
@@ -295,7 +291,7 @@ mod tests {
         assert!(help_message.contains("Comandos Disponíveis"));
         assert!(help_message.contains("resumo"));
         assert!(help_message.contains("contas"));
-        assert!(help_message.contains("nova-despesa"));
+        assert!(help_message.contains("despesa"));
         assert!(help_message.contains("pagamento"));
     }
 }
