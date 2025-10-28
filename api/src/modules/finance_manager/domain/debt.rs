@@ -76,6 +76,10 @@ impl Debt {
         }
     }
 
+    pub fn is_paid(&self) -> bool {
+        self.paid_amount == self.total_amount || self.paid_amount > self.total_amount
+    }
+
     pub fn payment_created(&mut self, payment: &Payment) {
         self.paid_amount += payment.amount();
 

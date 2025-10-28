@@ -19,8 +19,8 @@ pub type DynDebtHandler = dyn DebtHandler + Send + Sync;
 pub trait DebtHandler {
     async fn list_debts(&self, filters: DebtFilters) -> HttpResult<Vec<Debt>>;
     async fn create_debt(&self, request: CreateDebtRequest) -> HttpResult<Debt>;
-    /// Handles the payment created event by updating the debt
-    async fn payment_created_event(&self, payment: &Payment) -> HttpResult<()>;
+    /// Handles the debt updated event by updating the debt
+    async fn debt_updated_event(&self, payment: &Payment) -> HttpResult<()>;
 }
 
 #[derive(Clone)]
@@ -31,7 +31,7 @@ pub struct DebtHandlerImpl {
 
 #[async_trait]
 impl DebtHandler for DebtHandlerImpl {
-    async fn payment_created_event(&self, payment: &Payment) -> HttpResult<()> {
+    async fn debt_updated_event(&self, payment: &Payment) -> HttpResult<()> {
         let mut debt = self
             .debt_repository
             .get_by_id(payment.debt_id())
