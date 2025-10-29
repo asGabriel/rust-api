@@ -309,11 +309,11 @@ impl ChatFormatter for Debt {
     /// Formats debt list for chat display
     fn format_list_for_chat(items: &[Self]) -> String {
         if items.is_empty() {
-            return "📝 Nenhum débito encontrado".to_string();
+            return "📝 Nenhuma despesa encontrada".to_string();
         }
 
         let mut output = String::new();
-        writeln!(output, "📋 Lista de débitos").unwrap();
+        writeln!(output, "📋 Lista de despesas").unwrap();
 
         for debt in items.iter() {
             writeln!(

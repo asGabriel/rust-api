@@ -4,11 +4,12 @@ use api::modules::{
     chat_bot::{gateway::TelegramGateway, handler::ChatBotHandlerImpl, ChatBotState},
     finance_manager::{
         handler::{
-            account::AccountHandlerImpl, debt::DebtHandlerImpl, payment::PaymentHandlerImpl,
-            pubsub::PubSubHandlerImpl, recurrence::RecurrenceHandlerImpl,
+            account::AccountHandlerImpl, debt::DebtHandlerImpl, income::IncomeHandlerImpl,
+            payment::PaymentHandlerImpl, pubsub::PubSubHandlerImpl,
+            recurrence::RecurrenceHandlerImpl,
         },
         repository::{
-            account::AccountRepositoryImpl, debt::DebtRepositoryImpl,
+            account::AccountRepositoryImpl, debt::DebtRepositoryImpl, income::IncomeRepositoryImpl,
             payment::PaymentRepositoryImpl, recurrence::RecurrenceRepositoryImpl,
         },
         FinanceManagerState,
@@ -29,6 +30,7 @@ async fn main() {
     let debt_handler = build_debt_handler(pool);
     let account_handler = build_account_handler(pool);
     let recurrence_handler = build_recurrence_handler(pool);
+    let income_handler = build_income_handler(pool);
 
     // Build states
     let finance_manager_state = FinanceManagerState {
@@ -36,6 +38,7 @@ async fn main() {
         debt_handler: Arc::new(debt_handler.clone()),
         account_handler: Arc::new(account_handler.clone()),
         recurrence_handler: Arc::new(recurrence_handler.clone()),
+        income_handler: Arc::new(income_handler.clone()),
     };
 
     let chat_bot_state = ChatBotState {
@@ -95,6 +98,13 @@ fn build_account_handler(pool: &Pool<Postgres>) -> AccountHandlerImpl {
 fn build_recurrence_handler(pool: &Pool<Postgres>) -> RecurrenceHandlerImpl {
     RecurrenceHandlerImpl {
         recurrence_repository: Arc::new(RecurrenceRepositoryImpl::new(pool)),
+        account_repository: Arc::new(AccountRepositoryImpl::new(pool)),
+    }
+}
+
+fn build_income_handler(pool: &Pool<Postgres>) -> IncomeHandlerImpl {
+    IncomeHandlerImpl {
+        income_repository: Arc::new(IncomeRepositoryImpl::new(pool)),
         account_repository: Arc::new(AccountRepositoryImpl::new(pool)),
     }
 }

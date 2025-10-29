@@ -149,7 +149,8 @@ impl ChatBotHandler for ChatBotHandlerImpl {
                 Ok(())
             }
             ChatCommandType::Summary(filters) => {
-                self.handle_list_debts(chat_id, filters.to_debt_filters()).await?;
+                self.handle_list_debts(chat_id, filters.to_debt_filters())
+                    .await?;
                 Ok(())
             }
             ChatCommandType::ListAccounts => {
