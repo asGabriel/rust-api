@@ -5,7 +5,7 @@ use http_error::{ext::OptionHttpExt, HttpError, HttpResult};
 
 use crate::modules::finance_manager::{
     domain::payment::Payment,
-    handler::{debt::DynDebtHandler, payment::use_cases::CreatePaymentRequest},
+    handler::{payment::use_cases::CreatePaymentRequest, pubsub::DynPubSubHandler},
     repository::{debt::DynDebtRepository, payment::DynPaymentRepository},
 };
 
@@ -20,8 +20,7 @@ pub trait PaymentHandler {
 pub struct PaymentHandlerImpl {
     pub payment_repository: Arc<DynPaymentRepository>,
     pub debt_repository: Arc<DynDebtRepository>,
-    // TODO: remove this dependency when the event is built
-    pub debt_handler: Arc<DynDebtHandler>,
+    pub pubsub: Arc<DynPubSubHandler>,
 }
 
 #[async_trait]
@@ -53,8 +52,8 @@ impl PaymentHandler for PaymentHandlerImpl {
         let payment_created = self.payment_repository.insert(payment).await?;
 
         // TODO: dispatch payment.created event
-        self.debt_handler
-            .debt_updated_event(&payment_created)
+        self.pubsub
+            .publish_debt_updated_event(&payment_created)
             .await?;
 
         Ok(payment_created)

@@ -5,7 +5,7 @@ use api::modules::{
     finance_manager::{
         handler::{
             account::AccountHandlerImpl, debt::DebtHandlerImpl, payment::PaymentHandlerImpl,
-            recurrence::RecurrenceHandlerImpl,
+            pubsub::PubSubHandlerImpl, recurrence::RecurrenceHandlerImpl,
         },
         repository::{
             account::AccountRepositoryImpl, debt::DebtRepositoryImpl,
@@ -56,7 +56,7 @@ async fn main() {
 
     let app: Router = routes::configure_services().with_state(app_state);
 
-    let port = std::env::var("PORT").expect("Could not fetch port data.");
+    let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
     let url = format!("0.0.0.0:{}", port);
 
     let listener = tokio::net::TcpListener::bind(url).await.unwrap();
@@ -69,9 +69,8 @@ fn build_payment_handler(pool: &Pool<Postgres>) -> PaymentHandlerImpl {
     PaymentHandlerImpl {
         payment_repository: Arc::new(PaymentRepositoryImpl::new(pool)),
         debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
-        debt_handler: Arc::new(DebtHandlerImpl {
+        pubsub: Arc::new(PubSubHandlerImpl {
             debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
-            account_repository: Arc::new(AccountRepositoryImpl::new(pool)),
         }),
     }
 }
@@ -80,6 +79,10 @@ fn build_debt_handler(pool: &Pool<Postgres>) -> DebtHandlerImpl {
     DebtHandlerImpl {
         debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
         account_repository: Arc::new(AccountRepositoryImpl::new(pool)),
+        payment_repository: Arc::new(PaymentRepositoryImpl::new(pool)),
+        pubsub: Arc::new(PubSubHandlerImpl {
+            debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
+        }),
     }
 }
 

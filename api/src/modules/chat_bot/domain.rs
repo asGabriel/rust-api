@@ -1,11 +1,14 @@
 use http_error::{HttpError, HttpResult};
 use serde::{Deserialize, Serialize};
 
-use crate::modules::chat_bot::domain::{debt::NewDebtData, payment::NewPaymentData};
+use crate::modules::chat_bot::domain::{
+    debt::NewDebtData, payment::NewPaymentData, summary::SummaryFilters,
+};
 
 pub mod debt;
 pub mod formatter;
 pub mod payment;
+pub mod summary;
 pub mod utils;
 
 /// Trait for command recognition
@@ -16,7 +19,7 @@ trait CommandMatcher {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChatCommandType {
     Help,
-    Summary,
+    Summary(SummaryFilters),
     ListAccounts,
     NewDebt(NewDebtData),
     NewPayment(NewPaymentData),
@@ -29,7 +32,9 @@ impl ChatCommandType {
 
         match () {
             _ if HelpCommand.matches(&command_str_lower) => Ok(ChatCommandType::Help),
-            _ if SummaryCommand.matches(&command_str_lower) => Ok(ChatCommandType::Summary),
+            _ if SummaryCommand.matches(&command_str_lower) => Ok(ChatCommandType::Summary(
+                SummaryFilters::try_from(parameters)?,
+            )),
             _ if ListAccountsCommand.matches(&command_str_lower) => {
                 Ok(ChatCommandType::ListAccounts)
             }
@@ -98,7 +103,10 @@ impl ChatCommand {
             r#"📚 *Comandos Disponíveis*
 
 📊 *Consulta*
-• `resumo` - Lista todos os débitos pendentes
+• `resumo` - Lista débitos do mês corrente
+• `resumo d:proximo` - Lista débitos do próximo mês
+• `resumo d:anterior` - Lista débitos do mês anterior
+• `resumo d:06-25` ou `resumo d:jun/25` - Lista débitos de um mês específico
 
 💳 *Contas*
 • `contas` - Lista todas as contas cadastradas
@@ -244,7 +252,7 @@ mod tests {
 
         let command = result.unwrap();
         match command.command_type {
-            ChatCommandType::Summary => {}
+            ChatCommandType::Summary(_) => {}
             _ => panic!("Expected Summary command type"),
         }
     }

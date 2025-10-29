@@ -6,10 +6,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::modules::finance_manager::{
     domain::{
-        debt::{generator::DebtGenerator, Debt, DebtFilters, DebtStatus},
+        debt::{Debt, DebtFilters, DebtStatus},
         payment::Payment,
     },
-    repository::{account::DynAccountRepository, debt::DynDebtRepository},
+    handler::{payment::use_cases::PaymentBasicData, pubsub::DynPubSubHandler},
+    repository::{
+        account::DynAccountRepository, debt::DynDebtRepository, payment::DynPaymentRepository,
+    },
 };
 use std::sync::Arc;
 
@@ -19,31 +22,18 @@ pub type DynDebtHandler = dyn DebtHandler + Send + Sync;
 pub trait DebtHandler {
     async fn list_debts(&self, filters: DebtFilters) -> HttpResult<Vec<Debt>>;
     async fn create_debt(&self, request: CreateDebtRequest) -> HttpResult<Debt>;
-    /// Handles the debt updated event by updating the debt
-    async fn debt_updated_event(&self, payment: &Payment) -> HttpResult<()>;
 }
 
 #[derive(Clone)]
 pub struct DebtHandlerImpl {
     pub debt_repository: Arc<DynDebtRepository>,
     pub account_repository: Arc<DynAccountRepository>,
+    pub payment_repository: Arc<DynPaymentRepository>,
+    pub pubsub: Arc<DynPubSubHandler>,
 }
 
 #[async_trait]
 impl DebtHandler for DebtHandlerImpl {
-    async fn debt_updated_event(&self, payment: &Payment) -> HttpResult<()> {
-        let mut debt = self
-            .debt_repository
-            .get_by_id(payment.debt_id())
-            .await?
-            .or_not_found("debt", &payment.debt_id().to_string())?;
-
-        debt.payment_created(&payment);
-        self.debt_repository.update(debt).await?;
-
-        Ok(())
-    }
-
     async fn create_debt(&self, request: CreateDebtRequest) -> HttpResult<Debt> {
         let account = self
             .account_repository
@@ -51,9 +41,24 @@ impl DebtHandler for DebtHandlerImpl {
             .await?
             .or_not_found("account", &request.account_identification)?;
 
-        let debt = DebtGenerator::generate_debt_from_request(request, *account.id());
+        let debt = Debt::from_request(&request, *account.id());
 
         let debt = self.debt_repository.insert(debt).await?;
+
+        // TODO: dispatch payment create event
+        if request.is_paid {
+            let payment = Payment::new(
+                &debt,
+                &PaymentBasicData {
+                    amount: Some(*debt.total_amount()),
+                    payment_date: request.due_date,
+                },
+            );
+
+            let payment = self.payment_repository.insert(payment).await?;
+
+            self.pubsub.publish_debt_updated_event(&payment).await?;
+        }
 
         Ok(debt)
     }
