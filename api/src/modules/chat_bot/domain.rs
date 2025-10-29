@@ -2,11 +2,12 @@ use http_error::{HttpError, HttpResult};
 use serde::{Deserialize, Serialize};
 
 use crate::modules::chat_bot::domain::{
-    debt::NewDebtData, payment::NewPaymentData, summary::SummaryFilters,
+    debt::NewDebtData, income::NewIncomeData, payment::NewPaymentData, summary::SummaryFilters,
 };
 
 pub mod debt;
 pub mod formatter;
+pub mod income;
 pub mod payment;
 pub mod summary;
 pub mod utils;
@@ -20,7 +21,9 @@ trait CommandMatcher {
 pub enum ChatCommandType {
     Help,
     Summary(SummaryFilters),
+    ListIncomes,
     ListAccounts,
+    NewIncome(NewIncomeData),
     NewDebt(NewDebtData),
     NewPayment(NewPaymentData),
     Unknown(String),
@@ -38,6 +41,10 @@ impl ChatCommandType {
             _ if ListAccountsCommand.matches(&command_str_lower) => {
                 Ok(ChatCommandType::ListAccounts)
             }
+            _ if ListIncomesCommand.matches(&command_str_lower) => Ok(ChatCommandType::ListIncomes),
+            _ if NewIncomeCommand.matches(&command_str_lower) => Ok(ChatCommandType::NewIncome(
+                NewIncomeData::try_from(parameters)?,
+            )),
             _ if NewDebtCommand.matches(&command_str_lower) => {
                 Ok(ChatCommandType::NewDebt(NewDebtData::try_from(parameters)?))
             }
@@ -58,6 +65,8 @@ struct SummaryCommand;
 struct ListAccountsCommand;
 struct NewDebtCommand;
 struct NewPaymentCommand;
+struct ListIncomesCommand;
+struct NewIncomeCommand;
 
 impl CommandMatcher for HelpCommand {
     fn matches(&self, input: &str) -> bool {
@@ -86,6 +95,18 @@ impl CommandMatcher for NewDebtCommand {
 impl CommandMatcher for NewPaymentCommand {
     fn matches(&self, input: &str) -> bool {
         matches!(input, "novo-pagamento" | "pagamento" | "baixa" | "pagar")
+    }
+}
+
+impl CommandMatcher for ListIncomesCommand {
+    fn matches(&self, input: &str) -> bool {
+        matches!(input, "receitas" | "lista-receitas")
+    }
+}
+
+impl CommandMatcher for NewIncomeCommand {
+    fn matches(&self, input: &str) -> bool {
+        matches!(input, "nova-entrada" | "entrada")
     }
 }
 
@@ -123,6 +144,16 @@ impl ChatCommand {
   - Exemplo: `pagamento 123`
   - Com valor: `pagamento 123 150`
   - Com data: `pagamento 123 150 2025-01-15`
+
+📈 *Receitas*
+• `receitas` - Lista todas as receitas cadastradas
+
+💵 *Criar Receita*
+• `entrada descrição valor c:N [d:data]`
+  - Exemplo: `entrada salario 5000 c:1`
+  - Exemplo: `entrada freelance 1500 c:2 d:hoje`
+  - Com data: `entrada bonus 2000 c:1 d:15/01/2025`
+  - Prefixos: c:=conta, d:=data (usa hoje se não fornecido)
 
 ❓ *Ajuda*
 • `help`, `ajuda` ou `?` - Mostra esta mensagem
@@ -301,5 +332,7 @@ mod tests {
         assert!(help_message.contains("contas"));
         assert!(help_message.contains("despesa"));
         assert!(help_message.contains("pagamento"));
+        assert!(help_message.contains("receitas"));
+        assert!(help_message.contains("entrada"));
     }
 }
