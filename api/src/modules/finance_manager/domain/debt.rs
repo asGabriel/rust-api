@@ -7,10 +7,8 @@ use uuid::Uuid;
 
 use crate::modules::{
     chat_bot::domain::formatter::{ChatFormatter, ChatFormatterUtils},
-    finance_manager::domain::payment::Payment,
+    finance_manager::{domain::payment::Payment, handler::debt::CreateDebtRequest},
 };
-
-pub mod generator;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -57,6 +55,9 @@ impl Debt {
         due_date: NaiveDate,
     ) -> Self {
         let uuid = Uuid::new_v4();
+        let remaining_amount = total_amount
+            - paid_amount.unwrap_or(Decimal::ZERO)
+            - discount_amount.unwrap_or(Decimal::ZERO);
 
         Self {
             id: uuid,
@@ -66,14 +67,24 @@ impl Debt {
             total_amount,
             paid_amount: paid_amount.unwrap_or(Decimal::ZERO),
             discount_amount: discount_amount.unwrap_or(Decimal::ZERO),
-            remaining_amount: total_amount
-                - paid_amount.unwrap_or(Decimal::ZERO)
-                - discount_amount.unwrap_or(Decimal::ZERO),
+            remaining_amount,
             due_date,
             status: DebtStatus::default(),
             created_at: Utc::now(),
             updated_at: None,
         }
+    }
+
+    /// Generates a debt from a create debt request
+    pub fn from_request(request: &CreateDebtRequest, account_id: Uuid) -> Self {
+        Self::new(
+            account_id,
+            request.description.clone(),
+            request.total_amount.clone(),
+            request.paid_amount.clone(),
+            request.discount_amount.clone(),
+            request.due_date.clone(),
+        )
     }
 
     pub fn is_paid(&self) -> bool {
@@ -298,11 +309,11 @@ impl ChatFormatter for Debt {
     /// Formats debt list for chat display
     fn format_list_for_chat(items: &[Self]) -> String {
         if items.is_empty() {
-            return "📝 Nenhum débito encontrado".to_string();
+            return "📝 Nenhuma despesa encontrada".to_string();
         }
 
         let mut output = String::new();
-        writeln!(output, "📋 Lista de débitos").unwrap();
+        writeln!(output, "📋 Lista de despesas").unwrap();
 
         for debt in items.iter() {
             writeln!(

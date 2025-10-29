@@ -1,11 +1,15 @@
 use http_error::{HttpError, HttpResult};
 use serde::{Deserialize, Serialize};
 
-use crate::modules::chat_bot::domain::{debt::NewDebtData, payment::NewPaymentData};
+use crate::modules::chat_bot::domain::{
+    debt::NewDebtData, income::NewIncomeData, payment::NewPaymentData, summary::SummaryFilters,
+};
 
 pub mod debt;
 pub mod formatter;
+pub mod income;
 pub mod payment;
+pub mod summary;
 pub mod utils;
 
 /// Trait for command recognition
@@ -16,8 +20,10 @@ trait CommandMatcher {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChatCommandType {
     Help,
-    Summary,
+    Summary(SummaryFilters),
+    ListIncomes,
     ListAccounts,
+    NewIncome(NewIncomeData),
     NewDebt(NewDebtData),
     NewPayment(NewPaymentData),
     Unknown(String),
@@ -29,10 +35,16 @@ impl ChatCommandType {
 
         match () {
             _ if HelpCommand.matches(&command_str_lower) => Ok(ChatCommandType::Help),
-            _ if SummaryCommand.matches(&command_str_lower) => Ok(ChatCommandType::Summary),
+            _ if SummaryCommand.matches(&command_str_lower) => Ok(ChatCommandType::Summary(
+                SummaryFilters::try_from(parameters)?,
+            )),
             _ if ListAccountsCommand.matches(&command_str_lower) => {
                 Ok(ChatCommandType::ListAccounts)
             }
+            _ if ListIncomesCommand.matches(&command_str_lower) => Ok(ChatCommandType::ListIncomes),
+            _ if NewIncomeCommand.matches(&command_str_lower) => Ok(ChatCommandType::NewIncome(
+                NewIncomeData::try_from(parameters)?,
+            )),
             _ if NewDebtCommand.matches(&command_str_lower) => {
                 Ok(ChatCommandType::NewDebt(NewDebtData::try_from(parameters)?))
             }
@@ -53,6 +65,8 @@ struct SummaryCommand;
 struct ListAccountsCommand;
 struct NewDebtCommand;
 struct NewPaymentCommand;
+struct ListIncomesCommand;
+struct NewIncomeCommand;
 
 impl CommandMatcher for HelpCommand {
     fn matches(&self, input: &str) -> bool {
@@ -84,6 +98,18 @@ impl CommandMatcher for NewPaymentCommand {
     }
 }
 
+impl CommandMatcher for ListIncomesCommand {
+    fn matches(&self, input: &str) -> bool {
+        matches!(input, "receitas" | "lista-receitas")
+    }
+}
+
+impl CommandMatcher for NewIncomeCommand {
+    fn matches(&self, input: &str) -> bool {
+        matches!(input, "nova-entrada" | "entrada")
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatCommand {
     pub command_type: ChatCommandType,
@@ -98,7 +124,10 @@ impl ChatCommand {
             r#"📚 *Comandos Disponíveis*
 
 📊 *Consulta*
-• `resumo` - Lista todos os débitos pendentes
+• `resumo` - Lista débitos do mês corrente
+• `resumo d:proximo` - Lista débitos do próximo mês
+• `resumo d:anterior` - Lista débitos do mês anterior
+• `resumo d:06-25` ou `resumo d:jun/25` - Lista débitos de um mês específico
 
 💳 *Contas*
 • `contas` - Lista todas as contas cadastradas
@@ -115,6 +144,16 @@ impl ChatCommand {
   - Exemplo: `pagamento 123`
   - Com valor: `pagamento 123 150`
   - Com data: `pagamento 123 150 2025-01-15`
+
+📈 *Receitas*
+• `receitas` - Lista todas as receitas cadastradas
+
+💵 *Criar Receita*
+• `entrada descrição valor c:N [d:data]`
+  - Exemplo: `entrada salario 5000 c:1`
+  - Exemplo: `entrada freelance 1500 c:2 d:hoje`
+  - Com data: `entrada bonus 2000 c:1 d:15/01/2025`
+  - Prefixos: c:=conta, d:=data (usa hoje se não fornecido)
 
 ❓ *Ajuda*
 • `help`, `ajuda` ou `?` - Mostra esta mensagem
@@ -244,7 +283,7 @@ mod tests {
 
         let command = result.unwrap();
         match command.command_type {
-            ChatCommandType::Summary => {}
+            ChatCommandType::Summary(_) => {}
             _ => panic!("Expected Summary command type"),
         }
     }
@@ -293,5 +332,7 @@ mod tests {
         assert!(help_message.contains("contas"));
         assert!(help_message.contains("despesa"));
         assert!(help_message.contains("pagamento"));
+        assert!(help_message.contains("receitas"));
+        assert!(help_message.contains("entrada"));
     }
 }

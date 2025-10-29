@@ -42,8 +42,8 @@ pub struct ChatBotHandlerImpl {
 }
 
 impl ChatBotHandlerImpl {
-    pub async fn handle_list_debts(&self, chat_id: i64) -> HttpResult<()> {
-        let result = self.debt_handler.list_debts(DebtFilters::default()).await;
+    pub async fn handle_list_debts(&self, chat_id: i64, filters: DebtFilters) -> HttpResult<()> {
+        let result = self.debt_handler.list_debts(filters).await;
 
         let message = match result {
             Ok(debts) => ChatFormatter::format_list_for_chat(&debts),
@@ -148,27 +148,21 @@ impl ChatBotHandler for ChatBotHandlerImpl {
                 self.handle_help(chat_id).await?;
                 Ok(())
             }
-            ChatCommandType::Summary => {
-                self.handle_list_debts(chat_id).await?;
+            ChatCommandType::Summary(filters) => {
+                self.handle_list_debts(chat_id, filters.to_debt_filters())
+                    .await?;
                 Ok(())
             }
             ChatCommandType::ListAccounts => {
                 self.handle_list_accounts(chat_id).await?;
                 Ok(())
             }
-            ChatCommandType::NewDebt(debt) => {
-                self.handle_new_debt(debt, chat_id).await?;
+            ChatCommandType::NewDebt(payload) => {
+                self.handle_new_debt(payload, chat_id).await?;
                 Ok(())
             }
             ChatCommandType::NewPayment(payment) => {
-                if let Err(e) = self.handle_new_payment(payment, chat_id).await {
-                    self.telegram_gateway
-                        .send_message(SendMessageRequest {
-                            chat_id,
-                            text: format!("Erro ao criar pagamento: {}", e),
-                        })
-                        .await?;
-                }
+                self.handle_new_payment(payment, chat_id).await?;
 
                 Ok(())
             }
