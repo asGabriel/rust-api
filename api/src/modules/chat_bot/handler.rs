@@ -7,8 +7,8 @@ use telegram_api::domain::send_message::SendMessageRequest;
 use crate::modules::{
     chat_bot::{
         domain::{
-            debt::NewDebtData, formatter::ChatFormatter, payment::NewPaymentData, ChatCommand,
-            ChatCommandType,
+            debt::NewDebtData, formatter::ChatFormatter, income::NewIncomeData,
+            payment::NewPaymentData, ChatCommand, ChatCommandType,
         },
         gateway::DynTelegramApiGateway,
     },
@@ -17,6 +17,7 @@ use crate::modules::{
         handler::{
             account::DynAccountHandler,
             debt::{CreateDebtRequest, DynDebtHandler},
+            income::{use_cases::CreateIncomeRequest, DynIncomeHandler},
             payment::{
                 use_cases::{
                     CreatePaymentRequest, PaymentBasicData, PaymentRequestFromIdentification,
@@ -39,6 +40,7 @@ pub struct ChatBotHandlerImpl {
     pub debt_handler: Arc<DynDebtHandler>,
     pub account_handler: Arc<DynAccountHandler>,
     pub payment_handler: Arc<DynPaymentHandler>,
+    pub income_handler: Arc<DynIncomeHandler>,
 }
 
 impl ChatBotHandlerImpl {
@@ -128,6 +130,36 @@ impl ChatBotHandlerImpl {
         Ok(())
     }
 
+    async fn handle_list_incomes(&self, chat_id: i64) -> HttpResult<()> {
+        let result = self.income_handler.list_incomes().await;
+        let message = match result {
+            Ok(incomes) => ChatFormatter::format_list_for_chat(&incomes),
+            Err(e) => format!("❌ Erro ao listar receitas: {}", e.message),
+        };
+        self.send_message(chat_id, message).await?;
+        Ok(())
+    }
+
+    async fn handle_new_income(&self, income: NewIncomeData, chat_id: i64) -> HttpResult<()> {
+        let result = self
+            .income_handler
+            .create_income(CreateIncomeRequest {
+                account_identification: income.account_identification,
+                description: income.description,
+                amount: income.amount,
+                date_reference: income.date_reference,
+            })
+            .await;
+
+        let message = match result {
+            Ok(_) => "✅ Receita criada com sucesso!".to_string(),
+            Err(e) => format!("❌ Erro ao criar receita: {}", e.message),
+        };
+
+        self.send_message(chat_id, message).await?;
+        Ok(())
+    }
+
     async fn send_message(&self, chat_id: i64, message: String) -> HttpResult<()> {
         self.telegram_gateway
             .send_message(SendMessageRequest {
@@ -164,6 +196,14 @@ impl ChatBotHandler for ChatBotHandlerImpl {
             ChatCommandType::NewPayment(payment) => {
                 self.handle_new_payment(payment, chat_id).await?;
 
+                Ok(())
+            }
+            ChatCommandType::ListIncomes => {
+                self.handle_list_incomes(chat_id).await?;
+                Ok(())
+            }
+            ChatCommandType::NewIncome(income) => {
+                self.handle_new_income(income, chat_id).await?;
                 Ok(())
             }
             _ => Ok(()),

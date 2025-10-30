@@ -33,6 +33,7 @@ impl ChatCommandType {
     fn try_from_str(command_str: &str, parameters: &[String]) -> HttpResult<Self> {
         let command_str_lower = command_str.to_lowercase();
 
+        // TODO: melhorar esse trecho
         match () {
             _ if HelpCommand.matches(&command_str_lower) => Ok(ChatCommandType::Help),
             _ if SummaryCommand.matches(&command_str_lower) => Ok(ChatCommandType::Summary(

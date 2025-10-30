@@ -43,6 +43,7 @@ async fn main() {
 
     let chat_bot_state = ChatBotState {
         chat_bot_handler: Arc::new(ChatBotHandlerImpl {
+            income_handler: Arc::new(income_handler.clone()),
             payment_handler: Arc::new(payment_handler.clone()),
             debt_handler: Arc::new(debt_handler.clone()),
             account_handler: Arc::new(account_handler.clone()),
