@@ -4,7 +4,10 @@ use serde::{Deserialize, Serialize};
 use util::{from_row_constructor, getters};
 use uuid::Uuid;
 
-use crate::modules::{chat_bot::domain::formatter::ChatFormatter, finance_manager::handler::income::use_cases::CreateIncomeRequest};
+use crate::modules::{
+    chat_bot::domain::formatter::ChatFormatter,
+    finance_manager::handler::income::use_cases::CreateIncomeRequest,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
