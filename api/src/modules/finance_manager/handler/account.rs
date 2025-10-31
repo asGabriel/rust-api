@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use http_error::HttpResult;
-use serde::{Deserialize, Serialize};
 
 use crate::modules::finance_manager::{
-    domain::account::BankAccount, repository::account::DynAccountRepository,
+    domain::account::BankAccount, handler::account::use_cases::CreateAccountRequest,
+    repository::account::DynAccountRepository,
 };
 
 pub type DynAccountHandler = dyn AccountHandler + Send + Sync;
@@ -25,7 +25,8 @@ pub struct AccountHandlerImpl {
 #[async_trait]
 impl AccountHandler for AccountHandlerImpl {
     async fn create_account(&self, request: CreateAccountRequest) -> HttpResult<BankAccount> {
-        let bank_account = BankAccount::new(request.name, request.owner);
+        let bank_account = BankAccount::from(request);
+
         self.account_repository.insert(bank_account).await
     }
 
@@ -34,11 +35,16 @@ impl AccountHandler for AccountHandlerImpl {
     }
 }
 
-// USE CASES
+pub mod use_cases {
+    use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateAccountRequest {
-    name: String,
-    owner: String,
+    use crate::modules::finance_manager::domain::account::configuration::AccountConfiguration;
+
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct CreateAccountRequest {
+        pub name: String,
+        pub owner: String,
+        pub configuration: Option<AccountConfiguration>,
+    }
 }

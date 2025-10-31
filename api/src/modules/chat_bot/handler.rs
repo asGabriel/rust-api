@@ -66,9 +66,7 @@ impl ChatBotHandlerImpl {
                 total_amount: request.amount,
                 paid_amount: None,
                 discount_amount: Some(rust_decimal::Decimal::ZERO),
-                due_date: request
-                    .due_date
-                    .unwrap_or_else(|| chrono::Utc::now().date_naive()),
+                due_date: request.due_date,
                 status: Some(DebtStatus::Unpaid),
                 is_paid: request.is_paid(),
             })

@@ -1,7 +1,9 @@
 use axum::{extract::State, response::IntoResponse, routing::post, Json, Router};
 use http_error::HttpResult;
 
-use crate::modules::{finance_manager::handler::account::CreateAccountRequest, routes::AppState};
+use crate::modules::{
+    finance_manager::handler::account::use_cases::CreateAccountRequest, routes::AppState,
+};
 
 pub fn configure_routes() -> Router<AppState> {
     Router::new().nest(

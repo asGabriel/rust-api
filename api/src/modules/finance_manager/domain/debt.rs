@@ -1,4 +1,5 @@
 use chrono::{DateTime, NaiveDate, Utc};
+use http_error::{HttpError, HttpResult};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
@@ -7,7 +8,10 @@ use uuid::Uuid;
 
 use crate::modules::{
     chat_bot::domain::formatter::{ChatFormatter, ChatFormatterUtils},
-    finance_manager::{domain::payment::Payment, handler::debt::use_cases::CreateDebtRequest},
+    finance_manager::{
+        domain::{account::BankAccount, payment::Payment},
+        handler::debt::use_cases::CreateDebtRequest,
+    },
 };
 
 pub mod category;
@@ -84,16 +88,27 @@ impl Debt {
     }
 
     /// Generates a debt from a create debt request
-    pub fn from_request(request: &CreateDebtRequest, account_id: Uuid) -> Self {
-        Self::new(
-            account_id,
+    pub fn from_request(request: &CreateDebtRequest, account: &BankAccount) -> HttpResult<Self> {
+        let account_default_due_date = account.default_due_date();
+        if request.due_date.is_none() && account_default_due_date.is_none() {
+            return Err(Box::new(HttpError::bad_request(
+                "Data de vencimento não informada",
+            )));
+        }
+
+        let due_date = request
+            .due_date
+            .unwrap_or(account_default_due_date.unwrap());
+
+        Ok(Self::new(
+            account.id().clone(),
             request.description.clone(),
             request.total_amount.clone(),
             request.paid_amount.clone(),
             request.discount_amount.clone(),
-            request.due_date.clone(),
+            due_date,
             request.category_name.clone(),
-        )
+        ))
     }
 
     pub fn is_paid(&self) -> bool {
