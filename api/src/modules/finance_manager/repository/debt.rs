@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use database::push_filter;
+// use database::push_filter;
 use http_error::{ext::OptionHttpExt, HttpResult};
 use sqlx::{Pool, Postgres, QueryBuilder, Row};
 use uuid::Uuid;
@@ -208,27 +208,23 @@ impl DebtRepository for DebtRepositoryImpl {
     }
 
     async fn list(&self, filters: DebtFilters) -> HttpResult<Vec<Debt>> {
-        let mut query = QueryBuilder::new("SELECT * FROM finance_manager.debt");
+        let mut query_builder = QueryBuilder::new("SELECT * FROM finance_manager.debt");
         let mut has_where = false;
 
-        if let Some(ids) = filters.ids() {
-            push_filter!(query, &mut has_where, "id IN ($1)", ids);
-        }
-
-        if let Some(statuses) = filters.statuses() {
-            let status_strings: Vec<String> = statuses.iter().map(|s| s.clone().into()).collect();
-            push_filter!(query, &mut has_where, "status IN ($1)", status_strings);
-        }
-
         if let Some(start_date) = filters.start_date() {
-            push_filter!(query, &mut has_where, "due_date >= $1", start_date);
+            query_builder.push(if has_where { " AND" } else { " WHERE" });
+            query_builder.push(" due_date >= ");
+            query_builder.push_bind(start_date);
+            has_where = true;
         }
 
         if let Some(end_date) = filters.end_date() {
-            push_filter!(query, &mut has_where, "due_date <= $1", end_date);
+            query_builder.push(if has_where { " AND" } else { " WHERE" });
+            query_builder.push(" due_date <= ");
+            query_builder.push_bind(end_date);
         }
 
-        let query = query.build();
+        let query = query_builder.build();
         let rows = query.fetch_all(&self.pool).await?;
 
         let debt_dtos: Vec<entity::DebtEntity> = rows
