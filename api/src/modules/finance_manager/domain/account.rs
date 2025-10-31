@@ -9,7 +9,7 @@ use crate::modules::{
     chat_bot::domain::formatter::ChatFormatter,
     finance_manager::{
         domain::account::configuration::AccountConfiguration,
-        handler::account::use_cases::CreateAccountRequest,
+        handler::account::use_cases::{CreateAccountRequest, UpdateAccountRequest},
     },
 };
 
@@ -48,7 +48,21 @@ impl BankAccount {
 
     /// Returns the default due date for the account configuration.
     pub fn default_due_date(&self) -> Option<NaiveDate> {
-        self.configuration.default_due_date
+        self.configuration.default_due_date()
+    }
+
+    pub fn update(&mut self, request: &UpdateAccountRequest) {
+        if let Some(name) = &request.name {
+            self.name = name.clone();
+        }
+        if let Some(owner) = &request.owner {
+            self.owner = owner.clone();
+        }
+        if let Some(configuration) = &request.configuration {
+            self.configuration = configuration.clone();
+        }
+
+        self.updated_at = Some(Utc::now());
     }
 }
 

@@ -17,6 +17,8 @@ pub trait AccountRepository {
     async fn list(&self) -> HttpResult<Vec<BankAccount>>;
 
     async fn insert(&self, account: BankAccount) -> HttpResult<BankAccount>;
+
+    async fn update(&self, account: BankAccount) -> HttpResult<()>;
 }
 
 pub type DynAccountRepository = dyn AccountRepository + Send + Sync;
@@ -32,6 +34,29 @@ impl AccountRepositoryImpl {
 
 #[async_trait]
 impl AccountRepository for AccountRepositoryImpl {
+    async fn update(&self, account: BankAccount) -> HttpResult<()> {
+        let payload = BankAccountEntity::from(account);
+
+        sqlx::query(
+            r#"
+            UPDATE finance_manager.account SET 
+                name = $2,
+                owner = $3,
+                configuration = $4,
+                updated_at = $5
+            WHERE id = $1"#,
+        )
+        .bind(payload.id)
+        .bind(payload.name)
+        .bind(payload.owner)
+        .bind(serde_json::to_value(payload.configuration).unwrap())
+        .bind(payload.updated_at)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
     async fn get_by_identification(&self, identification: &str) -> HttpResult<Option<BankAccount>> {
         let identification_num: i32 = identification.parse().map_err(|_| {
             http_error::HttpError::bad_request(format!(
