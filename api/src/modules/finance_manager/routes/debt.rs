@@ -33,7 +33,7 @@ async fn create_category(
     let category = state
         .finance_manager_state
         .debt_handler
-        .create_category(request)
+        .create_debt_category(request)
         .await?;
 
     Ok(Json(category))
@@ -43,7 +43,7 @@ async fn list_categories(state: State<AppState>) -> HttpResult<impl IntoResponse
     let categories = state
         .finance_manager_state
         .debt_handler
-        .list_categories()
+        .list_debt_categories()
         .await?;
 
     Ok(Json(categories))
