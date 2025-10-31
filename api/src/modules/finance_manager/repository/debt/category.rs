@@ -29,7 +29,7 @@ impl DebtCategoryRepositoryImpl {
 impl DebtCategoryRepository for DebtCategoryRepositoryImpl {
     async fn get_by_name(&self, name: &str) -> HttpResult<Option<DebtCategory>> {
         let row = sqlx::query(r#"SELECT * FROM finance_manager.debt_category WHERE name = $1"#)
-            .bind(name)
+            .bind(name.to_uppercase())
             .fetch_optional(&self.pool)
             .await?;
 
@@ -54,7 +54,7 @@ impl DebtCategoryRepository for DebtCategoryRepositoryImpl {
         "#,
         )
         .bind(payload.id)
-        .bind(payload.name.to_uppercase())
+        .bind(payload.name)
         .fetch_one(&self.pool)
         .await?;
 

@@ -13,7 +13,7 @@ impl DebtCategory {
     pub fn new(name: String) -> Self {
         Self {
             id: Uuid::new_v4(),
-            name,
+            name: name.to_uppercase(),
         }
     }
 }
