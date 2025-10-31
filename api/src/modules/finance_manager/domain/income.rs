@@ -4,7 +4,10 @@ use serde::{Deserialize, Serialize};
 use util::{from_row_constructor, getters};
 use uuid::Uuid;
 
-use crate::modules::finance_manager::handler::income::use_cases::CreateIncomeRequest;
+use crate::modules::{
+    chat_bot::domain::formatter::ChatFormatter,
+    finance_manager::handler::income::use_cases::CreateIncomeRequest,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,5 +56,26 @@ from_row_constructor! {
         reference: NaiveDate,
         created_at: DateTime<Utc>,
         updated_at: Option<DateTime<Utc>>,
+    }
+}
+
+impl ChatFormatter for Income {
+    fn format_for_chat(&self) -> String {
+        format!(
+            "{} - {} - {}",
+            self.description(),
+            self.amount(),
+            self.reference().format("%d/%m/%Y"),
+        )
+    }
+
+    fn format_list_for_chat(items: &[Self]) -> String {
+        let mut output = format!("📋 Receitas cadastradas ({})", items.len());
+
+        for income in items.iter() {
+            output.push_str(&format!("\n{}", income.format_for_chat()));
+        }
+
+        output
     }
 }

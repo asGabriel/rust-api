@@ -9,8 +9,11 @@ use api::modules::{
             recurrence::RecurrenceHandlerImpl,
         },
         repository::{
-            account::AccountRepositoryImpl, debt::DebtRepositoryImpl, income::IncomeRepositoryImpl,
-            payment::PaymentRepositoryImpl, recurrence::RecurrenceRepositoryImpl,
+            account::AccountRepositoryImpl,
+            debt::{category::DebtCategoryRepositoryImpl, DebtRepositoryImpl},
+            income::IncomeRepositoryImpl,
+            payment::PaymentRepositoryImpl,
+            recurrence::RecurrenceRepositoryImpl,
         },
         FinanceManagerState,
     },
@@ -43,6 +46,7 @@ async fn main() {
 
     let chat_bot_state = ChatBotState {
         chat_bot_handler: Arc::new(ChatBotHandlerImpl {
+            income_handler: Arc::new(income_handler.clone()),
             payment_handler: Arc::new(payment_handler.clone()),
             debt_handler: Arc::new(debt_handler.clone()),
             account_handler: Arc::new(account_handler.clone()),
@@ -83,6 +87,7 @@ fn build_debt_handler(pool: &Pool<Postgres>) -> DebtHandlerImpl {
         debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
         account_repository: Arc::new(AccountRepositoryImpl::new(pool)),
         payment_repository: Arc::new(PaymentRepositoryImpl::new(pool)),
+        debt_category_repository: Arc::new(DebtCategoryRepositoryImpl::new(pool)),
         pubsub: Arc::new(PubSubHandlerImpl {
             debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
         }),

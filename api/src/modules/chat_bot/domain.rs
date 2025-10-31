@@ -33,6 +33,7 @@ impl ChatCommandType {
     fn try_from_str(command_str: &str, parameters: &[String]) -> HttpResult<Self> {
         let command_str_lower = command_str.to_lowercase();
 
+        // TODO: melhorar esse trecho
         match () {
             _ if HelpCommand.matches(&command_str_lower) => Ok(ChatCommandType::Help),
             _ if SummaryCommand.matches(&command_str_lower) => Ok(ChatCommandType::Summary(
@@ -125,19 +126,20 @@ impl ChatCommand {
 
 📊 *Consulta*
 • `resumo` - Lista débitos do mês corrente
+• `resumo d:atual` - Lista débitos do mês atual
 • `resumo d:proximo` - Lista débitos do próximo mês
 • `resumo d:anterior` - Lista débitos do mês anterior
-• `resumo d:06-25` ou `resumo d:jun/25` - Lista débitos de um mês específico
+• `resumo 06/2025` - Lista débitos de um mês específico (formato MM/YYYY)
 
 💳 *Contas*
 • `contas` - Lista todas as contas cadastradas
 
 ➕ *Criar Despesa*
-• `despesa descrição valor c:N [d:data] [p:s]`
-  - Exemplo: `despesa natação 150 c:2`
-  - Exemplo: `despesa mercado 400 c:1 p:s`
-  - Com data: `despesa almoço 30 c:3 d:2025-01-15`
-  - Prefixos: c:=conta, d:=data, p:s=pago/p:n=não pago
+• `despesa descrição valor c:N cat:categoria [d:data] [p:s]`
+  - Exemplo: `despesa natação 150 c:2 cat:Esportes`
+  - Exemplo: `despesa mercado 400 c:1 cat:Alimentação p:s`
+  - Com data: `despesa almoço 30 c:3 cat:Alimentação d:2025-01-15`
+  - Prefixos: c:=conta (obrigatório), cat:=categoria (obrigatório, será convertido para UPPERCASE), d:=data, p:s=pago/p:n=não pago
 
 💰 *Registrar Pagamento*
 • `pagamento identificação [valor] [data]`

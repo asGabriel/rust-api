@@ -14,25 +14,33 @@ impl SummaryFilters {
     /// Parse command parameters and create filters for the specified month period
     /// Supports:
     /// - No parameters: current month
+    /// - MM/YYYY - specific month (e.g., 06/2025)
+    /// - d:atual - current month
     /// - d:proximo - next month
     /// - d:anterior - previous month
-    /// - d:MM-YY or d:MMM/YY - specific month (e.g., d:06-25 or d:jun/25)
     pub fn try_from(parameters: &[String]) -> HttpResult<Self> {
         if parameters.is_empty() {
             // No parameters: current month
             return Ok(get_current_month_range());
         }
 
-        // Look for d: parameter
-        for param in parameters {
-            if let Some(date_param) = param.strip_prefix("d:") {
-                return parse_month_filter(date_param);
+        // Check for d: prefix commands first
+        if let Some(first_param) = parameters.first() {
+            if let Some(date_param) = first_param.strip_prefix("d:") {
+                return parse_date_command(date_param);
             }
         }
 
-        // If parameters exist but no d: found, return error
+        // Check for MM/YYYY format (e.g., 06/2025)
+        if let Some(first_param) = parameters.first() {
+            if let Some((month_str, year_str)) = first_param.split_once('/') {
+                return parse_mm_yyyy_format(month_str, year_str);
+            }
+        }
+
+        // If parameter format is not recognized, return error
         Err(Box::new(HttpError::bad_request(
-            "Parâmetro de data inválido. Use 'd:proximo', 'd:anterior' ou 'd:MM-YY' (ex: d:06-25)",
+            "Parâmetro de data inválido. Use MM/YYYY (ex: 06/2025), d:atual, d:proximo ou d:anterior.",
         )))
     }
 
@@ -92,117 +100,53 @@ fn get_previous_month_range() -> SummaryFilters {
     }
 }
 
-/// Parse a month filter parameter
-fn parse_month_filter(param: &str) -> HttpResult<SummaryFilters> {
+/// Parse date command (d:atual, d:proximo, d:anterior)
+fn parse_date_command(param: &str) -> HttpResult<SummaryFilters> {
     let param_lower = param.to_lowercase();
-
     match param_lower.as_str() {
+        "atual" => Ok(get_current_month_range()),
         "proximo" | "próximo" => Ok(get_next_month_range()),
         "anterior" => Ok(get_previous_month_range()),
-        _ => {
-            // Try to parse as MM-YY or MMM/YY format
-            parse_specific_month(param)
-        }
+        _ => Err(Box::new(HttpError::bad_request(format!(
+            "Comando inválido: 'd:{}'. Use d:atual, d:proximo ou d:anterior.",
+            param
+        )))),
     }
 }
 
-/// Parse specific month formats: MM-YY or MMM/YY (e.g., 06-25 or jun/25)
-fn parse_specific_month(param: &str) -> HttpResult<SummaryFilters> {
-    // Try MM-YY format (e.g., 06-25)
-    if let Some((month_str, year_str)) = param.split_once('-') {
-        let month: u32 = month_str.parse().map_err(|_| {
-            Box::new(HttpError::bad_request(format!(
-                "Mês inválido no formato 'd:MM-YY'. Exemplo: d:06-25"
-            )))
-        })?;
+/// Parse MM/YYYY format (e.g., 06/2025)
+fn parse_mm_yyyy_format(month_str: &str, year_str: &str) -> HttpResult<SummaryFilters> {
+    let month: u32 = month_str.parse().map_err(|_| {
+        Box::new(HttpError::bad_request(format!(
+            "Mês inválido no formato MM/YYYY. Use um número de 01 a 12. Exemplo: 06/2025"
+        )))
+    })?;
 
-        let year_short: i32 = year_str.parse().map_err(|_| {
-            Box::new(HttpError::bad_request(format!(
-                "Ano inválido no formato 'd:MM-YY'. Exemplo: d:06-25"
-            )))
-        })?;
+    let year: i32 = year_str.parse().map_err(|_| {
+        Box::new(HttpError::bad_request(format!(
+            "Ano inválido no formato MM/YYYY. Use um ano válido (ex: 2025). Exemplo: 06/2025"
+        )))
+    })?;
 
-        // Convert 2-digit year to 4-digit (assume 20xx for 00-99)
-        let year = if year_short < 100 {
-            if year_short < 50 {
-                2000 + year_short
-            } else {
-                1900 + year_short
-            }
-        } else {
-            year_short
-        };
-
-        if month < 1 || month > 12 {
-            return Err(Box::new(HttpError::bad_request(format!(
-                "Mês inválido: {}. Deve ser entre 1 e 12",
-                month
-            ))));
-        }
-
-        let (start, end) = get_month_range(year, month);
-        return Ok(SummaryFilters {
-            start_date: Some(start),
-            end_date: Some(end),
-        });
+    if month < 1 || month > 12 {
+        return Err(Box::new(HttpError::bad_request(format!(
+            "Mês inválido: {}. Deve ser entre 1 e 12",
+            month
+        ))));
     }
 
-    // Try MMM/YY format (e.g., jun/25)
-    if let Some((month_str, year_str)) = param.split_once('/') {
-        let month = parse_month_name(month_str)?;
-        let year_short: i32 = year_str.parse().map_err(|_| {
-            Box::new(HttpError::bad_request(format!(
-                "Ano inválido no formato 'd:MMM/YY'. Exemplo: d:jun/25"
-            )))
-        })?;
-
-        let year = if year_short < 100 {
-            if year_short < 50 {
-                2000 + year_short
-            } else {
-                1900 + year_short
-            }
-        } else {
-            year_short
-        };
-
-        let (start, end) = get_month_range(year, month);
-        return Ok(SummaryFilters {
-            start_date: Some(start),
-            end_date: Some(end),
-        });
+    if year < 1900 || year > 2100 {
+        return Err(Box::new(HttpError::bad_request(format!(
+            "Ano inválido: {}. Deve ser entre 1900 e 2100",
+            year
+        ))));
     }
 
-    Err(Box::new(HttpError::bad_request(format!(
-        "Formato de data inválido: 'd:{}'. Use 'd:proximo', 'd:anterior', 'd:MM-YY' (ex: d:06-25) ou 'd:MMM/YY' (ex: d:jun/25)",
-        param
-    ))))
-}
-
-/// Parse month name in Portuguese (jan, fev, mar, etc.)
-fn parse_month_name(month_str: &str) -> HttpResult<u32> {
-    let month_lower = month_str.to_lowercase();
-    let month = match month_lower.as_str() {
-        "jan" | "janeiro" => 1,
-        "fev" | "fevereiro" => 2,
-        "mar" | "marco" | "março" => 3,
-        "abr" | "abril" => 4,
-        "mai" | "maio" => 5,
-        "jun" | "junho" => 6,
-        "jul" | "julho" => 7,
-        "ago" | "agosto" => 8,
-        "set" | "setembro" => 9,
-        "out" | "outubro" => 10,
-        "nov" | "novembro" => 11,
-        "dez" | "dezembro" => 12,
-        _ => {
-            return Err(Box::new(HttpError::bad_request(format!(
-                "Nome de mês inválido: '{}'. Use abreviações como 'jan', 'fev', 'mar', etc.",
-                month_str
-            ))));
-        }
-    };
-    Ok(month)
+    let (start, end) = get_month_range(year, month);
+    Ok(SummaryFilters {
+        start_date: Some(start),
+        end_date: Some(end),
+    })
 }
 
 /// Get the first and last day of a given month
