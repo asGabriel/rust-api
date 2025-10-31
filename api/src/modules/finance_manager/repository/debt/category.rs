@@ -47,11 +47,10 @@ impl DebtCategoryRepository for DebtCategoryRepositoryImpl {
         let row = sqlx::query(
             r#"INSERT INTO finance_manager.debt_category (
                 id,
-                name,
-                identification
+                name
             )
-            VALUES ($1, $2, $3)
-            RETURNING id, name, identification
+            VALUES ($1, $2)
+            RETURNING *
         "#,
         )
         .bind(payload.id)

@@ -27,8 +27,11 @@ pub trait DebtHandler {
     async fn create_debt(&self, request: CreateDebtRequest) -> HttpResult<Debt>;
 
     // DEBT-CATEGORY
-    async fn create_category(&self, request: CreateCategoryRequest) -> HttpResult<DebtCategory>;
-    async fn list_categories(&self) -> HttpResult<Vec<DebtCategory>>;
+    async fn create_debt_category(
+        &self,
+        request: CreateCategoryRequest,
+    ) -> HttpResult<DebtCategory>;
+    async fn list_debt_categories(&self) -> HttpResult<Vec<DebtCategory>>;
 }
 
 #[derive(Clone)]
@@ -42,12 +45,15 @@ pub struct DebtHandlerImpl {
 
 #[async_trait]
 impl DebtHandler for DebtHandlerImpl {
-    async fn create_category(&self, request: CreateCategoryRequest) -> HttpResult<DebtCategory> {
+    async fn create_debt_category(
+        &self,
+        request: CreateCategoryRequest,
+    ) -> HttpResult<DebtCategory> {
         let category = DebtCategory::new(request.name);
         self.debt_category_repository.insert(category).await
     }
 
-    async fn list_categories(&self) -> HttpResult<Vec<DebtCategory>> {
+    async fn list_debt_categories(&self) -> HttpResult<Vec<DebtCategory>> {
         self.debt_category_repository.list().await
     }
     async fn create_debt(&self, request: CreateDebtRequest) -> HttpResult<Debt> {
@@ -138,6 +144,5 @@ pub mod use_cases {
     #[serde(rename_all = "camelCase")]
     pub struct CreateCategoryRequest {
         pub name: String,
-        pub identification: String,
     }
 }
