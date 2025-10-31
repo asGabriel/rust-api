@@ -5,10 +5,17 @@
 DEV_CONFIG_FILE := env.dev
 PROD_CONFIG_FILE := env.prod
 
-env-dev: ## Executa a aplicação em modo desenvolvimento carregando variáveis de env.dev
-	@echo "🚀 Iniciando em modo desenvolvimento..."
-	@export $$(grep -v '^#' $(DEV_CONFIG_FILE) | grep -v '^$$' | xargs)
+env-dev: ## Carrega variáveis de env.dev no shell atual (use: eval $$(make env-dev))
+	@grep -v '^#' $(DEV_CONFIG_FILE) | grep -v '^$$' | while IFS='=' read -r key value; do \
+		value=$${value#\"}; value=$${value%\"}; \
+		echo "export $$key=$$value"; \
+	done
 
-env-prod: ## Executa a aplicação em modo produção carregando variáveis de env.prod
-	@echo "🚀 Iniciando em modo produção..."
-	@export $$(grep -v '^#' $(PROD_CONFIG_FILE) | grep -v '^$$' | xargs)
+env-prod: ## Carrega variáveis de env.prod no shell atual (use: eval $$(make env-prod))
+	@grep -v '^#' $(PROD_CONFIG_FILE) | grep -v '^$$' | while IFS='=' read -r key value; do \
+		value=$${value#\"}; value=$${value%\"}; \
+		echo "export $$key=$$value"; \
+	done
+
+echo-env:
+	@echo "TELEGRAM_API_URL=$(TELEGRAM_API_URL)"

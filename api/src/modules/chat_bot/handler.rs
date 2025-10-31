@@ -16,7 +16,7 @@ use crate::modules::{
         domain::debt::{DebtFilters, DebtStatus},
         handler::{
             account::DynAccountHandler,
-            debt::{CreateDebtRequest, DynDebtHandler},
+            debt::{use_cases::CreateDebtRequest, DynDebtHandler},
             income::{use_cases::CreateIncomeRequest, DynIncomeHandler},
             payment::{
                 use_cases::{
@@ -61,6 +61,7 @@ impl ChatBotHandlerImpl {
             .debt_handler
             .create_debt(CreateDebtRequest {
                 account_identification: request.account_identification.clone(),
+                category_name: request.category_name.clone(),
                 description: request.description.clone(),
                 total_amount: request.amount,
                 paid_amount: None,

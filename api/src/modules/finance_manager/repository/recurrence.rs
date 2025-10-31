@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use http_error::HttpResult;
 use sqlx::{Pool, Postgres, Row};
 
-use crate::modules::finance_manager::domain::recurrence::Recurrence;
+use crate::modules::finance_manager::domain::debt::recurrence::Recurrence;
 
 use entity::RecurrenceEntity;
 
@@ -103,7 +103,7 @@ mod entity {
     use serde::{Deserialize, Serialize};
     use uuid::Uuid;
 
-    use crate::modules::finance_manager::domain::recurrence::Recurrence;
+    use crate::modules::finance_manager::domain::debt::recurrence::Recurrence;
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "camelCase")]

@@ -6,8 +6,6 @@ use uuid::Uuid;
 
 use crate::modules::finance_manager::handler::recurrence::use_cases::CreateRecurrenceRequest;
 
-pub mod recurrence_run;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Recurrence {

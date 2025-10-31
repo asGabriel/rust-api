@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use http_error::{ext::OptionHttpExt, HttpResult};
 
 use crate::modules::finance_manager::{
-    domain::recurrence::Recurrence,
+    domain::debt::recurrence::Recurrence,
     handler::recurrence::use_cases::CreateRecurrenceRequest,
     repository::{account::DynAccountRepository, recurrence::DynRecurrenceRepository},
 };

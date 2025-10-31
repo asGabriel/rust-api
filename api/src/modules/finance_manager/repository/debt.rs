@@ -6,6 +6,8 @@ use uuid::Uuid;
 
 use crate::modules::finance_manager::domain::debt::{Debt, DebtFilters};
 
+pub mod category;
+
 #[async_trait]
 pub trait DebtRepository {
     async fn list(&self, filters: DebtFilters) -> HttpResult<Vec<Debt>>;
@@ -41,7 +43,8 @@ impl DebtRepository for DebtRepositoryImpl {
             r#"
             UPDATE finance_manager.debt SET 
                 account_id = $1, 
-                description = $2, 
+                category_name = $2,
+                description = $3, 
                 total_amount = $3, 
                 paid_amount = $4, 
                 discount_amount = $5, 
@@ -50,7 +53,7 @@ impl DebtRepository for DebtRepositoryImpl {
                 status = $8, 
                 updated_at = $9
             WHERE id = $10 
-            RETURNING id, account_id, identification, description, total_amount, paid_amount, discount_amount, remaining_amount, due_date, status, created_at, updated_at
+            RETURNING id, account_id, category_name, identification, description, total_amount, paid_amount, discount_amount, remaining_amount, due_date, status, created_at, updated_at
             "#
         )
         .bind(debt_dto.account_id)
@@ -71,6 +74,7 @@ impl DebtRepository for DebtRepositoryImpl {
             id: row.get("id"),
             account_id: row.get("account_id"),
             identification: row.get::<i32, _>("identification").to_string(),
+            category_name: row.get("category_name"),
             description: row.get("description"),
             total_amount: row.get("total_amount"),
             paid_amount: row.get("paid_amount"),
@@ -87,7 +91,7 @@ impl DebtRepository for DebtRepositoryImpl {
 
     async fn get_by_id(&self, id: &Uuid) -> HttpResult<Option<Debt>> {
         let row = sqlx::query(
-            r#"SELECT id, account_id, identification, description, total_amount, paid_amount, discount_amount, remaining_amount, due_date, status, created_at, updated_at FROM finance_manager.debt WHERE id = $1"#
+            r#"SELECT id, account_id, category_name, identification, description, total_amount, paid_amount, discount_amount, remaining_amount, due_date, status, created_at, updated_at FROM finance_manager.debt WHERE id = $1"#
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -97,6 +101,7 @@ impl DebtRepository for DebtRepositoryImpl {
             id: r.get("id"),
             account_id: r.get("account_id"),
             identification: r.get::<i32, _>("identification").to_string(),
+            category_name: r.get("category_name"),
             description: r.get("description"),
             total_amount: r.get("total_amount"),
             paid_amount: r.get("paid_amount"),
@@ -120,7 +125,7 @@ impl DebtRepository for DebtRepositoryImpl {
         })?;
 
         let row = sqlx::query(
-            r#"SELECT id, account_id, identification, description, total_amount, paid_amount, discount_amount, remaining_amount, due_date, status, created_at, updated_at FROM finance_manager.debt WHERE identification = $1"#
+            r#"SELECT id, account_id, category_name, identification, description, total_amount, paid_amount, discount_amount, remaining_amount, due_date, status, created_at, updated_at FROM finance_manager.debt WHERE identification = $1"#
         )
         .bind(identification_num)
         .fetch_optional(&self.pool)
@@ -130,6 +135,7 @@ impl DebtRepository for DebtRepositoryImpl {
             id: r.get("id"),
             account_id: r.get("account_id"),
             identification: r.get::<i32, _>("identification").to_string(),
+            category_name: r.get("category_name"),
             description: r.get("description"),
             total_amount: r.get("total_amount"),
             paid_amount: r.get("paid_amount"),
@@ -152,6 +158,7 @@ impl DebtRepository for DebtRepositoryImpl {
             INSERT INTO finance_manager.debt (
                 id, 
                 account_id, 
+                category_name,
                 description, 
                 total_amount, 
                 paid_amount, 
@@ -162,12 +169,13 @@ impl DebtRepository for DebtRepositoryImpl {
                 created_at,
                 updated_at
             ) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-            RETURNING id, account_id, identification, description, total_amount, paid_amount, discount_amount, remaining_amount, due_date, status, created_at, updated_at
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            RETURNING id, account_id, category_name, identification, description, total_amount, paid_amount, discount_amount, remaining_amount, due_date, status, created_at, updated_at
         "#
         )
         .bind(debt_dto.id)
         .bind(debt_dto.account_id)
+        .bind(debt_dto.category_name)
         .bind(debt_dto.description)
         .bind(debt_dto.total_amount)
         .bind(debt_dto.paid_amount)
@@ -184,6 +192,7 @@ impl DebtRepository for DebtRepositoryImpl {
             id: row.get("id"),
             account_id: row.get("account_id"),
             identification: row.get::<i32, _>("identification").to_string(),
+            category_name: row.get("category_name"),
             description: row.get("description"),
             total_amount: row.get("total_amount"),
             paid_amount: row.get("paid_amount"),
@@ -211,6 +220,14 @@ impl DebtRepository for DebtRepositoryImpl {
             push_filter!(query, &mut has_where, "status IN ($1)", status_strings);
         }
 
+        if let Some(start_date) = filters.start_date() {
+            push_filter!(query, &mut has_where, "due_date >= $1", start_date);
+        }
+
+        if let Some(end_date) = filters.end_date() {
+            push_filter!(query, &mut has_where, "due_date <= $1", end_date);
+        }
+
         let query = query.build();
         let rows = query.fetch_all(&self.pool).await?;
 
@@ -220,6 +237,7 @@ impl DebtRepository for DebtRepositoryImpl {
                 id: row.get("id"),
                 account_id: row.get("account_id"),
                 identification: row.get::<i32, _>("identification").to_string(),
+                category_name: row.get("category_name"),
                 description: row.get("description"),
                 total_amount: row.get("total_amount"),
                 paid_amount: row.get("paid_amount"),
@@ -250,6 +268,7 @@ pub mod entity {
         pub id: Uuid,
         pub account_id: Uuid,
         pub identification: String,
+        pub category_name: String,
         pub description: String,
         pub total_amount: Decimal,
         pub paid_amount: Decimal,
@@ -267,6 +286,7 @@ pub mod entity {
                 id: *debt.id(),
                 account_id: *debt.account_id(),
                 identification: debt.identification().to_string(),
+                category_name: debt.category_name().to_string(),
                 description: debt.description().clone(),
                 total_amount: *debt.total_amount(),
                 paid_amount: *debt.paid_amount(),
@@ -285,6 +305,7 @@ pub mod entity {
             Debt::from_row(
                 dto.id,
                 dto.account_id,
+                dto.category_name,
                 dto.identification,
                 dto.description,
                 dto.total_amount,

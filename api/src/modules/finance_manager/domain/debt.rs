@@ -7,8 +7,12 @@ use uuid::Uuid;
 
 use crate::modules::{
     chat_bot::domain::formatter::{ChatFormatter, ChatFormatterUtils},
-    finance_manager::{domain::payment::Payment, handler::debt::CreateDebtRequest},
+    finance_manager::{domain::payment::Payment, handler::debt::use_cases::CreateDebtRequest},
 };
+
+pub mod category;
+pub mod recurrence;
+pub mod recurrence_run;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -18,6 +22,8 @@ pub struct Debt {
     /// Unique identifier of the account
     /// The account that the debt belongs to
     account_id: Uuid,
+    /// The category of the debt
+    category_name: String,
     /// The identification of the debt for human readability
     identification: String,
 
@@ -53,6 +59,7 @@ impl Debt {
         paid_amount: Option<Decimal>,
         discount_amount: Option<Decimal>,
         due_date: NaiveDate,
+        category_name: String,
     ) -> Self {
         let uuid = Uuid::new_v4();
         let remaining_amount = total_amount
@@ -62,6 +69,7 @@ impl Debt {
         Self {
             id: uuid,
             account_id,
+            category_name,
             identification: String::new(), // database auto increment
             description,
             total_amount,
@@ -84,6 +92,7 @@ impl Debt {
             request.paid_amount.clone(),
             request.discount_amount.clone(),
             request.due_date.clone(),
+            request.category_name.clone(),
         )
     }
 
@@ -180,6 +189,7 @@ getters!(
     Debt {
         id: Uuid,
         account_id: Uuid,
+        category_name: String,
         identification: String,
         description: String,
         total_amount: Decimal,
@@ -197,6 +207,7 @@ from_row_constructor! {
     Debt {
         id: Uuid,
         account_id: Uuid,
+        category_name: String,
         identification: String,
         description: String,
         total_amount: Decimal,
@@ -326,9 +337,10 @@ impl ChatFormatter for Debt {
             .unwrap();
             writeln!(
                 output,
-                "💵 {} | 📅 {}",
+                "💵 {} | 📅 {} | 🏷️ {}",
                 ChatFormatterUtils::format_currency(debt.remaining_amount()),
-                ChatFormatterUtils::format_date(debt.due_date())
+                ChatFormatterUtils::format_date(debt.due_date()),
+                debt.category_name()
             )
             .unwrap();
         }
