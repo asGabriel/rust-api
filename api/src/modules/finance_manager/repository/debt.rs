@@ -208,23 +208,33 @@ impl DebtRepository for DebtRepositoryImpl {
     }
 
     async fn list(&self, filters: DebtFilters) -> HttpResult<Vec<Debt>> {
-        let mut query_builder = QueryBuilder::new("SELECT * FROM finance_manager.debt");
+        let mut builder = QueryBuilder::new("SELECT * FROM finance_manager.debt");
         let mut has_where = false;
 
         if let Some(start_date) = filters.start_date() {
-            query_builder.push(if has_where { " AND" } else { " WHERE" });
-            query_builder.push(" due_date >= ");
-            query_builder.push_bind(start_date);
+            builder.push(if has_where { " AND " } else { " WHERE " });
+            builder.push("due_date >= ");
+            builder.push_bind(start_date);
             has_where = true;
         }
 
         if let Some(end_date) = filters.end_date() {
-            query_builder.push(if has_where { " AND" } else { " WHERE" });
-            query_builder.push(" due_date <= ");
-            query_builder.push_bind(end_date);
+            builder.push(if has_where { " AND " } else { " WHERE " });
+            builder.push("due_date <= ");
+            builder.push_bind(end_date);
+            has_where = true;
         }
 
-        let query = query_builder.build();
+        if let Some(account_ids) = filters.account_ids() {
+            if !account_ids.is_empty() {
+                builder.push(if has_where { " AND " } else { " WHERE " });
+                builder.push("account_id = ANY(");
+                builder.push_bind(account_ids);
+                builder.push(")");
+            }
+        }
+
+        let query = builder.build();
         let rows = query.fetch_all(&self.pool).await?;
 
         let debt_dtos: Vec<entity::DebtEntity> = rows

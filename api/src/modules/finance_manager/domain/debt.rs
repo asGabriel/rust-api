@@ -240,6 +240,7 @@ from_row_constructor! {
 #[serde(rename_all = "camelCase")]
 pub struct DebtFilters {
     ids: Option<Vec<Uuid>>,
+    account_ids: Option<Vec<Uuid>>,
     statuses: Option<Vec<DebtStatus>>,
     start_date: Option<NaiveDate>,
     end_date: Option<NaiveDate>,
@@ -248,6 +249,7 @@ pub struct DebtFilters {
 getters!(
     DebtFilters {
         ids: Option<Vec<Uuid>>,
+        account_ids: Option<Vec<Uuid>>,
         statuses: Option<Vec<DebtStatus>>,
         start_date: Option<NaiveDate>,
         end_date: Option<NaiveDate>,
@@ -278,6 +280,11 @@ impl DebtFilters {
 
     pub fn with_end_date(mut self, end_date: NaiveDate) -> Self {
         self.end_date = Some(end_date);
+        self
+    }
+
+    pub fn with_account_ids(mut self, account_ids: Vec<Uuid>) -> Self {
+        self.account_ids = Some(account_ids);
         self
     }
 }
