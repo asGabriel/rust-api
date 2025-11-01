@@ -26,7 +26,7 @@ pub trait DebtHandler {
     async fn list_debts(&self, filters: DebtFilters) -> HttpResult<Vec<Debt>>;
     async fn create_debt(&self, request: CreateDebtRequest) -> HttpResult<Debt>;
 
-    // DEBT-CATEGORY
+    // DEBT_CATEGORY
     async fn create_debt_category(
         &self,
         request: CreateCategoryRequest,
@@ -56,6 +56,7 @@ impl DebtHandler for DebtHandlerImpl {
     async fn list_debt_categories(&self) -> HttpResult<Vec<DebtCategory>> {
         self.debt_category_repository.list().await
     }
+
     async fn create_debt(&self, request: CreateDebtRequest) -> HttpResult<Debt> {
         let account = self
             .account_repository
@@ -68,8 +69,7 @@ impl DebtHandler for DebtHandlerImpl {
             .await?
             .or_not_found("category", &request.category_name)?;
 
-        let debt = Debt::from_request(&request, *account.id());
-
+        let debt = Debt::from_request(&request, &account)?;
         let debt = self.debt_repository.insert(debt).await?;
 
         // TODO: dispatch payment create event
@@ -78,7 +78,7 @@ impl DebtHandler for DebtHandlerImpl {
                 &debt,
                 &PaymentBasicData {
                     amount: Some(*debt.total_amount()),
-                    payment_date: request.due_date,
+                    payment_date: debt.due_date().clone(),
                 },
             );
 
@@ -95,9 +95,8 @@ impl DebtHandler for DebtHandlerImpl {
     }
 }
 
-// Use cases
 pub mod use_cases {
-    use chrono::{NaiveDate, Utc};
+    use chrono::NaiveDate;
     use rust_decimal::Decimal;
     use serde::{Deserialize, Serialize};
 
@@ -112,7 +111,7 @@ pub mod use_cases {
         pub total_amount: Decimal,
         pub paid_amount: Option<Decimal>,
         pub discount_amount: Option<Decimal>,
-        pub due_date: NaiveDate,
+        pub due_date: Option<NaiveDate>,
         pub status: Option<DebtStatus>,
         pub is_paid: bool,
     }
@@ -133,7 +132,7 @@ pub mod use_cases {
                 total_amount,
                 paid_amount: None,
                 discount_amount: None,
-                due_date: due_date.unwrap_or(Utc::now().date_naive()),
+                due_date: due_date,
                 status: Some(DebtStatus::Unpaid),
                 is_paid: is_paid.unwrap_or(false),
             }

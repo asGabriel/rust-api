@@ -122,40 +122,34 @@ impl ChatCommand {
     /// Generate a help message with all available commands
     pub fn get_help_message() -> String {
         format!(
-            r#"📚 *Comandos Disponíveis*
+            r#"📚 Comandos Disponíveis
 
-📊 *Consulta*
-• `resumo` - Lista débitos do mês corrente
-• `resumo d:atual` - Lista débitos do mês atual
-• `resumo d:proximo` - Lista débitos do próximo mês
-• `resumo d:anterior` - Lista débitos do mês anterior
-• `resumo 06/2025` - Lista débitos de um mês específico (formato MM/YYYY)
+📊 Consulta de Débitos
+• `resumo` [d:data] [c:numero da conta]
+ [d:atual | d:proximo | d:anterior | MM/YYYY] [c:1,2,3]
+ exemplo: resumo d:atual c:1,2
 
-💳 *Contas*
+💳 Contas
 • `contas` - Lista todas as contas cadastradas
 
-➕ *Criar Despesa*
+➕ Criar Despesa
 • `despesa descrição valor c:N cat:categoria [d:data] [p:s]`
-  - Exemplo: `despesa natação 150 c:2 cat:Esportes`
-  - Exemplo: `despesa mercado 400 c:1 cat:Alimentação p:s`
-  - Com data: `despesa almoço 30 c:3 cat:Alimentação d:2025-01-15`
-  - Prefixos: c:=conta (obrigatório), cat:=categoria (obrigatório, será convertido para UPPERCASE), d:=data, p:s=pago/p:n=não pago
+  onde: [c:1,2,3], cat:=categoria, d:=data, p:=pago (s=sim, n=não)
+  exemplo: despesa mercado 150 c:2 cat:mercado p:n
 
-💰 *Registrar Pagamento*
+💰 Registrar Pagamento
 • `pagamento identificação [valor] [data]`
-  - Exemplo: `pagamento 123`
-  - Com valor: `pagamento 123 150`
-  - Com data: `pagamento 123 150 2025-01-15`
+  onde: identificação:=número do débito, valor:=valor do pagamento, data:=data do pagamento
+  exemplo: pagamento 123 150 2025-01-15
+  *obs: valor ausente = valor total do débito | data ausente = data atual
 
-📈 *Receitas*
+📈 Receitas
 • `receitas` - Lista todas as receitas cadastradas
 
-💵 *Criar Receita*
+💵 Criar Receita
 • `entrada descrição valor c:N [d:data]`
-  - Exemplo: `entrada salario 5000 c:1`
-  - Exemplo: `entrada freelance 1500 c:2 d:hoje`
-  - Com data: `entrada bonus 2000 c:1 d:15/01/2025`
-  - Prefixos: c:=conta, d:=data (usa hoje se não fornecido)
+  ex: entrada salario 5000 c:1
+  c:=conta, d:=data (usa hoje se não fornecido)
 
 ❓ *Ajuda*
 • `help`, `ajuda` ou `?` - Mostra esta mensagem

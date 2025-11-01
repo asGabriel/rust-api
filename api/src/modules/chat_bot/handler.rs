@@ -8,14 +8,14 @@ use crate::modules::{
     chat_bot::{
         domain::{
             debt::NewDebtData, formatter::ChatFormatter, income::NewIncomeData,
-            payment::NewPaymentData, ChatCommand, ChatCommandType,
+            payment::NewPaymentData, summary::SummaryFilters, ChatCommand, ChatCommandType,
         },
         gateway::DynTelegramApiGateway,
     },
     finance_manager::{
         domain::debt::{DebtFilters, DebtStatus},
         handler::{
-            account::DynAccountHandler,
+            account::{use_cases::AccountListFilters, DynAccountHandler},
             debt::{use_cases::CreateDebtRequest, DynDebtHandler},
             income::{use_cases::CreateIncomeRequest, DynIncomeHandler},
             payment::{
@@ -44,8 +44,21 @@ pub struct ChatBotHandlerImpl {
 }
 
 impl ChatBotHandlerImpl {
-    pub async fn handle_list_debts(&self, chat_id: i64, filters: DebtFilters) -> HttpResult<()> {
-        let result = self.debt_handler.list_debts(filters).await;
+    pub async fn handle_list_debts(&self, chat_id: i64, filters: SummaryFilters) -> HttpResult<()> {
+        let mut debt_filters = DebtFilters::default();
+
+        if let Some(account_identifications) = filters.account_identifications {
+            let accounts = self
+                .account_handler
+                .list_accounts(
+                    AccountListFilters::new().with_identifications(account_identifications),
+                )
+                .await?;
+            debt_filters = debt_filters
+                .with_account_ids(accounts.into_iter().map(|a| a.id().clone()).collect());
+        }
+
+        let result = self.debt_handler.list_debts(debt_filters).await;
 
         let message = match result {
             Ok(debts) => ChatFormatter::format_list_for_chat(&debts),
@@ -66,9 +79,7 @@ impl ChatBotHandlerImpl {
                 total_amount: request.amount,
                 paid_amount: None,
                 discount_amount: Some(rust_decimal::Decimal::ZERO),
-                due_date: request
-                    .due_date
-                    .unwrap_or_else(|| chrono::Utc::now().date_naive()),
+                due_date: request.due_date,
                 status: Some(DebtStatus::Unpaid),
                 is_paid: request.is_paid(),
             })
@@ -89,7 +100,10 @@ impl ChatBotHandlerImpl {
     }
 
     async fn handle_list_accounts(&self, chat_id: i64) -> HttpResult<()> {
-        let result = self.account_handler.list_accounts().await;
+        let result = self
+            .account_handler
+            .list_accounts(AccountListFilters::default())
+            .await;
 
         let message = match result {
             Ok(accounts) => ChatFormatter::format_list_for_chat(&accounts),
@@ -182,8 +196,7 @@ impl ChatBotHandler for ChatBotHandlerImpl {
                 Ok(())
             }
             ChatCommandType::Summary(filters) => {
-                self.handle_list_debts(chat_id, filters.to_debt_filters())
-                    .await?;
+                self.handle_list_debts(chat_id, filters).await?;
                 Ok(())
             }
             ChatCommandType::ListAccounts => {

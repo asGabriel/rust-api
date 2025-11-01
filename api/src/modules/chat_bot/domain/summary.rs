@@ -8,6 +8,7 @@ use crate::modules::finance_manager::domain::debt::DebtFilters;
 pub struct SummaryFilters {
     pub start_date: Option<NaiveDate>,
     pub end_date: Option<NaiveDate>,
+    pub account_identifications: Option<Vec<String>>,
 }
 
 impl SummaryFilters {
@@ -18,30 +19,70 @@ impl SummaryFilters {
     /// - d:atual - current month
     /// - d:proximo - next month
     /// - d:anterior - previous month
+    /// - c:1 - filter by account identification (single)
+    /// - c:2,3,4 - filter by multiple account identifications
     pub fn try_from(parameters: &[String]) -> HttpResult<Self> {
-        if parameters.is_empty() {
-            // No parameters: current month
-            return Ok(get_current_month_range());
-        }
+        let mut account_identifications: Option<Vec<String>> = None;
+        let mut date_params = Vec::new();
 
-        // Check for d: prefix commands first
-        if let Some(first_param) = parameters.first() {
-            if let Some(date_param) = first_param.strip_prefix("d:") {
-                return parse_date_command(date_param);
+        // Separate date and account parameters
+        for param in parameters {
+            if let Some(account_param) = param.strip_prefix("c:") {
+                // Parse account identifications (e.g., "1" or "2,3,4")
+                let ids: Vec<String> = account_param
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+
+                if ids.is_empty() {
+                    return Err(Box::new(HttpError::bad_request(
+                        "Identificação da conta (c:) requer um número. Exemplo: c:1 ou c:2,3,4",
+                    )));
+                }
+
+                // Validate that all are numeric
+                for id in &ids {
+                    id.parse::<i32>().map_err(|_| {
+                        Box::new(HttpError::bad_request(format!(
+                            "Identificação de conta inválida: '{}'. Use apenas números. Exemplo: c:1 ou c:2,3,4",
+                            id
+                        )))
+                    })?;
+                }
+
+                account_identifications = Some(ids);
+            } else {
+                date_params.push(param.clone());
             }
         }
 
-        // Check for MM/YYYY format (e.g., 06/2025)
-        if let Some(first_param) = parameters.first() {
-            if let Some((month_str, year_str)) = first_param.split_once('/') {
-                return parse_mm_yyyy_format(month_str, year_str);
+        // Parse date parameters
+        let date_filters = if date_params.is_empty() {
+            // No date parameters: current month
+            get_current_month_range()
+        } else {
+            // Check for d: prefix commands first
+            if let Some(first_param) = date_params.first() {
+                if let Some(date_param) = first_param.strip_prefix("d:") {
+                    parse_date_command(date_param)?
+                } else if let Some((month_str, year_str)) = first_param.split_once('/') {
+                    parse_mm_yyyy_format(month_str, year_str)?
+                } else {
+                    return Err(Box::new(HttpError::bad_request(
+                        "Parâmetro de data inválido. Use MM/YYYY (ex: 06/2025), d:atual, d:proximo ou d:anterior.",
+                    )));
+                }
+            } else {
+                get_current_month_range()
             }
-        }
+        };
 
-        // If parameter format is not recognized, return error
-        Err(Box::new(HttpError::bad_request(
-            "Parâmetro de data inválido. Use MM/YYYY (ex: 06/2025), d:atual, d:proximo ou d:anterior.",
-        )))
+        Ok(SummaryFilters {
+            start_date: date_filters.start_date,
+            end_date: date_filters.end_date,
+            account_identifications,
+        })
     }
 
     /// Convert SummaryFilters to DebtFilters for querying
@@ -67,6 +108,7 @@ fn get_current_month_range() -> SummaryFilters {
     SummaryFilters {
         start_date: Some(start),
         end_date: Some(end),
+        account_identifications: None,
     }
 }
 
@@ -82,6 +124,7 @@ fn get_next_month_range() -> SummaryFilters {
     SummaryFilters {
         start_date: Some(start),
         end_date: Some(end),
+        account_identifications: None,
     }
 }
 
@@ -97,6 +140,7 @@ fn get_previous_month_range() -> SummaryFilters {
     SummaryFilters {
         start_date: Some(start),
         end_date: Some(end),
+        account_identifications: None,
     }
 }
 
@@ -146,6 +190,7 @@ fn parse_mm_yyyy_format(month_str: &str, year_str: &str) -> HttpResult<SummaryFi
     Ok(SummaryFilters {
         start_date: Some(start),
         end_date: Some(end),
+        account_identifications: None,
     })
 }
 
