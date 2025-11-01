@@ -115,6 +115,10 @@ impl AccountRepository for AccountRepositoryImpl {
         }
 
         if let Some(identifications) = filters.identifications {
+            let identifications: Vec<i32> = identifications
+                .iter()
+                .map(|i| i.parse::<i32>().unwrap())
+                .collect();
             builder.push(if has_where { " AND " } else { " WHERE " });
             builder.push("identification = ANY(");
             builder.push_bind(identifications);

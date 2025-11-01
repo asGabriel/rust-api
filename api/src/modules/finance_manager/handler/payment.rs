@@ -47,6 +47,19 @@ impl PaymentHandler for PaymentHandlerImpl {
             return Err(Box::new(HttpError::bad_request("Dívida já paga")));
         }
 
+        // Calcular o valor do pagamento antes de criar
+        let payment_amount = payment_data.amount(&debt);
+
+        // Verificar se o pagamento não ultrapassa o valor restante
+        let total_after_payment = *debt.paid_amount() + payment_amount;
+        if total_after_payment > *debt.total_amount() {
+            return Err(Box::new(HttpError::bad_request(format!(
+                "Valor do pagamento (R$ {:.2}) ultrapassa o valor restante (R$ {:.2})",
+                payment_amount,
+                debt.remaining_amount()
+            ))));
+        }
+
         let payment = Payment::new(&debt, &payment_data);
 
         let payment_created = self.payment_repository.insert(payment).await?;

@@ -5,7 +5,7 @@ use util::{from_row_constructor, getters};
 use uuid::Uuid;
 
 use crate::modules::{
-    chat_bot::domain::formatter::ChatFormatter,
+    chat_bot::domain::formatter::{ChatFormatter, ChatFormatterUtils},
     finance_manager::handler::income::use_cases::CreateIncomeRequest,
 };
 
@@ -64,7 +64,7 @@ impl ChatFormatter for Income {
         format!(
             "{} - {} - {}",
             self.description(),
-            self.amount(),
+            ChatFormatterUtils::format_currency(&self.amount()),
             self.reference().format("%d/%m/%Y"),
         )
     }

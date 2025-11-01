@@ -1,5 +1,6 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use util::{from_row_constructor, getters};
 use uuid::Uuid;
 
@@ -110,14 +111,31 @@ impl ChatFormatter for BankAccount {
     }
 
     fn format_list_for_chat(items: &[Self]) -> String {
+        if items.is_empty() {
+            return "📋 Nenhuma conta cadastrada".to_string();
+        }
+
+        // Agrupar contas por owner
+        let mut accounts_by_owner: BTreeMap<String, Vec<&Self>> = BTreeMap::new();
+        for account in items.iter() {
+            accounts_by_owner
+                .entry(account.owner().clone())
+                .or_insert_with(Vec::new)
+                .push(account);
+        }
+
         let mut output = format!("📋 Contas cadastradas ({})", items.len());
 
-        for account in items.iter() {
-            output.push_str(&format!(
-                "\n🆔 {} - {}",
-                account.identification(),
-                account.name()
-            ));
+        // Listar contas agrupadas por owner
+        for (owner, accounts) in accounts_by_owner.iter() {
+            output.push_str(&format!("\n\n👤 {} ({})", owner, accounts.len()));
+            for account in accounts.iter() {
+                output.push_str(&format!(
+                    "\n {} - {}",
+                    account.identification(),
+                    account.name()
+                ));
+            }
         }
 
         output

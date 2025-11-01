@@ -138,7 +138,7 @@ impl Debt {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DebtStatus {
     /// The debt is unpaid; a.k.a. "Nova dívida"
@@ -163,10 +163,16 @@ impl From<String> for DebtStatus {
 
 impl From<&str> for DebtStatus {
     fn from(s: &str) -> Self {
-        match s {
+        let s_upper = s.to_uppercase();
+        match s_upper.as_str() {
+            // Valores em inglês (banco de dados)
             "UNPAID" => DebtStatus::Unpaid,
             "PARTIALLY_PAID" => DebtStatus::PartiallyPaid,
             "SETTLED" => DebtStatus::Settled,
+            // Valores em português (interface do usuário)
+            "PENDENTE" => DebtStatus::Unpaid,
+            "PARCIAL" => DebtStatus::PartiallyPaid,
+            "PAGO" => DebtStatus::Settled,
             _ => DebtStatus::default(),
         }
     }
@@ -179,6 +185,17 @@ impl From<DebtStatus> for String {
             DebtStatus::PartiallyPaid => "PARTIALLY_PAID".to_string(),
             DebtStatus::Settled => "SETTLED".to_string(),
         }
+    }
+}
+
+impl std::fmt::Display for DebtStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            DebtStatus::Unpaid => "UNPAID",
+            DebtStatus::PartiallyPaid => "PARTIALLY_PAID",
+            DebtStatus::Settled => "SETTLED",
+        };
+        write!(f, "{}", s)
     }
 }
 
@@ -244,6 +261,7 @@ pub struct DebtFilters {
     statuses: Option<Vec<DebtStatus>>,
     start_date: Option<NaiveDate>,
     end_date: Option<NaiveDate>,
+    category_names: Option<Vec<String>>,
 }
 
 getters!(
@@ -253,6 +271,7 @@ getters!(
         statuses: Option<Vec<DebtStatus>>,
         start_date: Option<NaiveDate>,
         end_date: Option<NaiveDate>,
+        category_names: Option<Vec<String>>,
     }
 );
 
@@ -285,6 +304,11 @@ impl DebtFilters {
 
     pub fn with_account_ids(mut self, account_ids: Vec<Uuid>) -> Self {
         self.account_ids = Some(account_ids);
+        self
+    }
+
+    pub fn with_category_names(mut self, category_names: Vec<String>) -> Self {
+        self.category_names = Some(category_names);
         self
     }
 }
@@ -346,6 +370,18 @@ impl ChatFormatter for Debt {
         }
 
         let mut output = String::new();
+        // Summary
+        let total_remaining: Decimal = items.iter().map(|d| *d.remaining_amount()).sum();
+        let total_paid: Decimal = items.iter().map(|d| *d.paid_amount()).sum();
+
+        writeln!(
+            output,
+            "\n🔴 Total em aberto: {}\n✅ Total pago: {}\n\n ######",
+            ChatFormatterUtils::format_currency(&total_remaining),
+            ChatFormatterUtils::format_currency(&total_paid)
+        )
+        .unwrap();
+
         for debt in items.iter() {
             writeln!(
                 output,
@@ -358,22 +394,12 @@ impl ChatFormatter for Debt {
             .unwrap();
             writeln!(
                 output,
-                "💵 {} | 🏷️ {}",
+                "💵 {} | {}",
                 ChatFormatterUtils::format_currency(debt.remaining_amount()),
                 debt.category_name()
             )
             .unwrap();
         }
-
-        // Summary
-        let total_remaining: Decimal = items.iter().map(|d| *d.remaining_amount()).sum();
-
-        writeln!(
-            output,
-            "\n💼 Total em aberto: {}",
-            ChatFormatterUtils::format_currency(&total_remaining)
-        )
-        .unwrap();
 
         output
     }

@@ -2,13 +2,15 @@ use chrono::{Datelike, NaiveDate, Utc};
 use http_error::{HttpError, HttpResult};
 use serde::{Deserialize, Serialize};
 
-use crate::modules::finance_manager::domain::debt::DebtFilters;
+use crate::modules::finance_manager::domain::debt::{DebtFilters, DebtStatus};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SummaryFilters {
     pub start_date: Option<NaiveDate>,
     pub end_date: Option<NaiveDate>,
     pub account_identifications: Option<Vec<String>>,
+    pub category_names: Option<Vec<String>>,
+    pub statuses: Option<Vec<DebtStatus>>,
 }
 
 impl SummaryFilters {
@@ -23,6 +25,8 @@ impl SummaryFilters {
     /// - c:2,3,4 - filter by multiple account identifications
     pub fn try_from(parameters: &[String]) -> HttpResult<Self> {
         let mut account_identifications: Option<Vec<String>> = None;
+        let mut category_names: Option<Vec<String>> = None;
+        let mut statuses: Option<Vec<DebtStatus>> = None;
         let mut date_params = Vec::new();
 
         // Separate date and account parameters
@@ -52,6 +56,29 @@ impl SummaryFilters {
                 }
 
                 account_identifications = Some(ids);
+            } else if let Some(category_param) = param.strip_prefix("cat:") {
+                let names: Vec<String> = category_param
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                category_names = Some(names.clone());
+                if names.is_empty() {
+                    return Err(Box::new(HttpError::bad_request(
+                        "Nome da categoria (cat:) requer um nome. Exemplo: cat:investimento",
+                    )));
+                }
+            } else if let Some(status_param) = param.strip_prefix("status:") {
+                println!("STATUS PARAM: {:?}", status_param);
+                let parsed_statuses: Vec<DebtStatus> = status_param
+                    .split(',')
+                    .map(|s| DebtStatus::from(s.trim()))
+                    .collect();
+
+                println!("PARSED STATUSES: {:?}", parsed_statuses);
+                if !parsed_statuses.is_empty() {
+                    statuses = Some(parsed_statuses);
+                }
             } else {
                 date_params.push(param.clone());
             }
@@ -82,6 +109,8 @@ impl SummaryFilters {
             start_date: date_filters.start_date,
             end_date: date_filters.end_date,
             account_identifications,
+            category_names,
+            statuses,
         })
     }
 
@@ -97,6 +126,16 @@ impl SummaryFilters {
             filters = filters.with_end_date(end);
         }
 
+        if let Some(category_names) = &self.category_names {
+            filters = filters.with_category_names(category_names.clone());
+        }
+
+        if let Some(statuses) = &self.statuses {
+            filters = filters.with_statuses(statuses.clone());
+        }
+
+        println!("SUMMARY FILTERS: {:?}", filters);
+
         filters
     }
 }
@@ -109,6 +148,8 @@ fn get_current_month_range() -> SummaryFilters {
         start_date: Some(start),
         end_date: Some(end),
         account_identifications: None,
+        category_names: None,
+        statuses: None,
     }
 }
 
@@ -125,6 +166,8 @@ fn get_next_month_range() -> SummaryFilters {
         start_date: Some(start),
         end_date: Some(end),
         account_identifications: None,
+        category_names: None,
+        statuses: None,
     }
 }
 
@@ -141,6 +184,8 @@ fn get_previous_month_range() -> SummaryFilters {
         start_date: Some(start),
         end_date: Some(end),
         account_identifications: None,
+        category_names: None,
+        statuses: None,
     }
 }
 
@@ -191,6 +236,8 @@ fn parse_mm_yyyy_format(month_str: &str, year_str: &str) -> HttpResult<SummaryFi
         start_date: Some(start),
         end_date: Some(end),
         account_identifications: None,
+        category_names: None,
+        statuses: None,
     })
 }
 
