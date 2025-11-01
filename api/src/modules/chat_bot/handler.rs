@@ -7,17 +7,13 @@ use telegram_api::domain::send_message::SendMessageRequest;
 use crate::modules::{
     chat_bot::{
         domain::{
-            debt::NewDebtData,
-            formatter::ChatFormatter,
-            income::NewIncomeData,
-            payment::NewPaymentData,
-            summary::SummaryFilters,
-            ChatCommand, ChatCommandType,
+            debt::NewDebtData, formatter::ChatFormatter, income::NewIncomeData,
+            payment::NewPaymentData, summary::SummaryFilters, ChatCommand, ChatCommandType,
         },
         gateway::DynTelegramApiGateway,
     },
     finance_manager::{
-        domain::debt::{DebtFilters, DebtStatus},
+        domain::debt::DebtStatus,
         handler::{
             account::{use_cases::AccountListFilters, DynAccountHandler},
             debt::{use_cases::CreateDebtRequest, DynDebtHandler},
@@ -49,7 +45,7 @@ pub struct ChatBotHandlerImpl {
 
 impl ChatBotHandlerImpl {
     pub async fn handle_list_debts(&self, chat_id: i64, filters: SummaryFilters) -> HttpResult<()> {
-        let mut debt_filters = DebtFilters::default();
+        let mut debt_filters = filters.to_debt_filters();
 
         if let Some(account_identifications) = &filters.account_identifications {
             let accounts = self
