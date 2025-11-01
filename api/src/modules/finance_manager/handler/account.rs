@@ -5,7 +5,7 @@ use http_error::{ext::OptionHttpExt, HttpResult};
 
 use crate::modules::finance_manager::{
     domain::account::BankAccount,
-    handler::account::use_cases::{CreateAccountRequest, UpdateAccountRequest},
+    handler::account::use_cases::{AccountListFilters, CreateAccountRequest, UpdateAccountRequest},
     repository::account::DynAccountRepository,
 };
 
@@ -15,7 +15,7 @@ pub type DynAccountHandler = dyn AccountHandler + Send + Sync;
 pub trait AccountHandler {
     async fn create_account(&self, request: CreateAccountRequest) -> HttpResult<BankAccount>;
 
-    async fn list_accounts(&self) -> HttpResult<Vec<BankAccount>>;
+    async fn list_accounts(&self, filters: AccountListFilters) -> HttpResult<Vec<BankAccount>>;
 
     async fn update_account(&self, request: UpdateAccountRequest) -> HttpResult<BankAccount>;
 }
@@ -47,15 +47,41 @@ impl AccountHandler for AccountHandlerImpl {
         self.account_repository.insert(bank_account).await
     }
 
-    async fn list_accounts(&self) -> HttpResult<Vec<BankAccount>> {
-        self.account_repository.list().await
+    async fn list_accounts(&self, filters: AccountListFilters) -> HttpResult<Vec<BankAccount>> {
+        self.account_repository.list(filters).await
     }
 }
 
 pub mod use_cases {
     use serde::{Deserialize, Serialize};
+    use uuid::Uuid;
 
     use crate::modules::finance_manager::domain::account::configuration::AccountConfiguration;
+
+    #[derive(Debug, Clone, Default, Deserialize, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct AccountListFilters {
+        pub ids: Option<Vec<Uuid>>,
+        pub identifications: Option<Vec<String>>,
+    }
+
+    impl AccountListFilters {
+        pub fn new() -> Self {
+            Self {
+                ..Default::default()
+            }
+        }
+
+        pub fn with_ids(mut self, ids: Vec<Uuid>) -> Self {
+            self.ids = Some(ids);
+            self
+        }
+
+        pub fn with_identifications(mut self, identifications: Vec<String>) -> Self {
+            self.identifications = Some(identifications);
+            self
+        }
+    }
 
     #[derive(Debug, Clone, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]

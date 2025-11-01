@@ -346,22 +346,20 @@ impl ChatFormatter for Debt {
         }
 
         let mut output = String::new();
-        writeln!(output, "📋 Lista de despesas").unwrap();
-
         for debt in items.iter() {
             writeln!(
                 output,
-                "\n{} {} - {}",
+                "\n{} {} - {} 📅{}",
                 debt.status().emoji(),
                 debt.identification(),
-                debt.description()
+                debt.description(),
+                ChatFormatterUtils::format_date(debt.due_date()),
             )
             .unwrap();
             writeln!(
                 output,
-                "💵 {} | 📅 {} | 🏷️ {}",
+                "💵 {} | 🏷️ {}",
                 ChatFormatterUtils::format_currency(debt.remaining_amount()),
-                ChatFormatterUtils::format_date(debt.due_date()),
                 debt.category_name()
             )
             .unwrap();

@@ -7,7 +7,9 @@ use axum::{
 use http_error::HttpResult;
 
 use crate::modules::{
-    finance_manager::handler::account::use_cases::{CreateAccountRequest, UpdateAccountRequest},
+    finance_manager::handler::account::use_cases::{
+        AccountListFilters, CreateAccountRequest, UpdateAccountRequest,
+    },
     routes::AppState,
 };
 
@@ -47,11 +49,14 @@ async fn create_account(
     Ok(Json(account))
 }
 
-async fn list_accounts(state: State<AppState>) -> HttpResult<impl IntoResponse> {
+async fn list_accounts(
+    state: State<AppState>,
+    Json(filters): Json<AccountListFilters>,
+) -> HttpResult<impl IntoResponse> {
     let accounts = state
         .finance_manager_state
         .account_handler
-        .list_accounts()
+        .list_accounts(filters)
         .await?;
 
     Ok(Json(accounts))

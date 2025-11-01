@@ -1,10 +1,11 @@
 use async_trait::async_trait;
 use http_error::HttpResult;
-use sqlx::{Pool, Postgres, Row};
+use sqlx::{Pool, Postgres, QueryBuilder, Row};
 use uuid::Uuid;
 
 use crate::modules::finance_manager::{
-    domain::account::BankAccount, repository::account::entity::BankAccountEntity,
+    domain::account::BankAccount, handler::account::use_cases::AccountListFilters,
+    repository::account::entity::BankAccountEntity,
 };
 
 #[async_trait]
@@ -13,8 +14,7 @@ pub trait AccountRepository {
 
     async fn get_by_identification(&self, identification: &str) -> HttpResult<Option<BankAccount>>;
 
-    // TODO: Add filters
-    async fn list(&self) -> HttpResult<Vec<BankAccount>>;
+    async fn list(&self, filters: AccountListFilters) -> HttpResult<Vec<BankAccount>>;
 
     async fn insert(&self, account: BankAccount) -> HttpResult<BankAccount>;
 
@@ -102,12 +102,29 @@ impl AccountRepository for AccountRepositoryImpl {
         Ok(result.map(BankAccount::from))
     }
 
-    async fn list(&self) -> HttpResult<Vec<BankAccount>> {
-        let rows = sqlx::query(r#"SELECT * FROM finance_manager.account ORDER BY created_at DESC"#)
-            .fetch_all(&self.pool)
-            .await?;
+    async fn list(&self, filters: AccountListFilters) -> HttpResult<Vec<BankAccount>> {
+        let mut builder = QueryBuilder::new("SELECT * FROM finance_manager.account");
+        let mut has_where = false;
 
-        let results: Vec<BankAccountEntity> = rows
+        if let Some(ids) = filters.ids {
+            builder.push(if has_where { " AND " } else { " WHERE " });
+            builder.push("id = ANY(");
+            builder.push_bind(ids);
+            builder.push(")");
+            has_where = true;
+        }
+
+        if let Some(identifications) = filters.identifications {
+            builder.push(if has_where { " AND " } else { " WHERE " });
+            builder.push("identification = ANY(");
+            builder.push_bind(identifications);
+            builder.push(")");
+        }
+
+        let query = builder.build();
+        let rows = query.fetch_all(&self.pool).await?;
+
+        let rows: Vec<BankAccountEntity> = rows
             .into_iter()
             .map(|r| BankAccountEntity {
                 id: r.get("id"),
@@ -120,7 +137,7 @@ impl AccountRepository for AccountRepositoryImpl {
             })
             .collect();
 
-        Ok(results.into_iter().map(BankAccount::from).collect())
+        Ok(rows.into_iter().map(BankAccount::from).collect())
     }
 
     async fn insert(&self, account: BankAccount) -> HttpResult<BankAccount> {
