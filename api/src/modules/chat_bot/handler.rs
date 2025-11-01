@@ -7,8 +7,12 @@ use telegram_api::domain::send_message::SendMessageRequest;
 use crate::modules::{
     chat_bot::{
         domain::{
-            debt::NewDebtData, formatter::ChatFormatter, income::NewIncomeData,
-            payment::NewPaymentData, summary::SummaryFilters, ChatCommand, ChatCommandType,
+            debt::NewDebtData,
+            formatter::ChatFormatter,
+            income::NewIncomeData,
+            payment::NewPaymentData,
+            summary::SummaryFilters,
+            ChatCommand, ChatCommandType,
         },
         gateway::DynTelegramApiGateway,
     },
@@ -47,11 +51,11 @@ impl ChatBotHandlerImpl {
     pub async fn handle_list_debts(&self, chat_id: i64, filters: SummaryFilters) -> HttpResult<()> {
         let mut debt_filters = DebtFilters::default();
 
-        if let Some(account_identifications) = filters.account_identifications {
+        if let Some(account_identifications) = &filters.account_identifications {
             let accounts = self
                 .account_handler
                 .list_accounts(
-                    AccountListFilters::new().with_identifications(account_identifications),
+                    AccountListFilters::new().with_identifications(account_identifications.clone()),
                 )
                 .await?;
             debt_filters = debt_filters
@@ -60,10 +64,20 @@ impl ChatBotHandlerImpl {
 
         let result = self.debt_handler.list_debts(debt_filters).await;
 
-        let message = match result {
+        let mut message = match result {
             Ok(debts) => ChatFormatter::format_list_for_chat(&debts),
             Err(e) => format!("❌ Erro ao listar débitos: {}", e.message),
         };
+
+        message = format!(
+            "📊 Consulta de Débitos Mês: {}\n{}",
+            filters
+                .to_debt_filters()
+                .start_date()
+                .unwrap_or_else(|| chrono::Utc::now().date_naive())
+                .format("%m/%Y"),
+            message
+        );
 
         self.send_message(chat_id, message).await?;
         Ok(())

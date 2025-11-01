@@ -346,6 +346,18 @@ impl ChatFormatter for Debt {
         }
 
         let mut output = String::new();
+        // Summary
+        let total_remaining: Decimal = items.iter().map(|d| *d.remaining_amount()).sum();
+        let total_paid: Decimal = items.iter().map(|d| *d.paid_amount()).sum();
+
+        writeln!(
+            output,
+            "\n🔴 Total em aberto: {}\n✅ Total pago: {}\n\n ######",
+            ChatFormatterUtils::format_currency(&total_remaining),
+            ChatFormatterUtils::format_currency(&total_paid)
+        )
+        .unwrap();
+
         for debt in items.iter() {
             writeln!(
                 output,
@@ -365,15 +377,6 @@ impl ChatFormatter for Debt {
             .unwrap();
         }
 
-        // Summary
-        let total_remaining: Decimal = items.iter().map(|d| *d.remaining_amount()).sum();
-
-        writeln!(
-            output,
-            "\n💼 Total em aberto: {}",
-            ChatFormatterUtils::format_currency(&total_remaining)
-        )
-        .unwrap();
 
         output
     }
