@@ -90,15 +90,15 @@ impl Debt {
     /// Generates a debt from a create debt request
     pub fn from_request(request: &CreateDebtRequest, account: &BankAccount) -> HttpResult<Self> {
         let account_default_due_date = account.default_due_date();
-        if request.due_date.is_none() && account_default_due_date.is_none() {
-            return Err(Box::new(HttpError::bad_request(
-                "Data de vencimento não informada",
-            )));
-        }
-
-        let due_date = request
-            .due_date
-            .unwrap_or(account_default_due_date.unwrap());
+        let due_date = match (request.due_date, account_default_due_date) {
+            (Some(date), _) => date,
+            (None, Some(default_date)) => default_date,
+            (None, None) => {
+                return Err(Box::new(HttpError::bad_request(
+                    "Data de vencimento não informada",
+                )));
+            }
+        };
 
         Ok(Self::new(
             account.id().clone(),
