@@ -10,7 +10,7 @@ pub mod category;
 
 #[async_trait]
 pub trait DebtRepository {
-    async fn list(&self, filters: DebtFilters) -> HttpResult<Vec<Debt>>;
+    async fn list(&self, filters: &DebtFilters) -> HttpResult<Vec<Debt>>;
 
     async fn insert(&self, debt: Debt) -> HttpResult<Debt>;
 
@@ -45,18 +45,19 @@ impl DebtRepository for DebtRepositoryImpl {
                 account_id = $1, 
                 category_name = $2,
                 description = $3, 
-                total_amount = $3, 
-                paid_amount = $4, 
-                discount_amount = $5, 
-                remaining_amount = $6, 
-                due_date = $7, 
-                status = $8, 
-                updated_at = $9
-            WHERE id = $10 
-            RETURNING id, account_id, category_name, identification, description, total_amount, paid_amount, discount_amount, remaining_amount, due_date, status, created_at, updated_at
-            "#
+                total_amount = $4, 
+                paid_amount = $5, 
+                discount_amount = $6, 
+                remaining_amount = $7, 
+                due_date = $8, 
+                status = $9, 
+                updated_at = $10
+            WHERE id = $11 
+            RETURNING *
+            "#,
         )
         .bind(debt_dto.account_id)
+        .bind(debt_dto.category_name)
         .bind(debt_dto.description)
         .bind(debt_dto.total_amount)
         .bind(debt_dto.paid_amount)
@@ -207,7 +208,7 @@ impl DebtRepository for DebtRepositoryImpl {
         Ok(Debt::from(debt_dto))
     }
 
-    async fn list(&self, filters: DebtFilters) -> HttpResult<Vec<Debt>> {
+    async fn list(&self, filters: &DebtFilters) -> HttpResult<Vec<Debt>> {
         let mut builder = QueryBuilder::new("SELECT * FROM finance_manager.debt");
         let mut has_where = false;
 

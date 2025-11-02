@@ -69,7 +69,7 @@ pub async fn list_debts(
     let debts = state
         .finance_manager_state
         .debt_handler
-        .list_debts(filters)
+        .list_debts(&filters)
         .await?;
 
     Ok(Json(debts))

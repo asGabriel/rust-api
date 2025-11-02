@@ -6,12 +6,15 @@ use http_error::{ext::OptionHttpExt, HttpResult};
 use crate::modules::finance_manager::{
     domain::income::Income,
     handler::income::use_cases::CreateIncomeRequest,
-    repository::{account::DynAccountRepository, income::DynIncomeRepository},
+    repository::{
+        account::DynAccountRepository,
+        income::{use_cases::IncomeListFilters, DynIncomeRepository},
+    },
 };
 
 #[async_trait]
 pub trait IncomeHandler {
-    async fn list_incomes(&self) -> HttpResult<Vec<Income>>;
+    async fn list_incomes(&self, filters: IncomeListFilters) -> HttpResult<Vec<Income>>;
     async fn create_income(&self, request: CreateIncomeRequest) -> HttpResult<Income>;
 }
 
@@ -25,8 +28,8 @@ pub struct IncomeHandlerImpl {
 
 #[async_trait]
 impl IncomeHandler for IncomeHandlerImpl {
-    async fn list_incomes(&self) -> HttpResult<Vec<Income>> {
-        self.income_repository.list().await
+    async fn list_incomes(&self, filters: IncomeListFilters) -> HttpResult<Vec<Income>> {
+        self.income_repository.list(&filters).await
     }
 
     async fn create_income(&self, request: CreateIncomeRequest) -> HttpResult<Income> {

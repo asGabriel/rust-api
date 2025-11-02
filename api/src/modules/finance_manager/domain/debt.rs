@@ -308,7 +308,12 @@ impl DebtFilters {
     }
 
     pub fn with_category_names(mut self, category_names: Vec<String>) -> Self {
-        self.category_names = Some(category_names);
+        self.category_names = Some(
+            category_names
+                .into_iter()
+                .map(|name| name.to_uppercase())
+                .collect(),
+        );
         self
     }
 }
@@ -376,27 +381,46 @@ impl ChatFormatter for Debt {
 
         writeln!(
             output,
-            "\n🔴 Total em aberto: {}\n✅ Total pago: {}\n\n ######",
-            ChatFormatterUtils::format_currency(&total_remaining),
-            ChatFormatterUtils::format_currency(&total_paid)
+            "\n✅{} Total pago\n🔴{} Total em aberto\n\n ######\n",
+            ChatFormatterUtils::format_currency(&total_paid),
+            ChatFormatterUtils::format_currency(&total_remaining)
         )
         .unwrap();
 
-        for debt in items.iter() {
+        let mut sorted_items: Vec<&Debt> = items.iter().collect();
+        sorted_items.sort_by(|a, b| {
+            let a_is_paid = a.status() == &DebtStatus::Settled;
+            let b_is_paid = b.status() == &DebtStatus::Settled;
+
+            match (a_is_paid, b_is_paid) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => a.due_date().cmp(b.due_date()),
+            }
+        });
+
+        for debt in sorted_items.iter() {
+            let (value, due_date) = if *debt.remaining_amount() > Decimal::ZERO {
+                (debt.remaining_amount(), *debt.due_date())
+            } else {
+                (
+                    debt.paid_amount(),
+                    debt.updated_at().unwrap_or(Utc::now()).naive_utc().date(),
+                )
+            };
+
+            // Formato compacto: emoji ID - Descrição | DD/MM | 💵Valor
+            let date_str = due_date.format("%d/%m").to_string();
+            let value_str = format!("{:.0}", value);
+
             writeln!(
                 output,
-                "\n{} {} - {} 📅{}",
+                "{}{}: {} 💵{} - {}",
                 debt.status().emoji(),
                 debt.identification(),
+                date_str,
+                value_str,
                 debt.description(),
-                ChatFormatterUtils::format_date(debt.due_date()),
-            )
-            .unwrap();
-            writeln!(
-                output,
-                "💵 {} | {}",
-                ChatFormatterUtils::format_currency(debt.remaining_amount()),
-                debt.category_name()
             )
             .unwrap();
         }

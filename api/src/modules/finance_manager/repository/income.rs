@@ -1,15 +1,16 @@
 use async_trait::async_trait;
 use http_error::HttpResult;
-use sqlx::{Pool, Postgres, Row};
+use sqlx::{Pool, Postgres, QueryBuilder, Row};
 
-use crate::modules::finance_manager::domain::income::Income;
+use crate::modules::finance_manager::{
+    domain::income::Income, repository::income::use_cases::IncomeListFilters,
+};
 
 #[async_trait]
 pub trait IncomeRepository {
     async fn insert(&self, income: Income) -> HttpResult<Income>;
 
-    // TODO: Add filters
-    async fn list(&self) -> HttpResult<Vec<Income>>;
+    async fn list(&self, filters: &IncomeListFilters) -> HttpResult<Vec<Income>>;
 }
 
 pub type DynIncomeRepository = dyn IncomeRepository + Send + Sync;
@@ -27,25 +28,40 @@ impl IncomeRepositoryImpl {
 
 #[async_trait]
 impl IncomeRepository for IncomeRepositoryImpl {
-    async fn list(&self) -> HttpResult<Vec<Income>> {
-        let rows = sqlx::query(r#"SELECT * FROM finance_manager.income ORDER BY created_at DESC"#)
-            .fetch_all(&self.pool)
-            .await?;
+    async fn list(&self, filters: &IncomeListFilters) -> HttpResult<Vec<Income>> {
+        let mut builder = QueryBuilder::new("SELECT * FROM finance_manager.income");
+        let mut has_where = false;
 
-        let income_entities: Vec<entity::IncomeEntity> = rows
+        if let Some(start_date) = filters.start_date() {
+            builder.push(if has_where { " AND " } else { " WHERE " });
+            builder.push("reference >= ");
+            builder.push_bind(start_date);
+            has_where = true;
+        }
+
+        if let Some(end_date) = filters.end_date() {
+            builder.push(if has_where { " AND " } else { " WHERE " });
+            builder.push("reference <= ");
+            builder.push_bind(end_date);
+        }
+
+        let query = builder.build();
+        let rows = query.fetch_all(&self.pool).await?;
+
+        Ok(rows
             .into_iter()
-            .map(|row| entity::IncomeEntity {
-                id: row.get("id"),
-                account_id: row.get("account_id"),
-                description: row.get("description"),
-                amount: row.get("amount"),
-                reference: row.get("reference"),
-                created_at: row.get("created_at"),
-                updated_at: row.get("updated_at"),
+            .map(|row| {
+                Income::from(entity::IncomeEntity {
+                    id: row.get("id"),
+                    account_id: row.get("account_id"),
+                    description: row.get("description"),
+                    amount: row.get("amount"),
+                    reference: row.get("reference"),
+                    created_at: row.get("created_at"),
+                    updated_at: row.get("updated_at"),
+                })
             })
-            .collect();
-
-        Ok(income_entities.into_iter().map(Income::from).collect())
+            .collect())
     }
 
     async fn insert(&self, income: Income) -> HttpResult<Income> {
@@ -88,6 +104,42 @@ impl IncomeRepository for IncomeRepositoryImpl {
 
         Ok(Income::from(income_entity))
     }
+}
+
+pub mod use_cases {
+    use chrono::NaiveDate;
+    use serde::{Deserialize, Serialize};
+    use util::getters;
+
+    #[derive(Debug, Clone, Default, Deserialize, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct IncomeListFilters {
+        start_date: Option<NaiveDate>,
+        end_date: Option<NaiveDate>,
+    }
+
+    impl IncomeListFilters {
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        pub fn with_start_date(mut self, start_date: NaiveDate) -> Self {
+            self.start_date = Some(start_date);
+            self
+        }
+
+        pub fn with_end_date(mut self, end_date: NaiveDate) -> Self {
+            self.end_date = Some(end_date);
+            self
+        }
+    }
+
+    getters!(
+        IncomeListFilters {
+            start_date: Option<NaiveDate>,
+            end_date: Option<NaiveDate>,
+        }
+    );
 }
 
 pub mod entity {
