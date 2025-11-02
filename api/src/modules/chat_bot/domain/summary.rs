@@ -69,13 +69,11 @@ impl SummaryFilters {
                     )));
                 }
             } else if let Some(status_param) = param.strip_prefix("status:") {
-                println!("STATUS PARAM: {:?}", status_param);
                 let parsed_statuses: Vec<DebtStatus> = status_param
                     .split(',')
                     .map(|s| DebtStatus::from(s.trim()))
                     .collect();
 
-                println!("PARSED STATUSES: {:?}", parsed_statuses);
                 if !parsed_statuses.is_empty() {
                     statuses = Some(parsed_statuses);
                 }
@@ -133,8 +131,6 @@ impl SummaryFilters {
         if let Some(statuses) = &self.statuses {
             filters = filters.with_statuses(statuses.clone());
         }
-
-        println!("SUMMARY FILTERS: {:?}", filters);
 
         filters
     }

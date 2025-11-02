@@ -211,8 +211,6 @@ impl DebtRepository for DebtRepositoryImpl {
         let mut builder = QueryBuilder::new("SELECT * FROM finance_manager.debt");
         let mut has_where = false;
 
-        println!("filters: {:?}", filters);
-
         if let Some(start_date) = filters.start_date() {
             builder.push(if has_where { " AND " } else { " WHERE " });
             builder.push("due_date >= ");
@@ -244,7 +242,6 @@ impl DebtRepository for DebtRepositoryImpl {
         }
 
         if let Some(statuses) = filters.statuses() {
-            println!("statuses: {:?}", statuses);
             builder.push(if has_where { " AND " } else { " WHERE " });
             builder.push("status = ANY(");
             builder.push_bind(
@@ -256,8 +253,6 @@ impl DebtRepository for DebtRepositoryImpl {
             builder.push(")");
         }
 
-        // Log da query SQL com placeholders
-        println!("SQL Query: {}", builder.sql());
         let query = builder.build();
         let rows = query.fetch_all(&self.pool).await?;
 
