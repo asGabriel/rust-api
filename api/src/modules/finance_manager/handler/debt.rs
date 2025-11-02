@@ -23,7 +23,7 @@ pub type DynDebtHandler = dyn DebtHandler + Send + Sync;
 
 #[async_trait]
 pub trait DebtHandler {
-    async fn list_debts(&self, filters: DebtFilters) -> HttpResult<Vec<Debt>>;
+    async fn list_debts(&self, filters: &DebtFilters) -> HttpResult<Vec<Debt>>;
     async fn create_debt(&self, request: CreateDebtRequest) -> HttpResult<Debt>;
 
     // DEBT_CATEGORY
@@ -90,8 +90,8 @@ impl DebtHandler for DebtHandlerImpl {
         Ok(debt)
     }
 
-    async fn list_debts(&self, filters: DebtFilters) -> HttpResult<Vec<Debt>> {
-        self.debt_repository.list(filters).await
+    async fn list_debts(&self, filters: &DebtFilters) -> HttpResult<Vec<Debt>> {
+        self.debt_repository.list(&filters).await
     }
 }
 

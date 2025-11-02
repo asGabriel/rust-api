@@ -2,7 +2,10 @@ use chrono::{Datelike, NaiveDate, Utc};
 use http_error::{HttpError, HttpResult};
 use serde::{Deserialize, Serialize};
 
-use crate::modules::finance_manager::domain::debt::{DebtFilters, DebtStatus};
+use crate::modules::finance_manager::{
+    domain::debt::{DebtFilters, DebtStatus},
+    repository::income::use_cases::IncomeListFilters,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SummaryFilters {
@@ -113,26 +116,29 @@ impl SummaryFilters {
     }
 
     /// Convert SummaryFilters to DebtFilters for querying
-    pub fn to_debt_filters(&self) -> DebtFilters {
-        let mut filters = DebtFilters::default();
+    pub fn to_filters(&self) -> (DebtFilters, IncomeListFilters) {
+        let mut debt_filters = DebtFilters::default();
+        let mut income_filters = IncomeListFilters::default();
 
         if let Some(start) = self.start_date {
-            filters = filters.with_start_date(start);
+            debt_filters = debt_filters.with_start_date(start);
+            income_filters = income_filters.with_start_date(start);
         }
 
         if let Some(end) = self.end_date {
-            filters = filters.with_end_date(end);
+            debt_filters = debt_filters.with_end_date(end);
+            income_filters = income_filters.with_end_date(end);
         }
 
         if let Some(category_names) = &self.category_names {
-            filters = filters.with_category_names(category_names.clone());
+            debt_filters = debt_filters.with_category_names(category_names.clone());
         }
 
         if let Some(statuses) = &self.statuses {
-            filters = filters.with_statuses(statuses.clone());
+            debt_filters = debt_filters.with_statuses(statuses.clone());
         }
 
-        filters
+        (debt_filters, income_filters)
     }
 }
 

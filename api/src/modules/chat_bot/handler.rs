@@ -2,13 +2,18 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use http_error::HttpResult;
+use rust_decimal::Decimal;
 use telegram_api::domain::send_message::SendMessageRequest;
 
 use crate::modules::{
     chat_bot::{
         domain::{
-            debt::NewDebtData, formatter::ChatFormatter, income::NewIncomeData,
-            payment::NewPaymentData, summary::SummaryFilters, ChatCommand, ChatCommandType,
+            debt::NewDebtData,
+            formatter::{ChatFormatter, ChatFormatterUtils},
+            income::NewIncomeData,
+            payment::NewPaymentData,
+            summary::SummaryFilters,
+            ChatCommand, ChatCommandType,
         },
         gateway::DynTelegramApiGateway,
     },
@@ -25,6 +30,7 @@ use crate::modules::{
                 DynPaymentHandler,
             },
         },
+        repository::income::use_cases::IncomeListFilters,
     },
 };
 
@@ -45,7 +51,7 @@ pub struct ChatBotHandlerImpl {
 
 impl ChatBotHandlerImpl {
     pub async fn handle_list_debts(&self, chat_id: i64, filters: SummaryFilters) -> HttpResult<()> {
-        let mut debt_filters = filters.to_debt_filters();
+        let (mut debt_filters, income_filters) = filters.to_filters();
 
         if let Some(account_identifications) = &filters.account_identifications {
             let accounts = self
@@ -58,7 +64,18 @@ impl ChatBotHandlerImpl {
                 .with_account_ids(accounts.into_iter().map(|a| a.id().clone()).collect());
         }
 
-        let result = self.debt_handler.list_debts(debt_filters).await;
+        let result = self.debt_handler.list_debts(&debt_filters).await;
+
+        let income_result = match self.income_handler.list_incomes(income_filters).await {
+            Ok(incomes) => {
+                let total_income: Decimal = incomes.iter().map(|i| *i.amount()).sum();
+                format!(
+                    "💰{} Total de receitas",
+                    ChatFormatterUtils::format_currency(&total_income)
+                )
+            }
+            Err(e) => format!("❌ Erro ao listar receitas: {}", e.message),
+        };
 
         let mut message = match result {
             Ok(debts) => ChatFormatter::format_list_for_chat(&debts),
@@ -66,12 +83,12 @@ impl ChatBotHandlerImpl {
         };
 
         message = format!(
-            "📊 Consulta de Débitos Mês: {}\n{}",
-            filters
-                .to_debt_filters()
+            "📊 Consulta de Débitos Mês: {}\n{}{}",
+            debt_filters
                 .start_date()
                 .unwrap_or_else(|| chrono::Utc::now().date_naive())
                 .format("%m/%Y"),
+            income_result,
             message
         );
 
@@ -156,7 +173,10 @@ impl ChatBotHandlerImpl {
     }
 
     async fn handle_list_incomes(&self, chat_id: i64) -> HttpResult<()> {
-        let result = self.income_handler.list_incomes().await;
+        let result = self
+            .income_handler
+            .list_incomes(IncomeListFilters::default())
+            .await;
         let message = match result {
             Ok(incomes) => ChatFormatter::format_list_for_chat(&incomes),
             Err(e) => format!("❌ Erro ao listar receitas: {}", e.message),

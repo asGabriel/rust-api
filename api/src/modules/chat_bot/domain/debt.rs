@@ -343,4 +343,26 @@ mod tests {
             .message
             .contains("Categoria é obrigatória"));
     }
+
+    #[test]
+    fn test_try_from_with_category_accent() {
+        let params = vec![
+            "Psicóloga".to_string(),
+            "300".to_string(),
+            "c:9".to_string(),
+            "cat:saúde".to_string(),
+            "d:10/11".to_string(),
+            "p:s".to_string(),
+        ];
+        let result = NewDebtData::try_from(&params);
+        assert!(result.is_ok());
+
+        let data = result.unwrap();
+        assert_eq!(data.description, "Psicóloga");
+        assert_eq!(data.amount, Decimal::new(300, 0));
+        assert_eq!(data.account_identification, "9");
+        assert_eq!(data.category_name, "SAÚDE"); // Deve ser SAÚDE, não Psicóloga!
+        assert_eq!(data.is_paid, true);
+        assert!(data.due_date.is_some());
+    }
 }

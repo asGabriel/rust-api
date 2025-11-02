@@ -2,7 +2,11 @@ use axum::{extract::State, response::IntoResponse, routing::post, Json, Router};
 use http_error::HttpResult;
 
 use crate::modules::{
-    finance_manager::handler::income::use_cases::CreateIncomeRequest, routes::AppState,
+    finance_manager::{
+        handler::income::use_cases::CreateIncomeRequest,
+        repository::income::use_cases::IncomeListFilters,
+    },
+    routes::AppState,
 };
 
 pub fn configure_routes() -> Router<AppState> {
@@ -31,7 +35,7 @@ async fn list_incomes(state: State<AppState>) -> HttpResult<impl IntoResponse> {
     let incomes = state
         .finance_manager_state
         .income_handler
-        .list_incomes()
+        .list_incomes(IncomeListFilters::default())
         .await?;
 
     Ok(Json(incomes))

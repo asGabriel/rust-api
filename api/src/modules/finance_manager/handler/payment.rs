@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use http_error::{ext::OptionHttpExt, HttpError, HttpResult};
+use http_error::{ext::OptionHttpExt, HttpResult};
 
 use crate::modules::finance_manager::{
     domain::payment::Payment,
@@ -26,7 +26,7 @@ pub struct PaymentHandlerImpl {
 #[async_trait]
 impl PaymentHandler for PaymentHandlerImpl {
     async fn create_payment(&self, request: CreatePaymentRequest) -> HttpResult<Payment> {
-        let (debt, payment_data) = match request {
+        let (mut debt, payment_data) = match request {
             CreatePaymentRequest::PaymentRequestFromIdentification(data) => (
                 self.debt_repository
                     .get_by_identification(&data.debt_identification)
@@ -43,33 +43,13 @@ impl PaymentHandler for PaymentHandlerImpl {
             ),
         };
 
-        if debt.is_paid() {
-            return Err(Box::new(HttpError::bad_request("Dívida já paga")));
-        }
-
-        // Calcular o valor do pagamento antes de criar
-        let payment_amount = payment_data.amount(&debt);
-
-        // Verificar se o pagamento não ultrapassa o valor restante
-        let total_after_payment = *debt.paid_amount() + payment_amount;
-        if total_after_payment > *debt.total_amount() {
-            return Err(Box::new(HttpError::bad_request(format!(
-                "Valor do pagamento (R$ {:.2}) ultrapassa o valor restante (R$ {:.2})",
-                payment_amount,
-                debt.remaining_amount()
-            ))));
-        }
-
         let payment = Payment::new(&debt, &payment_data);
+        debt.process_payment(&payment, false)?;
 
-        let payment_created = self.payment_repository.insert(payment).await?;
+        let payment = self.payment_repository.insert(payment).await?;
+        self.debt_repository.update(debt).await?;
 
-        // TODO: dispatch payment.created event
-        self.pubsub
-            .publish_debt_updated_event(&payment_created)
-            .await?;
-
-        Ok(payment_created)
+        Ok(payment)
     }
 }
 

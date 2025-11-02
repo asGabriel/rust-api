@@ -111,7 +111,7 @@ impl Debt {
         ))
     }
 
-    pub fn is_paid(&self) -> bool {
+    fn is_paid(&self) -> bool {
         self.paid_amount == self.total_amount || self.paid_amount > self.total_amount
     }
 
@@ -135,6 +135,37 @@ impl Debt {
         } else {
             self.status = DebtStatus::Unpaid;
         }
+    }
+
+    fn force_settlement(&mut self, payment: &Payment) {
+        self.status = DebtStatus::Settled;
+        self.total_amount = *payment.amount();
+        self.paid_amount = *payment.amount();
+        self.remaining_amount = Decimal::ZERO;
+        self.updated_at = Some(Utc::now());
+    }
+
+    pub fn process_payment(&mut self, payment: &Payment, force_settlement: bool) -> HttpResult<()> {
+        if self.is_paid() {
+            return Err(Box::new(HttpError::bad_request("Dívida já paga")));
+        }
+
+        if force_settlement {
+            self.force_settlement(payment);
+            return Ok(());
+        }
+
+        if *payment.amount() > self.remaining_amount {
+            return Err(Box::new(HttpError::bad_request(format!(
+                "Valor do pagamento (R$ {:.2}) ultrapassa o valor restante (R$ {:.2}). Caso queira forçar a baixa adicione 'baixa:s' ao comando",
+                payment.amount(),
+                self.remaining_amount
+            ))));
+        }
+
+        self.payment_created(payment);
+
+        Ok(())
     }
 }
 
@@ -308,7 +339,12 @@ impl DebtFilters {
     }
 
     pub fn with_category_names(mut self, category_names: Vec<String>) -> Self {
-        self.category_names = Some(category_names);
+        self.category_names = Some(
+            category_names
+                .into_iter()
+                .map(|name| name.to_uppercase())
+                .collect(),
+        );
         self
     }
 }
@@ -376,27 +412,46 @@ impl ChatFormatter for Debt {
 
         writeln!(
             output,
-            "\n🔴 Total em aberto: {}\n✅ Total pago: {}\n\n ######",
-            ChatFormatterUtils::format_currency(&total_remaining),
-            ChatFormatterUtils::format_currency(&total_paid)
+            "\n✅{} Total pago\n🔴{} Total em aberto\n\n ######\n",
+            ChatFormatterUtils::format_currency(&total_paid),
+            ChatFormatterUtils::format_currency(&total_remaining)
         )
         .unwrap();
 
-        for debt in items.iter() {
+        let mut sorted_items: Vec<&Debt> = items.iter().collect();
+        sorted_items.sort_by(|a, b| {
+            let a_is_paid = a.status() == &DebtStatus::Settled;
+            let b_is_paid = b.status() == &DebtStatus::Settled;
+
+            match (a_is_paid, b_is_paid) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => a.due_date().cmp(b.due_date()),
+            }
+        });
+
+        for debt in sorted_items.iter() {
+            let (value, due_date) = if *debt.remaining_amount() > Decimal::ZERO {
+                (debt.remaining_amount(), *debt.due_date())
+            } else {
+                (
+                    debt.paid_amount(),
+                    debt.updated_at().unwrap_or(Utc::now()).naive_utc().date(),
+                )
+            };
+
+            // Formato compacto: emoji ID - Descrição | DD/MM | 💵Valor
+            let date_str = due_date.format("%d/%m").to_string();
+            let value_str = format!("{:.0}", value);
+
             writeln!(
                 output,
-                "\n{} {} - {} 📅{}",
+                "{}{}: {} 💵{} - {}",
                 debt.status().emoji(),
                 debt.identification(),
+                date_str,
+                value_str,
                 debt.description(),
-                ChatFormatterUtils::format_date(debt.due_date()),
-            )
-            .unwrap();
-            writeln!(
-                output,
-                "💵 {} | {}",
-                ChatFormatterUtils::format_currency(debt.remaining_amount()),
-                debt.category_name()
             )
             .unwrap();
         }
