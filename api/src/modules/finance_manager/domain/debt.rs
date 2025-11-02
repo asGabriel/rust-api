@@ -111,7 +111,7 @@ impl Debt {
         ))
     }
 
-    pub fn is_paid(&self) -> bool {
+    fn is_paid(&self) -> bool {
         self.paid_amount == self.total_amount || self.paid_amount > self.total_amount
     }
 
@@ -135,6 +135,37 @@ impl Debt {
         } else {
             self.status = DebtStatus::Unpaid;
         }
+    }
+
+    fn force_settlement(&mut self, payment: &Payment) {
+        self.status = DebtStatus::Settled;
+        self.total_amount = *payment.amount();
+        self.paid_amount = *payment.amount();
+        self.remaining_amount = Decimal::ZERO;
+        self.updated_at = Some(Utc::now());
+    }
+
+    pub fn process_payment(&mut self, payment: &Payment, force_settlement: bool) -> HttpResult<()> {
+        if self.is_paid() {
+            return Err(Box::new(HttpError::bad_request("Dívida já paga")));
+        }
+
+        if force_settlement {
+            self.force_settlement(payment);
+            return Ok(());
+        }
+
+        if *payment.amount() > self.remaining_amount {
+            return Err(Box::new(HttpError::bad_request(format!(
+                "Valor do pagamento (R$ {:.2}) ultrapassa o valor restante (R$ {:.2}). Caso queira forçar a baixa adicione 'baixa:s' ao comando",
+                payment.amount(),
+                self.remaining_amount
+            ))));
+        }
+
+        self.payment_created(payment);
+
+        Ok(())
     }
 }
 

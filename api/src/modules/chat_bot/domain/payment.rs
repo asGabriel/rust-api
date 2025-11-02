@@ -3,7 +3,7 @@ use http_error::{HttpError, HttpResult};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use crate::modules::chat_bot::domain::formatter::ChatFormatterUtils;
+use crate::modules::chat_bot::domain::utils;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NewPaymentData {
@@ -11,6 +11,7 @@ pub struct NewPaymentData {
     pub amount: Option<Decimal>,
     pub discount_amount: Option<Decimal>,
     pub payment_date: Option<NaiveDate>,
+    pub settled: bool,
 }
 
 impl NewPaymentData {
@@ -21,32 +22,58 @@ impl NewPaymentData {
             )));
         }
 
-        let debt_identification = parameters[0].clone();
+        let mut debt_identification: String = String::new();
+        let mut amount: Option<Decimal> = None;
+        let mut payment_date: Option<NaiveDate> = None;
+        let mut settled = false;
 
-        // Amount is optional - parse if provided
-        let amount = if parameters.len() >= 2 && !parameters[1].trim().is_empty() {
-            Some(parameters[1].parse::<Decimal>().map_err(|_| {
-                Box::new(HttpError::bad_request(format!(
-                    "Valor inválido: {}",
-                    parameters[1]
-                )))
-            })?)
-        } else {
-            None
-        };
+        for param in parameters {
+            let param = param.trim();
 
-        // Parse payment_date if provided, otherwise use today's date
-        let payment_date = if parameters.len() >= 3 && !parameters[2].trim().is_empty() {
-            Some(ChatFormatterUtils::parse_friendly_date(&parameters[2])?)
-        } else {
-            Some(chrono::Utc::now().date_naive())
-        };
+            match param.split_once(':') {
+                Some(("id", id)) if !id.is_empty() => {
+                    debt_identification = id.to_string();
+                }
+                Some(("id", _)) => {
+                    return Err(Box::new(HttpError::bad_request(
+                        "Identificação da dívida (id:) é obrigatória",
+                    )));
+                }
+                Some(("d", date_str)) => {
+                    payment_date = Some(utils::parse_date(date_str)?);
+                }
+                Some(("baixa", flag)) => {
+                    settled = match flag {
+                        "s" => true,
+                        "n" => false,
+                        "" => false,
+                        _ => false,
+                    };
+                }
+                None => {
+                    if let Ok(num) = param.parse::<Decimal>() {
+                        if num <= Decimal::ZERO {
+                            return Err(Box::new(HttpError::bad_request(
+                                "Valor deve ser maior que zero",
+                            )));
+                        }
+                        amount = Some(num);
+                    }
+                }
+                _ => {
+                    if debt_identification.is_empty() {
+                        return Err(Box::new(HttpError::bad_request("Comando inválido")));
+                    }
+                }
+            }
+        }
 
         Ok(NewPaymentData {
             debt_identification,
             amount,
             discount_amount: None,
             payment_date,
+            settled,
         })
     }
 }
