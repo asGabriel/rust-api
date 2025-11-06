@@ -44,7 +44,7 @@ impl PaymentHandler for PaymentHandlerImpl {
         };
 
         let payment = Payment::new(&debt, &payment_data);
-        debt.process_payment(&payment, false)?;
+        debt.process_payment(&payment, payment_data.force_settlement)?;
 
         let payment = self.payment_repository.insert(payment).await?;
         self.debt_repository.update(debt).await?;
@@ -89,6 +89,7 @@ pub mod use_cases {
     pub struct PaymentBasicData {
         pub payment_date: NaiveDate,
         pub amount: Option<Decimal>,
+        pub force_settlement: bool,
     }
 
     impl PaymentBasicData {
