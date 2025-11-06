@@ -79,6 +79,7 @@ impl DebtHandler for DebtHandlerImpl {
                 &PaymentBasicData {
                     amount: Some(*debt.total_amount()),
                     payment_date: debt.due_date().clone(),
+                    force_settlement: false,
                 },
             );
 

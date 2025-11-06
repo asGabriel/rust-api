@@ -158,6 +158,7 @@ impl ChatBotHandlerImpl {
                         payment_date: payment
                             .payment_date
                             .unwrap_or(chrono::Utc::now().date_naive()),
+                        force_settlement: payment.settled,
                     },
                 },
             ))
