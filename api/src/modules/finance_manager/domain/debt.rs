@@ -8,10 +8,7 @@ use uuid::Uuid;
 
 use crate::modules::{
     chat_bot::domain::formatter::{ChatFormatter, ChatFormatterUtils},
-    finance_manager::{
-        domain::{account::BankAccount, payment::Payment},
-        handler::debt::use_cases::CreateDebtRequest,
-    },
+    finance_manager::{domain::payment::Payment, handler::debt::use_cases::CreateDebtRequest},
 };
 
 pub mod category;
@@ -23,9 +20,6 @@ pub mod recurrence_run;
 pub struct Debt {
     /// Unique identifier
     id: Uuid,
-    /// Unique identifier of the account
-    /// The account that the debt belongs to
-    account_id: Uuid,
     /// The category of the debt
     category_name: String,
     /// The identification of the debt for human readability
@@ -57,7 +51,6 @@ pub struct Debt {
 
 impl Debt {
     pub fn new(
-        account_id: Uuid,
         description: String,
         total_amount: Decimal,
         paid_amount: Option<Decimal>,
@@ -72,7 +65,6 @@ impl Debt {
 
         Self {
             id: uuid,
-            account_id,
             category_name,
             identification: String::new(), // database auto increment
             description,
@@ -88,31 +80,19 @@ impl Debt {
     }
 
     /// Generates a debt from a create debt request
-    pub fn from_request(request: &CreateDebtRequest, account: &BankAccount) -> HttpResult<Self> {
-        let account_default_due_date = account.default_due_date();
-        let due_date = match (request.due_date, account_default_due_date) {
-            (Some(date), _) => date,
-            (None, Some(default_date)) => default_date,
-            (None, None) => {
-                return Err(Box::new(HttpError::bad_request(
-                    "Data de vencimento não informada",
-                )));
-            }
-        };
-
+    pub fn from_request(request: &CreateDebtRequest) -> HttpResult<Self> {
         Ok(Self::new(
-            account.id().clone(),
             request.description.clone(),
-            request.total_amount.clone(),
-            request.paid_amount.clone(),
-            request.discount_amount.clone(),
-            due_date,
+            request.total_amount,
+            request.paid_amount,
+            request.discount_amount,
+            request.due_date,
             request.category_name.clone(),
         ))
     }
 
     fn is_paid(&self) -> bool {
-        self.paid_amount == self.total_amount || self.paid_amount > self.total_amount
+        self.paid_amount >= self.total_amount
     }
 
     pub fn payment_created(&mut self, payment: &Payment) {
@@ -128,7 +108,7 @@ impl Debt {
     }
 
     fn recalculate_status(&mut self) {
-        if self.paid_amount == self.total_amount || self.paid_amount > self.total_amount {
+        if self.paid_amount >= self.total_amount {
             self.status = DebtStatus::Settled;
         } else if self.remaining_amount > Decimal::ZERO {
             self.status = DebtStatus::PartiallyPaid;
@@ -251,7 +231,6 @@ impl DebtStatus {
 getters!(
     Debt {
         id: Uuid,
-        account_id: Uuid,
         category_name: String,
         identification: String,
         description: String,
@@ -269,7 +248,6 @@ getters!(
 from_row_constructor! {
     Debt {
         id: Uuid,
-        account_id: Uuid,
         category_name: String,
         identification: String,
         description: String,
@@ -288,7 +266,6 @@ from_row_constructor! {
 #[serde(rename_all = "camelCase")]
 pub struct DebtFilters {
     ids: Option<Vec<Uuid>>,
-    account_ids: Option<Vec<Uuid>>,
     statuses: Option<Vec<DebtStatus>>,
     start_date: Option<NaiveDate>,
     end_date: Option<NaiveDate>,
@@ -298,7 +275,6 @@ pub struct DebtFilters {
 getters!(
     DebtFilters {
         ids: Option<Vec<Uuid>>,
-        account_ids: Option<Vec<Uuid>>,
         statuses: Option<Vec<DebtStatus>>,
         start_date: Option<NaiveDate>,
         end_date: Option<NaiveDate>,
@@ -330,11 +306,6 @@ impl DebtFilters {
 
     pub fn with_end_date(mut self, end_date: NaiveDate) -> Self {
         self.end_date = Some(end_date);
-        self
-    }
-
-    pub fn with_account_ids(mut self, account_ids: Vec<Uuid>) -> Self {
-        self.account_ids = Some(account_ids);
         self
     }
 

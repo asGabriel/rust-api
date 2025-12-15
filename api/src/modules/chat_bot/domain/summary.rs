@@ -208,25 +208,25 @@ fn parse_date_command(param: &str) -> HttpResult<SummaryFilters> {
 /// Parse MM/YYYY format (e.g., 06/2025)
 fn parse_mm_yyyy_format(month_str: &str, year_str: &str) -> HttpResult<SummaryFilters> {
     let month: u32 = month_str.parse().map_err(|_| {
-        Box::new(HttpError::bad_request(format!(
-            "Mês inválido no formato MM/YYYY. Use um número de 01 a 12. Exemplo: 06/2025"
-        )))
+        Box::new(HttpError::bad_request(
+            "Mês inválido no formato MM/YYYY. Use um número de 01 a 12. Exemplo: 06/2025".to_string(),
+        ))
     })?;
 
     let year: i32 = year_str.parse().map_err(|_| {
-        Box::new(HttpError::bad_request(format!(
-            "Ano inválido no formato MM/YYYY. Use um ano válido (ex: 2025). Exemplo: 06/2025"
-        )))
+        Box::new(HttpError::bad_request(
+            "Ano inválido no formato MM/YYYY. Use um ano válido (ex: 2025). Exemplo: 06/2025".to_string(),
+        ))
     })?;
 
-    if month < 1 || month > 12 {
+    if !(1..=12).contains(&month) {
         return Err(Box::new(HttpError::bad_request(format!(
             "Mês inválido: {}. Deve ser entre 1 e 12",
             month
         ))));
     }
 
-    if year < 1900 || year > 2100 {
+    if !(1900..=2100).contains(&year) {
         return Err(Box::new(HttpError::bad_request(format!(
             "Ano inválido: {}. Deve ser entre 1900 e 2100",
             year

@@ -130,7 +130,7 @@ mod entity {
                 amount: *recurrence.amount(),
                 active: *recurrence.active(),
                 start_date: *recurrence.start_date(),
-                end_date: recurrence.end_date().clone(),
+                end_date: *recurrence.end_date(),
                 day_of_month: *recurrence.day_of_month(),
                 next_run_date: *recurrence.next_run_date(),
                 created_at: recurrence.created_at().naive_utc(),

@@ -8,6 +8,7 @@ use crate::modules::chat_bot::domain::utils;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NewPaymentData {
     pub debt_identification: String,
+    pub account_identification: String,
     pub amount: Option<Decimal>,
     pub discount_amount: Option<Decimal>,
     pub payment_date: Option<NaiveDate>,
@@ -23,6 +24,7 @@ impl NewPaymentData {
         }
 
         let mut debt_identification: String = String::new();
+        let mut account_identification: String = String::new();
         let mut amount: Option<Decimal> = None;
         let mut payment_date: Option<NaiveDate> = None;
         let mut settled = false;
@@ -37,6 +39,14 @@ impl NewPaymentData {
                 Some(("id", _)) => {
                     return Err(Box::new(HttpError::bad_request(
                         "Identificação da dívida (id:) é obrigatória",
+                    )));
+                }
+                Some(("c", id)) if !id.is_empty() => {
+                    account_identification = id.to_string();
+                }
+                Some(("c", _)) => {
+                    return Err(Box::new(HttpError::bad_request(
+                        "Identificação da conta (c:) é obrigatória",
                     )));
                 }
                 Some(("d", date_str)) => {
@@ -70,6 +80,7 @@ impl NewPaymentData {
 
         Ok(NewPaymentData {
             debt_identification,
+            account_identification,
             amount,
             discount_amount: None,
             payment_date,

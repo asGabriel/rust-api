@@ -38,7 +38,7 @@ pub async fn handle_events(
                                 .telegram_gateway
                                 .send_message(SendMessageRequest {
                                     chat_id: message.chat.id,
-                                    text: format!("❌ erro interno ao processar seu comando"),
+                                    text: "❌ erro interno ao processar seu comando".to_string(),
                                 })
                                 .await;
                         }

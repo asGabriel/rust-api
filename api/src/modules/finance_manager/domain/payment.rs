@@ -33,11 +33,11 @@ pub struct Payment {
 }
 
 impl Payment {
-    pub fn new(debt: &Debt, payment_data: &PaymentBasicData) -> Self {
+    pub fn new(debt: &Debt, account_id: &Uuid, payment_data: &PaymentBasicData) -> Self {
         Self {
             id: Uuid::new_v4(),
             debt_id: *debt.id(),
-            account_id: *debt.account_id(),
+            account_id: *account_id,
             amount: payment_data.amount(debt),
             payment_date: payment_data.payment_date,
             created_at: Utc::now(),

@@ -26,7 +26,7 @@ impl PubSubHandler for PubSubHandlerImpl {
             .debt_repository
             .get_by_id(payment.debt_id())
             .await?
-            .or_not_found("debt", &payment.debt_id().to_string())?;
+            .or_not_found("debt", payment.debt_id().to_string())?;
 
         debt.payment_created(&payment);
         self.debt_repository.update(debt).await?;

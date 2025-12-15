@@ -76,6 +76,7 @@ fn build_payment_handler(pool: &Pool<Postgres>) -> PaymentHandlerImpl {
     PaymentHandlerImpl {
         payment_repository: Arc::new(PaymentRepositoryImpl::new(pool)),
         debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
+        account_repository: Arc::new(AccountRepositoryImpl::new(pool)),
         pubsub: Arc::new(PubSubHandlerImpl {
             debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
         }),

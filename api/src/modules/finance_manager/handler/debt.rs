@@ -58,27 +58,28 @@ impl DebtHandler for DebtHandlerImpl {
     }
 
     async fn create_debt(&self, request: CreateDebtRequest) -> HttpResult<Debt> {
-        let account = self
-            .account_repository
-            .get_by_identification(&request.account_identification)
-            .await?
-            .or_not_found("account", &request.account_identification)?;
-
         self.debt_category_repository
             .get_by_name(&request.category_name)
             .await?
             .or_not_found("category", &request.category_name)?;
 
-        let debt = Debt::from_request(&request, &account)?;
+        let debt = Debt::from_request(&request)?;
         let debt = self.debt_repository.insert(debt).await?;
 
         // TODO: dispatch payment create event
-        if request.is_paid {
+        if request.is_paid() {
+            let account_id = request.account_id.ok_or_else(|| {
+                Box::new(http_error::HttpError::bad_request(
+                    "Account ID é obrigatório quando a despesa está paga",
+                ))
+            })?;
+
             let payment = Payment::new(
                 &debt,
+                &account_id,
                 &PaymentBasicData {
                     amount: Some(*debt.total_amount()),
-                    payment_date: debt.due_date().clone(),
+                    payment_date: *debt.due_date(),
                     force_settlement: false,
                 },
             );
@@ -92,7 +93,7 @@ impl DebtHandler for DebtHandlerImpl {
     }
 
     async fn list_debts(&self, filters: &DebtFilters) -> HttpResult<Vec<Debt>> {
-        self.debt_repository.list(&filters).await
+        self.debt_repository.list(filters).await
     }
 }
 
@@ -106,37 +107,40 @@ pub mod use_cases {
     #[derive(Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "camelCase")]
     pub struct CreateDebtRequest {
-        pub account_identification: String,
         pub category_name: String,
         pub description: String,
+        pub due_date: NaiveDate,
         pub total_amount: Decimal,
         pub paid_amount: Option<Decimal>,
         pub discount_amount: Option<Decimal>,
-        pub due_date: Option<NaiveDate>,
         pub status: Option<DebtStatus>,
         pub is_paid: bool,
+        pub account_id: Option<uuid::Uuid>,
     }
 
     impl CreateDebtRequest {
         pub fn new(
-            account_identification: String,
             category_name: String,
             description: String,
             total_amount: Decimal,
-            due_date: Option<NaiveDate>,
+            due_date: NaiveDate,
             is_paid: Option<bool>,
         ) -> Self {
             Self {
-                account_identification,
                 category_name,
                 description,
                 total_amount,
                 paid_amount: None,
                 discount_amount: None,
-                due_date: due_date,
+                due_date,
                 status: Some(DebtStatus::Unpaid),
                 is_paid: is_paid.unwrap_or(false),
+                account_id: None,
             }
+        }
+
+        pub fn is_paid(&self) -> bool {
+            self.account_id.is_some()
         }
     }
 

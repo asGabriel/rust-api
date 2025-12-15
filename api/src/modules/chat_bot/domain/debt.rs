@@ -9,65 +9,50 @@ use crate::modules::chat_bot::domain::utils;
 pub struct NewDebtData {
     pub description: String,
     pub amount: Decimal,
-    pub account_identification: String,
-    pub is_paid: bool,
-    pub due_date: Option<NaiveDate>,
+    pub due_date: NaiveDate,
     pub category_name: String,
+    pub account_identification: Option<String>,
 }
 
 impl NewDebtData {
     pub fn is_paid(&self) -> bool {
-        self.is_paid
+        self.account_identification.is_some()
     }
 
     /// Try to create a NewDebtData from parameters.
     /// Supports flexible parameter format:
     /// - Strings = description
     /// - Numbers = amount
-    /// - c:N = account_identification (c:1, c:2, etc)
-    /// - d:YYYY-MM-DD = due_date
-    /// - p:s/n = is_paid (s=true, n=false, empty=false)
+    /// - c:N = account_identification (c:1, c:2, etc) - quando presente, indica que a despesa está paga
+    /// - d:YYYY-MM-DD = due_date (obrigatório)
     /// - cat:Nome = category_name (obrigatório)
     pub fn try_from(parameters: &[String]) -> HttpResult<Self> {
         if parameters.is_empty() {
             return Err(Box::new(HttpError::bad_request(
-                "Comando 'despesa' requer parâmetros: descrição, valor, conta (c:N) e categoria (cat:Nome). Exemplo: despesa natacao 150 c:2 cat:Esportes",
+                "Comando 'despesa' requer parâmetros: descrição, valor, data (d:YYYY-MM-DD) e categoria (cat:Nome). Exemplo: despesa natacao 150 d:2025-01-15 cat:Esportes",
             )));
         }
 
         let mut description_parts = Vec::new();
         let mut amount: Option<Decimal> = None;
-        let mut account_identification: Option<String> = None;
         let mut due_date: Option<NaiveDate> = None;
-        let mut is_paid = false;
         let mut category_name: Option<String> = None;
+        let mut account_identification: Option<String> = None;
 
         for param in parameters {
             let param = param.trim();
 
             match param.split_once(':') {
-                Some(("c", id)) if !id.is_empty() => {
+                Some(("c", id)) => {
+                    if id.is_empty() {
+                        return Err(Box::new(HttpError::bad_request(
+                            "Identificação da conta (c:) não pode estar vazia. Exemplo: c:1",
+                        )));
+                    }
                     account_identification = Some(id.to_string());
-                }
-                Some(("c", _)) => {
-                    return Err(Box::new(HttpError::bad_request(
-                        "Identificação da conta (c:) requer um número. Exemplo: c:1",
-                    )));
                 }
                 Some(("d", date_str)) => {
                     due_date = Some(utils::parse_date(date_str)?);
-                }
-                Some(("p", flag)) => {
-                    is_paid = match flag {
-                        "s" => true,
-                        "n" => false,
-                        "" => false,
-                        _ => {
-                            return Err(Box::new(HttpError::bad_request(
-                                "Flag de pagamento (p:) deve ser 's' (sim) ou 'n' (não)",
-                            )))
-                        }
-                    };
                 }
                 Some(("cat", name)) => {
                     if name.is_empty() {
@@ -112,25 +97,24 @@ impl NewDebtData {
             ))
         })?;
 
-        let account_identification = account_identification.ok_or_else(|| {
-            Box::new(HttpError::bad_request(
-                "Conta é obrigatória. Use o formato c:N (ex: c:1)",
-            ))
-        })?;
-
         let category_name = category_name.ok_or_else(|| {
             Box::new(HttpError::bad_request(
                 "Categoria é obrigatória. Use o formato cat:Nome (ex: cat:Alimentação)",
             ))
         })?;
 
+        let due_date = due_date.ok_or_else(|| {
+            Box::new(HttpError::bad_request(
+                "Data de vencimento é obrigatória. Use o formato d:YYYY-MM-DD, d:DD/MM/YYYY, d:DD/MM, d:hoje ou d:+N/-N (ex: d:2025-01-15, d:15/01/2025, d:hoje, d:+1)",
+            ))
+        })?;
+
         Ok(NewDebtData {
             description,
             amount,
-            account_identification,
-            is_paid,
             due_date,
             category_name,
+            account_identification,
         })
     }
 }
@@ -144,7 +128,7 @@ mod tests {
         let params = vec![
             "natação".to_string(),
             "150".to_string(),
-            "c:2".to_string(),
+            "d:2025-01-15".to_string(),
             "cat:Esportes".to_string(),
         ];
         let result = NewDebtData::try_from(&params);
@@ -153,10 +137,9 @@ mod tests {
         let data = result.unwrap();
         assert_eq!(data.description, "natação");
         assert_eq!(data.amount, Decimal::new(150, 0));
-        assert_eq!(data.account_identification, "2");
-        assert_eq!(data.is_paid, false);
+        assert_eq!(data.is_paid(), false);
         assert_eq!(data.category_name, "ESPORTES");
-        assert!(data.due_date.is_none());
+        assert_eq!(data.account_identification, None);
     }
 
     #[test]
@@ -164,8 +147,8 @@ mod tests {
         let params = vec![
             "mercado".to_string(),
             "400".to_string(),
+            "d:2025-01-20".to_string(),
             "c:1".to_string(),
-            "p:s".to_string(),
             "cat:Alimentação".to_string(),
         ];
         let result = NewDebtData::try_from(&params);
@@ -174,9 +157,9 @@ mod tests {
         let data = result.unwrap();
         assert_eq!(data.description, "mercado");
         assert_eq!(data.amount, Decimal::new(400, 0));
-        assert_eq!(data.account_identification, "1");
-        assert_eq!(data.is_paid, true);
+        assert_eq!(data.is_paid(), true);
         assert_eq!(data.category_name, "ALIMENTAÇÃO");
+        assert_eq!(data.account_identification, Some("1".to_string()));
     }
 
     #[test]
@@ -184,13 +167,11 @@ mod tests {
         let params = vec![
             "almoço".to_string(),
             "30".to_string(),
-            "c:3".to_string(),
             "d:2025-01-15".to_string(),
             "cat:Alimentação".to_string(),
         ];
         let result = NewDebtData::try_from(&params);
         assert!(result.is_ok());
-        assert!(result.unwrap().due_date.is_some());
     }
 
     #[test]
@@ -198,13 +179,11 @@ mod tests {
         let params = vec![
             "almoço".to_string(),
             "30".to_string(),
-            "c:3".to_string(),
             "d:15/01/2025".to_string(),
             "cat:Alimentação".to_string(),
         ];
         let result = NewDebtData::try_from(&params);
         assert!(result.is_ok());
-        assert!(result.unwrap().due_date.is_some());
     }
 
     #[test]
@@ -212,13 +191,11 @@ mod tests {
         let params = vec![
             "almoço".to_string(),
             "30".to_string(),
-            "c:3".to_string(),
             "d:15/01".to_string(),
             "cat:Alimentação".to_string(),
         ];
         let result = NewDebtData::try_from(&params);
         assert!(result.is_ok());
-        assert!(result.unwrap().due_date.is_some());
     }
 
     #[test]
@@ -226,15 +203,13 @@ mod tests {
         let params = vec![
             "almoço".to_string(),
             "30".to_string(),
-            "c:3".to_string(),
             "d:hoje".to_string(),
             "cat:Alimentação".to_string(),
         ];
         let result = NewDebtData::try_from(&params);
         assert!(result.is_ok());
         let data = result.unwrap();
-        assert!(data.due_date.is_some());
-        assert_eq!(data.due_date, Some(chrono::Utc::now().date_naive()));
+        assert_eq!(data.due_date, chrono::Utc::now().date_naive());
     }
 
     #[test]
@@ -242,7 +217,6 @@ mod tests {
         let params = vec![
             "almoço".to_string(),
             "30".to_string(),
-            "c:3".to_string(),
             "d:+1".to_string(),
             "cat:Alimentação".to_string(),
         ];
@@ -255,7 +229,6 @@ mod tests {
         let params = vec![
             "almoço".to_string(),
             "30".to_string(),
-            "c:3".to_string(),
             "d:-7".to_string(),
             "cat:Alimentação".to_string(),
         ];
@@ -274,7 +247,7 @@ mod tests {
     fn test_try_from_missing_amount() {
         let params = vec![
             "mercado".to_string(),
-            "c:1".to_string(),
+            "d:2025-01-15".to_string(),
             "cat:Alimentação".to_string(),
         ];
         let result = NewDebtData::try_from(&params);
@@ -282,7 +255,7 @@ mod tests {
     }
 
     #[test]
-    fn test_try_from_missing_account() {
+    fn test_try_from_missing_due_date() {
         let params = vec![
             "mercado".to_string(),
             "100".to_string(),
@@ -290,6 +263,10 @@ mod tests {
         ];
         let result = NewDebtData::try_from(&params);
         assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .message
+            .contains("Data de vencimento é obrigatória"));
     }
 
     #[test]
@@ -297,7 +274,7 @@ mod tests {
         let params = vec![
             "mercado".to_string(),
             "abc".to_string(),
-            "c:1".to_string(),
+            "d:2025-01-15".to_string(),
             "cat:Alimentação".to_string(),
         ];
         let result = NewDebtData::try_from(&params);
@@ -309,7 +286,6 @@ mod tests {
         let params = vec![
             "mercado".to_string(),
             "100".to_string(),
-            "c:1".to_string(),
             "d:invalid".to_string(),
             "cat:Alimentação".to_string(),
         ];
@@ -318,24 +294,28 @@ mod tests {
     }
 
     #[test]
-    fn test_try_from_paid_false() {
+    fn test_try_from_unpaid() {
         let params = vec![
             "mercado".to_string(),
             "100".to_string(),
-            "c:1".to_string(),
-            "p:n".to_string(),
+            "d:2025-01-15".to_string(),
             "cat:Alimentação".to_string(),
         ];
         let result = NewDebtData::try_from(&params);
         assert!(result.is_ok());
 
         let data = result.unwrap();
-        assert_eq!(data.is_paid, false);
+        assert_eq!(data.is_paid(), false);
+        assert_eq!(data.account_identification, None);
     }
 
     #[test]
     fn test_try_from_missing_category() {
-        let params = vec!["mercado".to_string(), "100".to_string(), "c:1".to_string()];
+        let params = vec![
+            "mercado".to_string(),
+            "100".to_string(),
+            "d:2025-01-15".to_string(),
+        ];
         let result = NewDebtData::try_from(&params);
         assert!(result.is_err());
         assert!(result
@@ -352,7 +332,6 @@ mod tests {
             "c:9".to_string(),
             "cat:saúde".to_string(),
             "d:10/11".to_string(),
-            "p:s".to_string(),
         ];
         let result = NewDebtData::try_from(&params);
         assert!(result.is_ok());
@@ -360,9 +339,60 @@ mod tests {
         let data = result.unwrap();
         assert_eq!(data.description, "Psicóloga");
         assert_eq!(data.amount, Decimal::new(300, 0));
-        assert_eq!(data.account_identification, "9");
         assert_eq!(data.category_name, "SAÚDE"); // Deve ser SAÚDE, não Psicóloga!
-        assert_eq!(data.is_paid, true);
-        assert!(data.due_date.is_some());
+        assert_eq!(data.is_paid(), true);
+        assert_eq!(data.account_identification, Some("9".to_string()));
+    }
+
+    #[test]
+    fn test_try_from_paid_with_account() {
+        let params = vec![
+            "mercado".to_string(),
+            "100".to_string(),
+            "d:2025-01-15".to_string(),
+            "c:1".to_string(),
+            "cat:Alimentação".to_string(),
+        ];
+        let result = NewDebtData::try_from(&params);
+        assert!(result.is_ok());
+
+        let data = result.unwrap();
+        assert_eq!(data.is_paid(), true);
+        assert_eq!(data.account_identification, Some("1".to_string()));
+    }
+
+    #[test]
+    fn test_try_from_unpaid_without_account() {
+        let params = vec![
+            "mercado".to_string(),
+            "100".to_string(),
+            "d:2025-01-15".to_string(),
+            "cat:Alimentação".to_string(),
+        ];
+        let result = NewDebtData::try_from(&params);
+        assert!(result.is_ok());
+
+        let data = result.unwrap();
+        assert_eq!(data.is_paid(), false);
+        assert_eq!(data.account_identification, None);
+    }
+
+    #[test]
+    fn test_try_from_unpaid_with_account_ignored() {
+        // Se c: está presente, sempre será considerado pago, mesmo que não faça sentido
+        let params = vec![
+            "mercado".to_string(),
+            "100".to_string(),
+            "d:2025-01-15".to_string(),
+            "c:2".to_string(),
+            "cat:Alimentação".to_string(),
+        ];
+        let result = NewDebtData::try_from(&params);
+        assert!(result.is_ok());
+
+        let data = result.unwrap();
+        // Se tem conta, é considerado pago
+        assert_eq!(data.is_paid(), true);
+        assert_eq!(data.account_identification, Some("2".to_string()));
     }
 }

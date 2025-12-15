@@ -42,7 +42,6 @@ impl DebtRepository for DebtRepositoryImpl {
         let row = sqlx::query(
             r#"
             UPDATE finance_manager.debt SET 
-                account_id = $1, 
                 category_name = $2,
                 description = $3, 
                 total_amount = $4, 
@@ -52,11 +51,11 @@ impl DebtRepository for DebtRepositoryImpl {
                 due_date = $8, 
                 status = $9, 
                 updated_at = $10
-            WHERE id = $11 
+            WHERE id = $1 
             RETURNING *
             "#,
         )
-        .bind(debt_dto.account_id)
+        .bind(debt_dto.id)
         .bind(debt_dto.category_name)
         .bind(debt_dto.description)
         .bind(debt_dto.total_amount)
@@ -66,14 +65,12 @@ impl DebtRepository for DebtRepositoryImpl {
         .bind(debt_dto.due_date)
         .bind(debt_dto.status)
         .bind(debt_dto.updated_at)
-        .bind(debt_dto.id)
         .fetch_optional(&self.pool)
         .await?
-        .or_not_found("debt", &debt_dto.id.to_string())?;
+        .or_not_found("debt", debt_dto.id.to_string())?;
 
         let debt_dto = entity::DebtEntity {
             id: row.get("id"),
-            account_id: row.get("account_id"),
             identification: row.get::<i32, _>("identification").to_string(),
             category_name: row.get("category_name"),
             description: row.get("description"),
@@ -91,16 +88,13 @@ impl DebtRepository for DebtRepositoryImpl {
     }
 
     async fn get_by_id(&self, id: &Uuid) -> HttpResult<Option<Debt>> {
-        let row = sqlx::query(
-            r#"SELECT id, account_id, category_name, identification, description, total_amount, paid_amount, discount_amount, remaining_amount, due_date, status, created_at, updated_at FROM finance_manager.debt WHERE id = $1"#
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row = sqlx::query(r#"SELECT * FROM finance_manager.debt WHERE id = $1"#)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
 
         let debt = row.map(|r| entity::DebtEntity {
             id: r.get("id"),
-            account_id: r.get("account_id"),
             identification: r.get::<i32, _>("identification").to_string(),
             category_name: r.get("category_name"),
             description: r.get("description"),
@@ -125,16 +119,13 @@ impl DebtRepository for DebtRepositoryImpl {
             ))
         })?;
 
-        let row = sqlx::query(
-            r#"SELECT id, account_id, category_name, identification, description, total_amount, paid_amount, discount_amount, remaining_amount, due_date, status, created_at, updated_at FROM finance_manager.debt WHERE identification = $1"#
-        )
-        .bind(identification_num)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row = sqlx::query(r#"SELECT * FROM finance_manager.debt WHERE identification = $1"#)
+            .bind(identification_num)
+            .fetch_optional(&self.pool)
+            .await?;
 
         let debt = row.map(|r| entity::DebtEntity {
             id: r.get("id"),
-            account_id: r.get("account_id"),
             identification: r.get::<i32, _>("identification").to_string(),
             category_name: r.get("category_name"),
             description: r.get("description"),
@@ -158,7 +149,6 @@ impl DebtRepository for DebtRepositoryImpl {
             r#"
             INSERT INTO finance_manager.debt (
                 id, 
-                account_id, 
                 category_name,
                 description, 
                 total_amount, 
@@ -170,12 +160,11 @@ impl DebtRepository for DebtRepositoryImpl {
                 created_at,
                 updated_at
             ) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-            RETURNING id, account_id, category_name, identification, description, total_amount, paid_amount, discount_amount, remaining_amount, due_date, status, created_at, updated_at
-        "#
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            RETURNING *
+        "#,
         )
         .bind(debt_dto.id)
-        .bind(debt_dto.account_id)
         .bind(debt_dto.category_name)
         .bind(debt_dto.description)
         .bind(debt_dto.total_amount)
@@ -191,7 +180,6 @@ impl DebtRepository for DebtRepositoryImpl {
 
         let debt_dto = entity::DebtEntity {
             id: row.get("id"),
-            account_id: row.get("account_id"),
             identification: row.get::<i32, _>("identification").to_string(),
             category_name: row.get("category_name"),
             description: row.get("description"),
@@ -226,15 +214,6 @@ impl DebtRepository for DebtRepositoryImpl {
             has_where = true;
         }
 
-        if let Some(account_ids) = filters.account_ids() {
-            if !account_ids.is_empty() {
-                builder.push(if has_where { " AND " } else { " WHERE " });
-                builder.push("account_id = ANY(");
-                builder.push_bind(account_ids);
-                builder.push(")");
-            }
-        }
-
         if let Some(category_names) = filters.category_names() {
             builder.push(if has_where { " AND " } else { " WHERE " });
             builder.push("category_name = ANY(");
@@ -261,7 +240,6 @@ impl DebtRepository for DebtRepositoryImpl {
             .into_iter()
             .map(|row| entity::DebtEntity {
                 id: row.get("id"),
-                account_id: row.get("account_id"),
                 identification: row.get::<i32, _>("identification").to_string(),
                 category_name: row.get("category_name"),
                 description: row.get("description"),
@@ -292,7 +270,6 @@ pub mod entity {
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct DebtEntity {
         pub id: Uuid,
-        pub account_id: Uuid,
         pub identification: String,
         pub category_name: String,
         pub description: String,
@@ -310,7 +287,6 @@ pub mod entity {
         fn from(debt: Debt) -> Self {
             DebtEntity {
                 id: *debt.id(),
-                account_id: *debt.account_id(),
                 identification: debt.identification().to_string(),
                 category_name: debt.category_name().to_string(),
                 description: debt.description().clone(),
@@ -330,7 +306,6 @@ pub mod entity {
         fn from(dto: DebtEntity) -> Self {
             Debt::from_row(
                 dto.id,
-                dto.account_id,
                 dto.category_name,
                 dto.identification,
                 dto.description,
