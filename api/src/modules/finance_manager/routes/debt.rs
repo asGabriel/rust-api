@@ -56,7 +56,7 @@ async fn create_debt(
     let debt = state
         .finance_manager_state
         .debt_handler
-        .create_debt(request)
+        .register_new_debt(request)
         .await?;
 
     Ok(Json(debt))

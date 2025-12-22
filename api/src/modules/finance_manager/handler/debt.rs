@@ -13,7 +13,10 @@ use crate::modules::finance_manager::{
     },
     repository::{
         account::DynAccountRepository,
-        debt::{category::DynDebtCategoryRepository, DynDebtRepository},
+        debt::{
+            category::DynDebtCategoryRepository, installment::DynInstallmentRepository,
+            DynDebtRepository,
+        },
         payment::DynPaymentRepository,
     },
 };
@@ -24,7 +27,7 @@ pub type DynDebtHandler = dyn DebtHandler + Send + Sync;
 #[async_trait]
 pub trait DebtHandler {
     async fn list_debts(&self, filters: &DebtFilters) -> HttpResult<Vec<Debt>>;
-    async fn create_debt(&self, request: CreateDebtRequest) -> HttpResult<Debt>;
+    async fn register_new_debt(&self, request: CreateDebtRequest) -> HttpResult<Debt>;
 
     // DEBT_CATEGORY
     async fn create_debt_category(
@@ -37,10 +40,27 @@ pub trait DebtHandler {
 #[derive(Clone)]
 pub struct DebtHandlerImpl {
     pub debt_repository: Arc<DynDebtRepository>,
+    pub installment_repository: Arc<DynInstallmentRepository>,
     pub account_repository: Arc<DynAccountRepository>,
     pub payment_repository: Arc<DynPaymentRepository>,
     pub debt_category_repository: Arc<DynDebtCategoryRepository>,
     pub pubsub: Arc<DynPubSubHandler>,
+}
+
+impl DebtHandlerImpl {
+    async fn create_debt(&self, request: CreateDebtRequest) -> HttpResult<Debt> {
+        let debt = Debt::from(request);
+        let debt = self.debt_repository.insert(debt).await?;
+
+        if let Some(installments) = debt.generate_installments()? {
+            let _installments = self
+                .installment_repository
+                .insert_batch(installments)
+                .await?;
+        }
+
+        Ok(debt)
+    }
 }
 
 #[async_trait]
@@ -57,16 +77,14 @@ impl DebtHandler for DebtHandlerImpl {
         self.debt_category_repository.list().await
     }
 
-    async fn create_debt(&self, request: CreateDebtRequest) -> HttpResult<Debt> {
+    async fn register_new_debt(&self, request: CreateDebtRequest) -> HttpResult<Debt> {
         self.debt_category_repository
             .get_by_name(&request.category_name)
             .await?
             .or_not_found("category", &request.category_name)?;
 
-        let debt = Debt::from_request(&request)?;
-        let debt = self.debt_repository.insert(debt).await?;
+        let mut debt = self.create_debt(request.clone()).await?;
 
-        // TODO: dispatch payment create event
         if request.is_paid() {
             let account_id = request.account_id.ok_or_else(|| {
                 Box::new(http_error::HttpError::bad_request(
@@ -86,7 +104,10 @@ impl DebtHandler for DebtHandlerImpl {
 
             let payment = self.payment_repository.insert(payment).await?;
 
-            self.pubsub.publish_debt_updated_event(&payment).await?;
+            debt = self
+                .pubsub
+                .process_debt_payment(debt, &payment, false)
+                .await?;
         }
 
         Ok(debt)
@@ -116,6 +137,7 @@ pub mod use_cases {
         pub status: Option<DebtStatus>,
         pub is_paid: bool,
         pub account_id: Option<uuid::Uuid>,
+        pub installment_count: Option<i32>,
     }
 
     impl CreateDebtRequest {
@@ -125,6 +147,7 @@ pub mod use_cases {
             total_amount: Decimal,
             due_date: NaiveDate,
             is_paid: Option<bool>,
+            installment_count: Option<i32>,
         ) -> Self {
             Self {
                 category_name,
@@ -136,6 +159,7 @@ pub mod use_cases {
                 status: Some(DebtStatus::Unpaid),
                 is_paid: is_paid.unwrap_or(false),
                 account_id: None,
+                installment_count,
             }
         }
 

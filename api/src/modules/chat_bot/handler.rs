@@ -110,7 +110,7 @@ impl ChatBotHandlerImpl {
 
         let result = self
             .debt_handler
-            .create_debt(CreateDebtRequest {
+            .register_new_debt(CreateDebtRequest {
                 category_name: request.category_name.clone(),
                 description: request.description.clone(),
                 total_amount: request.amount,
@@ -120,6 +120,7 @@ impl ChatBotHandlerImpl {
                 status: Some(DebtStatus::Unpaid),
                 is_paid: request.is_paid(),
                 account_id,
+                installment_count: request.installment_number,
             })
             .await;
 

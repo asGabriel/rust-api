@@ -1,17 +1,23 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use http_error::{ext::OptionHttpExt, HttpResult};
+use http_error::HttpResult;
 
 use crate::modules::finance_manager::{
-    domain::payment::Payment, repository::debt::DynDebtRepository,
+    domain::{debt::Debt, payment::Payment},
+    repository::debt::DynDebtRepository,
 };
 
 pub type DynPubSubHandler = dyn PubSubHandler + Send + Sync;
 
 #[async_trait]
 pub trait PubSubHandler {
-    async fn publish_debt_updated_event(&self, payment: &Payment) -> HttpResult<()>;
+    async fn process_debt_payment(
+        &self,
+        debt: Debt,
+        payment: &Payment,
+        force_settlement: bool,
+    ) -> HttpResult<Debt>;
 }
 
 #[derive(Clone)]
@@ -21,16 +27,24 @@ pub struct PubSubHandlerImpl {
 
 #[async_trait]
 impl PubSubHandler for PubSubHandlerImpl {
-    async fn publish_debt_updated_event(&self, payment: &Payment) -> HttpResult<()> {
-        let mut debt = self
-            .debt_repository
-            .get_by_id(payment.debt_id())
-            .await?
-            .or_not_found("debt", payment.debt_id().to_string())?;
+    async fn process_debt_payment(
+        &self,
+        mut debt: Debt,
+        payment: &Payment,
+        force_settlement: bool,
+    ) -> HttpResult<Debt> {
+        if force_settlement {
+            println!("force_settlement");
+            debt.force_settlement(&payment);
+        } else {
+            println!("process_payment");
+            debt.process_payment(&payment);
+        }
 
-        debt.payment_created(&payment);
-        self.debt_repository.update(debt).await?;
+        dbg!(&debt, "process_debt_payment");
 
-        Ok(())
+        self.debt_repository.update(debt.clone()).await?;
+
+        Ok(debt)
     }
 }

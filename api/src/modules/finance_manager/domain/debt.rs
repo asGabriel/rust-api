@@ -8,10 +8,14 @@ use uuid::Uuid;
 
 use crate::modules::{
     chat_bot::domain::formatter::{ChatFormatter, ChatFormatterUtils},
-    finance_manager::{domain::payment::Payment, handler::debt::use_cases::CreateDebtRequest},
+    finance_manager::{
+        domain::{debt::installment::Installment, payment::Payment},
+        handler::debt::use_cases::CreateDebtRequest,
+    },
 };
 
 pub mod category;
+pub mod installment;
 pub mod recurrence;
 pub mod recurrence_run;
 
@@ -43,6 +47,9 @@ pub struct Debt {
     #[serde(default)]
     status: DebtStatus,
 
+    /// The number of installments of the debt
+    installment_count: Option<i32>,
+
     /// The date of the creation of the debt
     created_at: DateTime<Utc>,
     /// The date of the last update of the debt
@@ -57,6 +64,7 @@ impl Debt {
         discount_amount: Option<Decimal>,
         due_date: NaiveDate,
         category_name: String,
+        installment_count: Option<i32>,
     ) -> Self {
         let uuid = Uuid::new_v4();
         let remaining_amount = total_amount
@@ -74,28 +82,13 @@ impl Debt {
             remaining_amount,
             due_date,
             status: DebtStatus::default(),
+            installment_count,
             created_at: Utc::now(),
             updated_at: None,
         }
     }
 
-    /// Generates a debt from a create debt request
-    pub fn from_request(request: &CreateDebtRequest) -> HttpResult<Self> {
-        Ok(Self::new(
-            request.description.clone(),
-            request.total_amount,
-            request.paid_amount,
-            request.discount_amount,
-            request.due_date,
-            request.category_name.clone(),
-        ))
-    }
-
-    fn is_paid(&self) -> bool {
-        self.paid_amount >= self.total_amount
-    }
-
-    pub fn payment_created(&mut self, payment: &Payment) {
+    pub fn process_payment(&mut self, payment: &Payment) {
         self.paid_amount += payment.amount();
 
         self.recalculate_remaining_amount();
@@ -117,7 +110,7 @@ impl Debt {
         }
     }
 
-    fn force_settlement(&mut self, payment: &Payment) {
+    pub fn force_settlement(&mut self, payment: &Payment) {
         self.status = DebtStatus::Settled;
         self.total_amount = *payment.amount();
         self.paid_amount = *payment.amount();
@@ -125,27 +118,86 @@ impl Debt {
         self.updated_at = Some(Utc::now());
     }
 
-    pub fn process_payment(&mut self, payment: &Payment, force_settlement: bool) -> HttpResult<()> {
-        if self.is_paid() {
-            return Err(Box::new(HttpError::bad_request("Dívida já paga")));
+    // pub fn process_payment(&mut self, payment: &Payment, force_settlement: bool) -> HttpResult<()> {
+    //     if self.is_paid() {
+    //         return Err(Box::new(HttpError::bad_request("Dívida já paga")));
+    //     }
+
+    //     if force_settlement {
+    //         self.force_settlement(payment);
+    //         return Ok(());
+    //     }
+
+    //     if *payment.amount() > self.remaining_amount {
+    //         return Err(Box::new(HttpError::bad_request(format!(
+    //             "Valor do pagamento (R$ {:.2}) ultrapassa o valor restante (R$ {:.2}). Caso queira forçar a baixa adicione 'baixa:s' ao comando",
+    //             payment.amount(),
+    //             self.remaining_amount
+    //         ))));
+    //     }
+
+    //     self.payment_created(payment);
+
+    //     Ok(())
+    // }
+
+    /// Generates the installments of the debt
+    /// It will return the installments if the debt is parceled, otherwise it will return None
+    pub fn generate_installments(&self) -> HttpResult<Option<Vec<Installment>>> {
+        let installment_count = match self.installment_count {
+            Some(count) if count > 0 => count,
+            _ => return Ok(None),
+        };
+
+        let (base_amount, remainder) = self.calculate_installment_amount(installment_count);
+
+        let mut installments = Vec::new();
+
+        for i in 1..=installment_count {
+            // the first installment receives the remainder to avoid rounding errors
+            let amount = if i == 1 {
+                base_amount + remainder
+            } else {
+                base_amount
+            };
+
+            let due_date = self
+                .due_date
+                .checked_add_months(chrono::Months::new((i - 1) as u32))
+                .ok_or_else(|| {
+                    Box::new(HttpError::bad_request(format!(
+                        "Não foi possível calcular a data da parcela {}",
+                        i
+                    )))
+                })?;
+
+            installments.push(Installment::new(*self.id(), i, due_date, amount));
         }
 
-        if force_settlement {
-            self.force_settlement(payment);
-            return Ok(());
-        }
+        Ok(Some(installments))
+    }
 
-        if *payment.amount() > self.remaining_amount {
-            return Err(Box::new(HttpError::bad_request(format!(
-                "Valor do pagamento (R$ {:.2}) ultrapassa o valor restante (R$ {:.2}). Caso queira forçar a baixa adicione 'baixa:s' ao comando",
-                payment.amount(),
-                self.remaining_amount
-            ))));
-        }
+    /// Calculates the amount of the installment and the remainder
+    fn calculate_installment_amount(&self, installment_number: i32) -> (Decimal, Decimal) {
+        let installment_number = Decimal::from(installment_number);
 
-        self.payment_created(payment);
+        let base_amount = self.total_amount() / installment_number;
+        let remainder = self.total_amount() - (base_amount * installment_number);
+        (base_amount, remainder)
+    }
+}
 
-        Ok(())
+impl From<CreateDebtRequest> for Debt {
+    fn from(request: CreateDebtRequest) -> Self {
+        Self::new(
+            request.description,
+            request.total_amount,
+            request.paid_amount,
+            request.discount_amount,
+            request.due_date,
+            request.category_name,
+            request.installment_count,
+        )
     }
 }
 
@@ -240,6 +292,7 @@ getters!(
         remaining_amount: Decimal,
         due_date: NaiveDate,
         status: DebtStatus,
+        installment_count: Option<i32>,
         created_at: DateTime<Utc>,
         updated_at: Option<DateTime<Utc>>,
     }
@@ -257,6 +310,7 @@ from_row_constructor! {
         remaining_amount: Decimal,
         due_date: NaiveDate,
         status: DebtStatus,
+        installment_count: Option<i32>,
         created_at: DateTime<Utc>,
         updated_at: Option<DateTime<Utc>>,
     }

@@ -12,6 +12,7 @@ pub struct NewDebtData {
     pub due_date: NaiveDate,
     pub category_name: String,
     pub account_identification: Option<String>,
+    pub installment_number: Option<i32>,
 }
 
 impl NewDebtData {
@@ -38,6 +39,7 @@ impl NewDebtData {
         let mut due_date: Option<NaiveDate> = None;
         let mut category_name: Option<String> = None;
         let mut account_identification: Option<String> = None;
+        let mut installment_number: Option<i32> = None;
 
         for param in parameters {
             let param = param.trim();
@@ -61,6 +63,19 @@ impl NewDebtData {
                         )));
                     }
                     category_name = Some(name.to_uppercase());
+                }
+                Some(("i", number)) => {
+                    let num = number.parse::<i32>().map_err(|_| {
+                        HttpError::bad_request(format!(
+                            "Número de parcelas (i:) deve ser um número inteiro válido. Exemplo: i:3"
+                        ))
+                    })?;
+                    if num <= 0 {
+                        return Err(Box::new(HttpError::bad_request(
+                            "Número de parcelas (i:) deve ser maior que zero. Exemplo: i:3",
+                        )));
+                    }
+                    installment_number = Some(num);
                 }
                 None => {
                     // Try to parse as number for amount
@@ -115,6 +130,7 @@ impl NewDebtData {
             due_date,
             category_name,
             account_identification,
+            installment_number,
         })
     }
 }
