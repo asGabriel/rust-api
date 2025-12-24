@@ -32,13 +32,15 @@ pub struct PaymentHandlerImpl {
 #[async_trait]
 impl PaymentHandler for PaymentHandlerImpl {
     async fn create_payment(&self, request: CreatePaymentRequest) -> HttpResult<Payment> {
-        let (debt, account, payment_data) =
-            self.extract_payment_data_from_request(request).await?;
-
+        let (mut debt, account, payment_data, reconcile) = self.extract_payment_data_from_request(request).await?;
         let payment = Payment::new(&debt, account.id(), &payment_data);
 
+        if reconcile {
+            debt = self.pubsub.reconcile_debt_with_actual_payment(debt, &payment).await?;
+        }
+
         let payment = self.payment_repository.insert(payment).await?;
-        let _debt = self.pubsub.process_debt_payment(debt, &payment, payment_data.force_settlement()).await?;
+        _ = self.pubsub.process_debt_payment(debt, &payment).await?;
 
         Ok(payment)
     }
@@ -48,8 +50,8 @@ impl PaymentHandlerImpl {
     async fn extract_payment_data_from_request(
         &self,
         request: CreatePaymentRequest,
-    ) -> HttpResult<(Debt, BankAccount, PaymentBasicData)> {
-        let (debt, account, payment_data) = match request {
+    ) -> HttpResult<(Debt, BankAccount, PaymentBasicData, bool)> {
+        let (debt, account, payment_data, reconcile) = match request {
             CreatePaymentRequest::PaymentRequestFromIdentification(data) => (
                 self.debt_repository
                     .get_by_identification(&data.debt_identification)
@@ -60,6 +62,7 @@ impl PaymentHandlerImpl {
                     .await?
                     .or_not_found("account", &data.account_identification)?,
                 data.payment_basic_data,
+                data.reconcile,
             ),
             CreatePaymentRequest::PaymentRequestFromUuid(data) => (
                 self.debt_repository
@@ -71,10 +74,11 @@ impl PaymentHandlerImpl {
                     .await?
                     .or_not_found("account", data.account_id.to_string())?,
                 data.payment_basic_data,
+                data.reconcile,
             ),
         };
 
-        Ok((debt, account, payment_data))
+        Ok((debt, account, payment_data, reconcile))
     }
 }
 
@@ -98,6 +102,8 @@ pub mod use_cases {
     pub struct PaymentRequestFromIdentification {
         pub debt_identification: String,
         pub account_identification: String,
+        #[serde(default)]
+        pub reconcile: bool,
         #[serde(flatten)]
         pub payment_basic_data: PaymentBasicData,
     }
@@ -107,6 +113,8 @@ pub mod use_cases {
     pub struct PaymentRequestFromUuid {
         pub debt_id: Uuid,
         pub account_id: Uuid,
+        #[serde(default)]
+        pub reconcile: bool,
         #[serde(flatten)]
         pub payment_basic_data: PaymentBasicData,
     }
@@ -116,16 +124,11 @@ pub mod use_cases {
     pub struct PaymentBasicData {
         pub payment_date: NaiveDate,
         pub amount: Option<Decimal>,
-        pub force_settlement: bool,
     }
 
     impl PaymentBasicData {
         pub fn amount(&self, debt: &Debt) -> Decimal {
             self.amount.unwrap_or(*debt.remaining_amount())
-        }
-
-        pub fn force_settlement(&self) -> bool {
-            self.force_settlement
         }
     }
 }

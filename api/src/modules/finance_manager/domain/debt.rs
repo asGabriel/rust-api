@@ -88,58 +88,28 @@ impl Debt {
         }
     }
 
-    pub fn process_payment(&mut self, payment: &Payment) {
+    pub fn process_payment(&mut self, payment: &Payment) -> HttpResult<()> {
+        self.validate_payment_amount(payment)?;
+
         self.paid_amount += payment.amount();
 
         self.recalculate_remaining_amount();
         self.recalculate_status();
         self.updated_at = Some(Utc::now());
+
+        Ok(())
     }
 
-    fn recalculate_remaining_amount(&mut self) {
-        self.remaining_amount = self.total_amount - self.paid_amount - self.discount_amount;
-    }
-
-    fn recalculate_status(&mut self) {
-        if self.paid_amount >= self.total_amount {
-            self.status = DebtStatus::Settled;
-        } else if self.remaining_amount > Decimal::ZERO {
-            self.status = DebtStatus::PartiallyPaid;
-        } else {
-            self.status = DebtStatus::Unpaid;
-        }
-    }
-
-    pub fn force_settlement(&mut self, payment: &Payment) {
-        self.status = DebtStatus::Settled;
+    pub fn reconcile_with_actual_payment(&mut self, payment: &Payment) -> HttpResult<()> {
         self.total_amount = *payment.amount();
         self.paid_amount = *payment.amount();
         self.remaining_amount = Decimal::ZERO;
+        self.recalculate_status();
+
         self.updated_at = Some(Utc::now());
+
+        Ok(())
     }
-
-    // pub fn process_payment(&mut self, payment: &Payment, force_settlement: bool) -> HttpResult<()> {
-    //     if self.is_paid() {
-    //         return Err(Box::new(HttpError::bad_request("Dívida já paga")));
-    //     }
-
-    //     if force_settlement {
-    //         self.force_settlement(payment);
-    //         return Ok(());
-    //     }
-
-    //     if *payment.amount() > self.remaining_amount {
-    //         return Err(Box::new(HttpError::bad_request(format!(
-    //             "Valor do pagamento (R$ {:.2}) ultrapassa o valor restante (R$ {:.2}). Caso queira forçar a baixa adicione 'baixa:s' ao comando",
-    //             payment.amount(),
-    //             self.remaining_amount
-    //         ))));
-    //     }
-
-    //     self.payment_created(payment);
-
-    //     Ok(())
-    // }
 
     /// Generates the installments of the debt
     /// It will return the installments if the debt is parceled, otherwise it will return None
@@ -175,6 +145,43 @@ impl Debt {
         }
 
         Ok(Some(installments))
+    }
+
+    pub fn has_installments(&self) -> bool {
+        self.installment_count.is_some() && self.installment_count.unwrap() > 0
+    }
+
+    // PRIVATE METHODS
+
+    /// Checks if the payment amount is valid to be processed
+    fn validate_payment_amount(&self, payment: &Payment) -> HttpResult<()> {
+        if self.paid_amount >= self.total_amount {
+            return Err(Box::new(HttpError::bad_request("Débito quitado")));
+        }
+
+        if *payment.amount() > self.remaining_amount {
+            return Err(Box::new(HttpError::bad_request(format!(
+                "Valor do pagamento (R$ {:.2}) ultrapassa o valor restante (R$ {:.2}). Caso queira forçar a baixa adicione 'baixa:s' ao comando",
+                payment.amount(),
+                self.remaining_amount
+            ))));
+        }
+
+        Ok(())
+    }
+
+    fn recalculate_remaining_amount(&mut self) {
+        self.remaining_amount = self.total_amount - self.paid_amount - self.discount_amount;
+    }
+
+    fn recalculate_status(&mut self) {
+        if self.paid_amount >= self.total_amount {
+            self.status = DebtStatus::Settled;
+        } else if self.remaining_amount > Decimal::ZERO {
+            self.status = DebtStatus::PartiallyPaid;
+        } else {
+            self.status = DebtStatus::Unpaid;
+        }
     }
 
     /// Calculates the amount of the installment and the remainder

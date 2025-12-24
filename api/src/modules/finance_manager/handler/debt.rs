@@ -55,7 +55,7 @@ impl DebtHandlerImpl {
         if let Some(installments) = debt.generate_installments()? {
             let _installments = self
                 .installment_repository
-                .insert_batch(installments)
+                .insert_many(installments)
                 .await?;
         }
 
@@ -98,16 +98,12 @@ impl DebtHandler for DebtHandlerImpl {
                 &PaymentBasicData {
                     amount: Some(*debt.total_amount()),
                     payment_date: *debt.due_date(),
-                    force_settlement: false,
                 },
             );
 
             let payment = self.payment_repository.insert(payment).await?;
 
-            debt = self
-                .pubsub
-                .process_debt_payment(debt, &payment, false)
-                .await?;
+            debt = self.pubsub.process_debt_payment(debt, &payment).await?;
         }
 
         Ok(debt)
@@ -122,8 +118,11 @@ pub mod use_cases {
     use chrono::NaiveDate;
     use rust_decimal::Decimal;
     use serde::{Deserialize, Serialize};
+    use uuid::Uuid;
 
-    use crate::modules::finance_manager::domain::debt::DebtStatus;
+    use crate::modules::finance_manager::
+        domain::debt::DebtStatus
+    ;
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -136,7 +135,7 @@ pub mod use_cases {
         pub discount_amount: Option<Decimal>,
         pub status: Option<DebtStatus>,
         pub is_paid: bool,
-        pub account_id: Option<uuid::Uuid>,
+        pub account_id: Option<Uuid>,
         pub installment_count: Option<i32>,
     }
 

@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use http_error::HttpResult;
-use sqlx::{Pool, Postgres};
+use sqlx::{Pool, Postgres, QueryBuilder};
 
 use crate::modules::finance_manager::{
     domain::debt::installment::{Installment, InstallmentFilters},
@@ -9,9 +9,9 @@ use crate::modules::finance_manager::{
 
 #[async_trait]
 pub trait InstallmentRepository {
-    async fn insert(&self, installment: Installment) -> HttpResult<Installment>;
-    async fn insert_batch(&self, installments: Vec<Installment>) -> HttpResult<Vec<Installment>>;
+    async fn insert_many(&self, installments: Vec<Installment>) -> HttpResult<Vec<Installment>>;
     async fn list(&self, filters: &InstallmentFilters) -> HttpResult<Vec<Installment>>;
+    async fn update(&self, installment: Installment) -> HttpResult<Installment>;
 }
 
 pub type DynInstallmentRepository = dyn InstallmentRepository + Send + Sync;
@@ -28,40 +28,38 @@ impl InstallmentRepositoryImpl {
 
 #[async_trait]
 impl InstallmentRepository for InstallmentRepositoryImpl {
-    async fn insert(&self, installment: Installment) -> HttpResult<Installment> {
-        let payload = InstallmentEntity::from(installment);
+    async fn update(&self, installment: Installment) -> HttpResult<Installment> {
+        let installment_dto = InstallmentEntity::from(installment);
 
         let row = sqlx::query(
             r#"
-                INSERT INTO finance_manager.debt_installment (
-                    debt_id,
-                    installment_id,
-                    due_date,
-                    amount,
-                    is_paid,
-                    payment_id,
-                    created_at,
-                    updated_at
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                RETURNING *
+            UPDATE finance_manager.debt_installment SET 
+                debt_id = $2,
+                installment_id = $3,
+                due_date = $4,
+                amount = $5,
+                is_paid = $6,
+                payment_id = $7,
+                updated_at = $8
+            WHERE installment_id = $1
+            RETURNING *
             "#,
         )
-        .bind(payload.debt_id)
-        .bind(payload.installment_id)
-        .bind(payload.due_date)
-        .bind(payload.amount)
-        .bind(payload.is_paid)
-        .bind(payload.payment_id)
-        .bind(payload.created_at)
-        .bind(payload.updated_at)
+        .bind(installment_dto.installment_id)
+        .bind(installment_dto.debt_id)
+        .bind(installment_dto.installment_id)
+        .bind(installment_dto.due_date)
+        .bind(installment_dto.amount)
+        .bind(installment_dto.is_paid)
+        .bind(installment_dto.payment_id)
+        .bind(installment_dto.updated_at)
         .fetch_one(&self.pool)
         .await?;
 
         Ok(Installment::from(InstallmentEntity::from(&row)))
     }
 
-    async fn insert_batch(&self, installments: Vec<Installment>) -> HttpResult<Vec<Installment>> {
+    async fn insert_many(&self, installments: Vec<Installment>) -> HttpResult<Vec<Installment>> {
         let mut tx = self.pool.begin().await?;
         let mut results: Vec<Installment> = Vec::new();
 
@@ -103,8 +101,23 @@ impl InstallmentRepository for InstallmentRepositoryImpl {
         Ok(results)
     }
 
-    async fn list(&self, _filters: &InstallmentFilters) -> HttpResult<Vec<Installment>> {
-        unimplemented!()
+    async fn list(&self, filters: &InstallmentFilters) -> HttpResult<Vec<Installment>> {
+        let mut builder = QueryBuilder::new("SELECT * FROM finance_manager.debt_installment");
+        let has_where = false;
+
+        if let Some(debt_id) = filters.debt_id {
+            builder.push(if has_where { " AND " } else { " WHERE " });
+            builder.push("debt_id = ");
+            builder.push_bind(debt_id);
+        }
+
+        let query = builder.build();
+        let rows = query.fetch_all(&self.pool).await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| Installment::from(InstallmentEntity::from(&row)))
+            .collect())
     }
 }
 

@@ -166,12 +166,12 @@ impl ChatBotHandlerImpl {
                 PaymentRequestFromIdentification {
                     debt_identification: payment.debt_identification,
                     account_identification: payment.account_identification,
+                    reconcile: payment.settled,
                     payment_basic_data: PaymentBasicData {
                         amount: payment.amount,
                         payment_date: payment
                             .payment_date
                             .unwrap_or(chrono::Utc::now().date_naive()),
-                        force_settlement: payment.settled,
                     },
                 },
             ))
