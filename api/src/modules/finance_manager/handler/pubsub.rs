@@ -38,6 +38,7 @@ pub struct PubSubHandlerImpl {
 }
 
 impl PubSubHandlerImpl {
+    // TODO: understand if this is needed
     async fn process_installments(&self, debt: &Debt, payment: &Payment) -> HttpResult<()> {
         if !debt.has_installments() {
             return Ok(());

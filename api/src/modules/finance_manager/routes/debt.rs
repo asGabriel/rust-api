@@ -28,7 +28,10 @@ pub fn configure_routes() -> Router<AppState> {
 
     Router::new().nest(
         "/debt",
-        Router::new().merge(main_debt_routes).merge(category_routes).merge(installment_routes),
+        Router::new()
+            .merge(main_debt_routes)
+            .merge(category_routes)
+            .merge(installment_routes),
     )
 }
 

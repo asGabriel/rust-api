@@ -100,6 +100,7 @@ fn build_debt_handler(pool: &Pool<Postgres>, pubsub: &PubSubHandlerImpl) -> Debt
         payment_repository: Arc::new(PaymentRepositoryImpl::new(pool)),
         debt_category_repository: Arc::new(DebtCategoryRepositoryImpl::new(pool)),
         installment_repository: Arc::new(InstallmentRepositoryImpl::new(pool)),
+        recurrence_repository: Arc::new(RecurrenceRepositoryImpl::new(pool)),
         pubsub: Arc::new(pubsub.clone()),
     }
 }

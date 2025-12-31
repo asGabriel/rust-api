@@ -42,7 +42,7 @@ impl RecurrenceRepository for RecurrenceRepositoryImpl {
             builder.push(if has_where { " AND " } else { " WHERE " });
             builder.push("active = ");
             builder.push_bind(active);
-            has_where = true;
+            // has_where = true;
         }
         let query = builder.build();
         let rows = query.fetch_all(&self.pool).await?;

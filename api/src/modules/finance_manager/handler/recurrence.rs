@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use http_error::{ext::OptionHttpExt, HttpResult};
 
 use crate::modules::finance_manager::{
-    domain::debt::recurrence::Recurrence,
+    domain::debt::recurrence::{Recurrence, RecurrenceFilters},
     handler::recurrence::use_cases::CreateRecurrenceRequest,
     repository::{account::DynAccountRepository, recurrence::DynRecurrenceRepository},
 };
@@ -38,7 +38,9 @@ pub trait RecurrenceHandler {
 #[async_trait]
 impl RecurrenceHandler for RecurrenceHandlerImpl {
     async fn list_recurrences(&self) -> HttpResult<Vec<Recurrence>> {
-        self.recurrence_repository.list().await
+        self.recurrence_repository
+            .list(&RecurrenceFilters::new())
+            .await
     }
 
     async fn create_recurrence(&self, request: CreateRecurrenceRequest) -> HttpResult<Recurrence> {

@@ -3,7 +3,12 @@ use http_error::{ext::OptionHttpExt, HttpResult};
 
 use crate::modules::finance_manager::{
     domain::{
-        debt::{category::DebtCategory, Debt, DebtFilters},
+        debt::{
+            category::DebtCategory,
+            installment::{Installment, InstallmentFilters},
+            recurrence::RecurrenceFilters,
+            Debt, DebtFilters,
+        },
         payment::Payment,
     },
     handler::{
@@ -18,6 +23,7 @@ use crate::modules::finance_manager::{
             DynDebtRepository,
         },
         payment::DynPaymentRepository,
+        recurrence::DynRecurrenceRepository,
     },
 };
 use std::sync::Arc;
@@ -28,6 +34,13 @@ pub type DynDebtHandler = dyn DebtHandler + Send + Sync;
 pub trait DebtHandler {
     async fn list_debts(&self, filters: &DebtFilters) -> HttpResult<Vec<Debt>>;
     async fn register_new_debt(&self, request: CreateDebtRequest) -> HttpResult<Debt>;
+
+    async fn list_debt_installments(
+        &self,
+        filters: &InstallmentFilters,
+    ) -> HttpResult<Vec<Installment>>;
+
+    // async fn generate_debt_recurrences(&self) -> HttpResult<()>;
 
     // DEBT_CATEGORY
     async fn create_debt_category(
@@ -44,6 +57,7 @@ pub struct DebtHandlerImpl {
     pub account_repository: Arc<DynAccountRepository>,
     pub payment_repository: Arc<DynPaymentRepository>,
     pub debt_category_repository: Arc<DynDebtCategoryRepository>,
+    pub recurrence_repository: Arc<DynRecurrenceRepository>,
     pub pubsub: Arc<DynPubSubHandler>,
 }
 
@@ -65,6 +79,13 @@ impl DebtHandlerImpl {
 
 #[async_trait]
 impl DebtHandler for DebtHandlerImpl {
+    async fn list_debt_installments(
+        &self,
+        filters: &InstallmentFilters,
+    ) -> HttpResult<Vec<Installment>> {
+        self.installment_repository.list(filters).await
+    }
+
     async fn create_debt_category(
         &self,
         request: CreateCategoryRequest,
@@ -120,9 +141,7 @@ pub mod use_cases {
     use serde::{Deserialize, Serialize};
     use uuid::Uuid;
 
-    use crate::modules::finance_manager::
-        domain::debt::DebtStatus
-    ;
+    use crate::modules::finance_manager::domain::debt::DebtStatus;
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "camelCase")]
