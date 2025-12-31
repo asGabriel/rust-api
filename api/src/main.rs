@@ -10,7 +10,7 @@ use api::modules::{
         },
         repository::{
             account::AccountRepositoryImpl,
-            debt::{category::DebtCategoryRepositoryImpl, DebtRepositoryImpl},
+            debt::{installment::InstallmentRepositoryImpl, DebtRepositoryImpl},
             income::IncomeRepositoryImpl,
             payment::PaymentRepositoryImpl,
             recurrence::RecurrenceRepositoryImpl,
@@ -28,9 +28,11 @@ async fn main() {
     let db_conection = DbPool::new().await;
     let pool = db_conection.get_connection();
 
+    let pubsub = build_pubsub(pool);
+
     // Build handlers
-    let payment_handler = build_payment_handler(pool);
-    let debt_handler = build_debt_handler(pool);
+    let payment_handler = build_payment_handler(pool, &pubsub);
+    let debt_handler = build_debt_handler(pool, &pubsub);
     let account_handler = build_account_handler(pool);
     let recurrence_handler = build_recurrence_handler(pool);
     let income_handler = build_income_handler(pool);
@@ -72,25 +74,30 @@ async fn main() {
     db_conection.close().await;
 }
 
-fn build_payment_handler(pool: &Pool<Postgres>) -> PaymentHandlerImpl {
-    PaymentHandlerImpl {
-        payment_repository: Arc::new(PaymentRepositoryImpl::new(pool)),
+fn build_pubsub(pool: &Pool<Postgres>) -> PubSubHandlerImpl {
+    PubSubHandlerImpl {
         debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
-        pubsub: Arc::new(PubSubHandlerImpl {
-            debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
-        }),
+        installment_repository: Arc::new(InstallmentRepositoryImpl::new(pool)),
     }
 }
 
-fn build_debt_handler(pool: &Pool<Postgres>) -> DebtHandlerImpl {
+fn build_payment_handler(pool: &Pool<Postgres>, pubsub: &PubSubHandlerImpl) -> PaymentHandlerImpl {
+    PaymentHandlerImpl {
+        payment_repository: Arc::new(PaymentRepositoryImpl::new(pool)),
+        debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
+        account_repository: Arc::new(AccountRepositoryImpl::new(pool)),
+        pubsub: Arc::new(pubsub.clone()),
+    }
+}
+
+fn build_debt_handler(pool: &Pool<Postgres>, pubsub: &PubSubHandlerImpl) -> DebtHandlerImpl {
     DebtHandlerImpl {
         debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
         account_repository: Arc::new(AccountRepositoryImpl::new(pool)),
         payment_repository: Arc::new(PaymentRepositoryImpl::new(pool)),
-        debt_category_repository: Arc::new(DebtCategoryRepositoryImpl::new(pool)),
-        pubsub: Arc::new(PubSubHandlerImpl {
-            debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
-        }),
+        installment_repository: Arc::new(InstallmentRepositoryImpl::new(pool)),
+        recurrence_repository: Arc::new(RecurrenceRepositoryImpl::new(pool)),
+        pubsub: Arc::new(pubsub.clone()),
     }
 }
 

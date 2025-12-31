@@ -9,12 +9,13 @@ use uuid::Uuid;
 use crate::modules::{
     chat_bot::domain::formatter::{ChatFormatter, ChatFormatterUtils},
     finance_manager::{
-        domain::{account::BankAccount, payment::Payment},
+        domain::{debt::installment::Installment, payment::Payment},
         handler::debt::use_cases::CreateDebtRequest,
     },
 };
 
 pub mod category;
+pub mod installment;
 pub mod recurrence;
 pub mod recurrence_run;
 
@@ -23,11 +24,10 @@ pub mod recurrence_run;
 pub struct Debt {
     /// Unique identifier
     id: Uuid,
-    /// Unique identifier of the account
-    /// The account that the debt belongs to
-    account_id: Uuid,
     /// The category of the debt
-    category_name: String,
+    category: DebtCategory,
+    /// Tags that identify the debt, it's like a category but more flexible
+    tags: Vec<String>,
     /// The identification of the debt for human readability
     identification: String,
 
@@ -49,6 +49,9 @@ pub struct Debt {
     #[serde(default)]
     status: DebtStatus,
 
+    /// The number of installments of the debt
+    installment_count: Option<i32>,
+
     /// The date of the creation of the debt
     created_at: DateTime<Utc>,
     /// The date of the last update of the debt
@@ -57,13 +60,14 @@ pub struct Debt {
 
 impl Debt {
     pub fn new(
-        account_id: Uuid,
         description: String,
         total_amount: Decimal,
         paid_amount: Option<Decimal>,
         discount_amount: Option<Decimal>,
         due_date: NaiveDate,
-        category_name: String,
+        category: Option<DebtCategory>,
+        tags: Option<Vec<String>>,
+        installment_count: Option<i32>,
     ) -> Self {
         let uuid = Uuid::new_v4();
         let remaining_amount = total_amount
@@ -72,8 +76,8 @@ impl Debt {
 
         Self {
             id: uuid,
-            account_id,
-            category_name,
+            category: category.unwrap_or_default(),
+            tags: tags.unwrap_or_default(),
             identification: String::new(), // database auto increment
             description,
             total_amount,
@@ -82,77 +86,81 @@ impl Debt {
             remaining_amount,
             due_date,
             status: DebtStatus::default(),
+            installment_count,
             created_at: Utc::now(),
             updated_at: None,
         }
     }
 
-    /// Generates a debt from a create debt request
-    pub fn from_request(request: &CreateDebtRequest, account: &BankAccount) -> HttpResult<Self> {
-        let account_default_due_date = account.default_due_date();
-        let due_date = match (request.due_date, account_default_due_date) {
-            (Some(date), _) => date,
-            (None, Some(default_date)) => default_date,
-            (None, None) => {
-                return Err(Box::new(HttpError::bad_request(
-                    "Data de vencimento não informada",
-                )));
-            }
-        };
+    pub fn process_payment(&mut self, payment: &Payment) -> HttpResult<()> {
+        self.validate_payment_amount(payment)?;
 
-        Ok(Self::new(
-            account.id().clone(),
-            request.description.clone(),
-            request.total_amount.clone(),
-            request.paid_amount.clone(),
-            request.discount_amount.clone(),
-            due_date,
-            request.category_name.clone(),
-        ))
-    }
-
-    fn is_paid(&self) -> bool {
-        self.paid_amount == self.total_amount || self.paid_amount > self.total_amount
-    }
-
-    pub fn payment_created(&mut self, payment: &Payment) {
         self.paid_amount += payment.amount();
 
         self.recalculate_remaining_amount();
         self.recalculate_status();
         self.updated_at = Some(Utc::now());
+
+        Ok(())
     }
 
-    fn recalculate_remaining_amount(&mut self) {
-        self.remaining_amount = self.total_amount - self.paid_amount - self.discount_amount;
-    }
-
-    fn recalculate_status(&mut self) {
-        if self.paid_amount == self.total_amount || self.paid_amount > self.total_amount {
-            self.status = DebtStatus::Settled;
-        } else if self.remaining_amount > Decimal::ZERO {
-            self.status = DebtStatus::PartiallyPaid;
-        } else {
-            self.status = DebtStatus::Unpaid;
-        }
-    }
-
-    fn force_settlement(&mut self, payment: &Payment) {
-        self.status = DebtStatus::Settled;
+    pub fn reconcile_with_actual_payment(&mut self, payment: &Payment) -> HttpResult<()> {
         self.total_amount = *payment.amount();
         self.paid_amount = *payment.amount();
         self.remaining_amount = Decimal::ZERO;
+        self.recalculate_status();
+
         self.updated_at = Some(Utc::now());
+
+        Ok(())
     }
 
-    pub fn process_payment(&mut self, payment: &Payment, force_settlement: bool) -> HttpResult<()> {
-        if self.is_paid() {
-            return Err(Box::new(HttpError::bad_request("Dívida já paga")));
+    /// Generates the installments of the debt
+    /// It will return the installments if the debt is parceled, otherwise it will return None
+    pub fn generate_installments(&self) -> HttpResult<Option<Vec<Installment>>> {
+        let installment_count = match self.installment_count {
+            Some(count) if count > 0 => count,
+            _ => return Ok(None),
+        };
+
+        let (base_amount, remainder) = self.calculate_installment_amount(installment_count);
+
+        let mut installments = Vec::new();
+
+        for i in 1..=installment_count {
+            // the first installment receives the remainder to avoid rounding errors
+            let amount = if i == 1 {
+                base_amount + remainder
+            } else {
+                base_amount
+            };
+
+            let due_date = self
+                .due_date
+                .checked_add_months(chrono::Months::new((i - 1) as u32))
+                .ok_or_else(|| {
+                    Box::new(HttpError::bad_request(format!(
+                        "Não foi possível calcular a data da parcela {}",
+                        i
+                    )))
+                })?;
+
+            installments.push(Installment::new(*self.id(), i, due_date, amount));
         }
 
-        if force_settlement {
-            self.force_settlement(payment);
-            return Ok(());
+        Ok(Some(installments))
+    }
+
+    pub fn has_installments(&self) -> bool {
+        self.installment_count.is_some() && self.installment_count.unwrap() > 0
+    }
+
+    // PRIVATE METHODS
+
+    /// Checks if the payment amount is valid to be processed
+    fn validate_payment_amount(&self, payment: &Payment) -> HttpResult<()> {
+        if self.paid_amount >= self.total_amount {
+            return Err(Box::new(HttpError::bad_request("Débito quitado")));
         }
 
         if *payment.amount() > self.remaining_amount {
@@ -163,9 +171,95 @@ impl Debt {
             ))));
         }
 
-        self.payment_created(payment);
-
         Ok(())
+    }
+
+    fn recalculate_remaining_amount(&mut self) {
+        self.remaining_amount = self.total_amount - self.paid_amount - self.discount_amount;
+    }
+
+    fn recalculate_status(&mut self) {
+        if self.paid_amount >= self.total_amount {
+            self.status = DebtStatus::Settled;
+        } else if self.remaining_amount > Decimal::ZERO {
+            self.status = DebtStatus::PartiallyPaid;
+        } else {
+            self.status = DebtStatus::Unpaid;
+        }
+    }
+
+    /// Calculates the amount of the installment and the remainder
+    fn calculate_installment_amount(&self, installment_number: i32) -> (Decimal, Decimal) {
+        let installment_number = Decimal::from(installment_number);
+
+        let base_amount = self.total_amount() / installment_number;
+        let remainder = self.total_amount() - (base_amount * installment_number);
+        (base_amount, remainder)
+    }
+}
+
+impl From<CreateDebtRequest> for Debt {
+    fn from(request: CreateDebtRequest) -> Self {
+        Self::new(
+            request.description,
+            request.total_amount,
+            request.paid_amount,
+            request.discount_amount,
+            request.due_date,
+            request.category,
+            request.tags,
+            request.installment_count,
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum DebtCategory {
+    #[default]
+    Unknown,
+    Home,
+    Food,
+    Transport,
+    Health,
+    Entertainment,
+    ShoppingAndGifts,
+    Education,
+    Services,
+    Investments,
+}
+
+impl From<String> for DebtCategory {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "HOME" => DebtCategory::Home,
+            "FOOD" => DebtCategory::Food,
+            "TRANSPORT" => DebtCategory::Transport,
+            "HEALTH" => DebtCategory::Health,
+            "ENTERTAINMENT" => DebtCategory::Entertainment,
+            "SHOPPING_AND_GIFTS" => DebtCategory::ShoppingAndGifts,
+            "EDUCATION" => DebtCategory::Education,
+            "SERVICES" => DebtCategory::Services,
+            "INVESTMENTS" => DebtCategory::Investments,
+            _ => DebtCategory::Unknown,
+        }
+    }
+}
+
+impl From<DebtCategory> for String {
+    fn from(category: DebtCategory) -> Self {
+        match category {
+            DebtCategory::Home => "HOME".to_string(),
+            DebtCategory::Food => "FOOD".to_string(),
+            DebtCategory::Transport => "TRANSPORT".to_string(),
+            DebtCategory::Health => "HEALTH".to_string(),
+            DebtCategory::Entertainment => "ENTERTAINMENT".to_string(),
+            DebtCategory::ShoppingAndGifts => "SHOPPING_AND_GIFTS".to_string(),
+            DebtCategory::Education => "EDUCATION".to_string(),
+            DebtCategory::Services => "SERVICES".to_string(),
+            DebtCategory::Investments => "INVESTMENTS".to_string(),
+            DebtCategory::Unknown => "UNKNOWN".to_string(),
+        }
     }
 }
 
@@ -251,8 +345,8 @@ impl DebtStatus {
 getters!(
     Debt {
         id: Uuid,
-        account_id: Uuid,
-        category_name: String,
+        category: DebtCategory,
+        tags: Vec<String>,
         identification: String,
         description: String,
         total_amount: Decimal,
@@ -261,6 +355,7 @@ getters!(
         remaining_amount: Decimal,
         due_date: NaiveDate,
         status: DebtStatus,
+        installment_count: Option<i32>,
         created_at: DateTime<Utc>,
         updated_at: Option<DateTime<Utc>>,
     }
@@ -269,8 +364,8 @@ getters!(
 from_row_constructor! {
     Debt {
         id: Uuid,
-        account_id: Uuid,
-        category_name: String,
+        category: DebtCategory,
+        tags: Vec<String>,
         identification: String,
         description: String,
         total_amount: Decimal,
@@ -279,6 +374,7 @@ from_row_constructor! {
         remaining_amount: Decimal,
         due_date: NaiveDate,
         status: DebtStatus,
+        installment_count: Option<i32>,
         created_at: DateTime<Utc>,
         updated_at: Option<DateTime<Utc>>,
     }
@@ -288,7 +384,6 @@ from_row_constructor! {
 #[serde(rename_all = "camelCase")]
 pub struct DebtFilters {
     ids: Option<Vec<Uuid>>,
-    account_ids: Option<Vec<Uuid>>,
     statuses: Option<Vec<DebtStatus>>,
     start_date: Option<NaiveDate>,
     end_date: Option<NaiveDate>,
@@ -298,7 +393,6 @@ pub struct DebtFilters {
 getters!(
     DebtFilters {
         ids: Option<Vec<Uuid>>,
-        account_ids: Option<Vec<Uuid>>,
         statuses: Option<Vec<DebtStatus>>,
         start_date: Option<NaiveDate>,
         end_date: Option<NaiveDate>,
@@ -330,11 +424,6 @@ impl DebtFilters {
 
     pub fn with_end_date(mut self, end_date: NaiveDate) -> Self {
         self.end_date = Some(end_date);
-        self
-    }
-
-    pub fn with_account_ids(mut self, account_ids: Vec<Uuid>) -> Self {
-        self.account_ids = Some(account_ids);
         self
     }
 

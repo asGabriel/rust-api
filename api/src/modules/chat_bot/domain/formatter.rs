@@ -94,8 +94,8 @@ impl ChatFormatterUtils {
         }
 
         // "+n" or "em-n-dias" format
-        if input.starts_with('+') {
-            if let Ok(days) = input[1..].trim().parse::<i64>() {
+        if let Some(stripped) = input.strip_prefix('+') {
+            if let Ok(days) = stripped.trim().parse::<i64>() {
                 return Ok(Utc::now().date_naive() + chrono::Duration::days(days));
             }
         }
@@ -108,7 +108,7 @@ impl ChatFormatterUtils {
         }
 
         // Try parsing as dd/mm/yyyy, dd-mm-yyyy, or dd.mm.yyyy
-        let parts: Vec<&str> = input.split(|c| c == '/' || c == '-' || c == '.').collect();
+        let parts: Vec<&str> = input.split(['/', '-', '.']).collect();
         if parts.len() >= 2 {
             let day: u32 = parts[0].parse().map_err(|_| {
                 Box::new(HttpError::bad_request(format!(

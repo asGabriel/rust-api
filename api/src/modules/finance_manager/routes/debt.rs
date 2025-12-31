@@ -3,50 +3,41 @@ use http_error::HttpResult;
 
 use crate::modules::{
     finance_manager::{
-        domain::debt::DebtFilters,
-        handler::debt::use_cases::{CreateCategoryRequest, CreateDebtRequest},
+        domain::debt::{installment::InstallmentFilters, DebtFilters},
+        handler::debt::use_cases::CreateDebtRequest,
     },
     routes::AppState,
 };
 
 pub fn configure_routes() -> Router<AppState> {
-    let category_routes = Router::new().nest(
-        "/category",
-        Router::new()
-            .route("/list", post(list_categories))
-            .route("/", post(create_category)),
+    let main_debt_routes = Router::new()
+        .route("/list", post(list_debts))
+        .route("/", post(create_debt));
+
+    let installment_routes = Router::new().nest(
+        "/installment",
+        Router::new().route("/list", post(list_debt_installments)),
     );
 
     Router::new().nest(
         "/debt",
         Router::new()
-            .route("/list", post(list_debts))
-            .route("/", post(create_debt))
-            .merge(category_routes),
+            .merge(main_debt_routes)
+            .merge(installment_routes),
     )
 }
 
-async fn create_category(
+async fn list_debt_installments(
     state: State<AppState>,
-    Json(request): Json<CreateCategoryRequest>,
+    Json(filters): Json<InstallmentFilters>,
 ) -> HttpResult<impl IntoResponse> {
-    let category = state
+    let installments = state
         .finance_manager_state
         .debt_handler
-        .create_debt_category(request)
+        .list_debt_installments(&filters)
         .await?;
 
-    Ok(Json(category))
-}
-
-async fn list_categories(state: State<AppState>) -> HttpResult<impl IntoResponse> {
-    let categories = state
-        .finance_manager_state
-        .debt_handler
-        .list_debt_categories()
-        .await?;
-
-    Ok(Json(categories))
+    Ok(Json(installments))
 }
 
 async fn create_debt(
@@ -56,7 +47,7 @@ async fn create_debt(
     let debt = state
         .finance_manager_state
         .debt_handler
-        .create_debt(request)
+        .register_new_debt(request)
         .await?;
 
     Ok(Json(debt))

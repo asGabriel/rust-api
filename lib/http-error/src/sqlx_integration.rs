@@ -23,17 +23,16 @@ fn map_database_error(db_err: &(dyn DatabaseError + 'static)) -> HttpError {
     // Para Postgres, códigos de erro seguem SQLSTATE.
     // 23505 = unique_violation, 23503 = foreign_key_violation
     let code = db_err.code();
+    let message = db_err.message().to_string();
 
     if let Some(code) = code.as_deref() {
         match code {
-            "23505" => HttpError::conflict("Violação de unicidade").with_meta(meta_code(code)),
-            "23503" => {
-                HttpError::bad_request("Violação de chave estrangeira").with_meta(meta_code(code))
-            }
-            _ => HttpError::internal("Erro de banco de dados").with_meta(meta_code(code)),
+            "23505" => HttpError::conflict(message).with_meta(meta_code(code)),
+            "23503" => HttpError::bad_request(message).with_meta(meta_code(code)),
+            _ => HttpError::internal(message).with_meta(meta_code(code)),
         }
     } else {
-        HttpError::internal("Erro de banco de dados")
+        HttpError::internal(message)
     }
 }
 

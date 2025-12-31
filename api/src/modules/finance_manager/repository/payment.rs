@@ -94,7 +94,7 @@ pub mod dto {
                 debt_id: *payment.debt_id(),
                 account_id: *payment.account_id(),
                 amount: *payment.amount(),
-                payment_date: payment.payment_date().clone(),
+                payment_date: *payment.payment_date(),
                 created_at: payment.created_at().naive_utc(),
                 updated_at: payment.updated_at().map(|dt| dt.naive_utc()),
             }

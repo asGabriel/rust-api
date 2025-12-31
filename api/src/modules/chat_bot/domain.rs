@@ -121,8 +121,7 @@ pub struct ChatCommand {
 impl ChatCommand {
     /// Generate a help message with all available commands
     pub fn get_help_message() -> String {
-        format!(
-            r#"📚 Comandos Disponíveis
+        r#"📚 Comandos Disponíveis
 
 📊 Consulta de Débitos
 • `resumo` [d:data] [c:numero da conta]
@@ -133,9 +132,10 @@ impl ChatCommand {
 • `contas` - Lista todas as contas cadastradas
 
 ➕ Criar Despesa
-• `despesa descrição valor c:N cat:categoria [d:data] [p:s]`
-  onde: [c:1,2,3], cat:=categoria, d:=data, p:=pago (s=sim, n=não)
-  exemplo: despesa mercado 150 c:2 cat:mercado p:n
+• `despesa descrição valor d:data cat:categoria [c:N]`
+  onde: d:=data (obrigatório), cat:=categoria (obrigatório), c:=conta (opcional, quando presente indica que está pago)
+  exemplo: despesa mercado 150 d:2025-01-15 cat:Alimentação
+  exemplo com pagamento: despesa mercado 150 d:2025-01-15 cat:Alimentação c:1
 
 💰 Registrar Pagamento
 • `pagamento identificação [valor] [data]`
@@ -154,7 +154,7 @@ impl ChatCommand {
 ❓ *Ajuda*
 • `help`, `ajuda` ou `?` - Mostra esta mensagem
 "#
-        )
+            .to_string()
     }
 
     /// Parse a message and extract the command with detailed error handling.
@@ -190,7 +190,7 @@ mod tests {
 
     #[test]
     fn test_from_message_valid_new_debt_example1() {
-        let result = ChatCommand::from_message("despesa natação 150 c:2");
+        let result = ChatCommand::from_message("despesa natação 150 d:2025-01-15 cat:Esportes");
         assert!(result.is_ok());
 
         let command = result.unwrap();
@@ -198,8 +198,8 @@ mod tests {
             ChatCommandType::NewDebt(data) => {
                 assert_eq!(data.description, "natação");
                 assert_eq!(data.amount, rust_decimal::Decimal::new(150, 0));
-                assert_eq!(data.account_identification, "2");
-                assert_eq!(data.is_paid, false);
+                assert_eq!(data.account_identification, None);
+                assert_eq!(data.is_paid(), false);
             }
             _ => panic!("Expected NewDebt command type"),
         }
@@ -207,7 +207,8 @@ mod tests {
 
     #[test]
     fn test_from_message_valid_new_debt_example2() {
-        let result = ChatCommand::from_message("despesa mercado 400 c:1 p:s");
+        let result =
+            ChatCommand::from_message("despesa mercado 400 c:1 d:2025-01-20 cat:Alimentação");
         assert!(result.is_ok());
 
         let command = result.unwrap();
@@ -215,8 +216,8 @@ mod tests {
             ChatCommandType::NewDebt(data) => {
                 assert_eq!(data.description, "mercado");
                 assert_eq!(data.amount, rust_decimal::Decimal::new(400, 0));
-                assert_eq!(data.account_identification, "1");
-                assert_eq!(data.is_paid, true);
+                assert_eq!(data.account_identification, Some("1".to_string()));
+                assert_eq!(data.is_paid(), true);
             }
             _ => panic!("Expected NewDebt command type"),
         }
@@ -224,7 +225,8 @@ mod tests {
 
     #[test]
     fn test_from_message_valid_new_debt_with_date() {
-        let result = ChatCommand::from_message("despesa almoço 30 c:3 d:2025-01-15");
+        let result =
+            ChatCommand::from_message("despesa almoço 30 c:3 d:2025-01-15 cat:Alimentação");
         assert!(result.is_ok());
 
         let command = result.unwrap();
@@ -232,8 +234,8 @@ mod tests {
             ChatCommandType::NewDebt(data) => {
                 assert_eq!(data.description, "almoço");
                 assert_eq!(data.amount, rust_decimal::Decimal::new(30, 0));
-                assert_eq!(data.account_identification, "3");
-                assert!(data.due_date.is_some());
+                assert_eq!(data.account_identification, Some("3".to_string()));
+                assert_eq!(data.is_paid(), true);
             }
             _ => panic!("Expected NewDebt command type"),
         }
@@ -241,7 +243,7 @@ mod tests {
 
     #[test]
     fn test_from_message_invalid_amount() {
-        let result = ChatCommand::from_message("despesa mercado abc c:1");
+        let result = ChatCommand::from_message("despesa mercado abc d:2025-01-15 cat:Alimentação");
         assert!(result.is_err());
 
         let error = result.unwrap_err();
@@ -250,7 +252,7 @@ mod tests {
 
     #[test]
     fn test_from_message_missing_amount() {
-        let result = ChatCommand::from_message("despesa mercado c:1");
+        let result = ChatCommand::from_message("despesa mercado d:2025-01-15 cat:Alimentação");
         assert!(result.is_err());
 
         let error = result.unwrap_err();
@@ -258,17 +260,17 @@ mod tests {
     }
 
     #[test]
-    fn test_from_message_missing_account() {
-        let result = ChatCommand::from_message("despesa mercado 100");
+    fn test_from_message_missing_category() {
+        let result = ChatCommand::from_message("despesa mercado 100 d:2025-01-15");
         assert!(result.is_err());
 
         let error = result.unwrap_err();
-        assert!(error.message.contains("Conta"));
+        assert!(error.message.contains("Categoria"));
     }
 
     #[test]
     fn test_from_message_valid_description_from_number() {
-        let result = ChatCommand::from_message("despesa mercado 100 c:1");
+        let result = ChatCommand::from_message("despesa mercado 100 d:2025-01-15 cat:Alimentação");
         assert!(result.is_ok());
     }
 

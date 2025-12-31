@@ -169,7 +169,7 @@ pub mod entity {
                 account_id: *income.account_id(),
                 description: income.description().clone(),
                 amount: *income.amount(),
-                reference: income.reference().clone(),
+                reference: *income.reference(),
                 created_at: income.created_at().naive_utc(),
                 updated_at: income.updated_at().map(|dt| dt.naive_utc()),
             }
@@ -183,7 +183,7 @@ pub mod entity {
                 entity.account_id,
                 entity.description,
                 entity.amount,
-                entity.reference.clone(),
+                entity.reference,
                 entity.created_at.and_utc(),
                 entity.updated_at.map(|dt| dt.and_utc()),
             )

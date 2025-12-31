@@ -69,9 +69,7 @@ impl BankAccount {
 
 impl From<CreateAccountRequest> for BankAccount {
     fn from(request: CreateAccountRequest) -> Self {
-        let configuration = request
-            .configuration
-            .unwrap_or(AccountConfiguration::default());
+        let configuration = request.configuration.unwrap_or_default();
         BankAccount::new(request.name, request.owner, configuration)
     }
 }
@@ -120,7 +118,7 @@ impl ChatFormatter for BankAccount {
         for account in items.iter() {
             accounts_by_owner
                 .entry(account.owner().clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(account);
         }
 

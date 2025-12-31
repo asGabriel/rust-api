@@ -25,7 +25,7 @@ impl Income {
     pub fn from_request(request: CreateIncomeRequest, account_id: Uuid) -> Self {
         Self {
             id: Uuid::new_v4(),
-            account_id: account_id,
+            account_id,
             description: request.description,
             amount: request.amount,
             reference: request.date_reference,
@@ -64,7 +64,7 @@ impl ChatFormatter for Income {
         format!(
             "{} - {} - {}",
             self.description(),
-            ChatFormatterUtils::format_currency(&self.amount()),
+            ChatFormatterUtils::format_currency(self.amount()),
             self.reference().format("%d/%m/%Y"),
         )
     }

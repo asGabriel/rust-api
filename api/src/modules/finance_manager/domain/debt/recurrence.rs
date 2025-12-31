@@ -22,6 +22,38 @@ pub struct Recurrence {
     updated_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RecurrenceFilters {
+    next_run_date: Option<NaiveDate>,
+    active: Option<bool>,
+}
+
+impl RecurrenceFilters {
+    pub fn new() -> Self {
+        Self {
+            ..Default::default()
+        }
+    }
+
+    pub fn with_next_run_date(mut self, next_run_date: NaiveDate) -> Self {
+        self.next_run_date = Some(next_run_date);
+        self
+    }
+
+    pub fn with_active(mut self, active: bool) -> Self {
+        self.active = Some(active);
+        self
+    }
+}
+
+getters!(
+    RecurrenceFilters {
+        next_run_date: Option<NaiveDate>,
+        active: Option<bool>,
+    }
+);
+
 impl Recurrence {
     pub fn from_request(request: CreateRecurrenceRequest, account_id: Uuid) -> Self {
         Self {

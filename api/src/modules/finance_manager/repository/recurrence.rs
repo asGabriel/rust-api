@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use http_error::HttpResult;
-use sqlx::{Pool, Postgres, Row};
+use sqlx::{Pool, Postgres, QueryBuilder, Row};
 
-use crate::modules::finance_manager::domain::debt::recurrence::Recurrence;
+use crate::modules::finance_manager::domain::debt::recurrence::{Recurrence, RecurrenceFilters};
 
 use entity::RecurrenceEntity;
 
@@ -13,7 +13,7 @@ pub trait RecurrenceRepository {
     async fn insert(&self, recurrence: Recurrence) -> HttpResult<Recurrence>;
 
     // TODO: Add filters
-    async fn list(&self) -> HttpResult<Vec<Recurrence>>;
+    async fn list(&self, filters: &RecurrenceFilters) -> HttpResult<Vec<Recurrence>>;
 }
 
 #[derive(Clone)]
@@ -29,11 +29,23 @@ impl RecurrenceRepositoryImpl {
 
 #[async_trait]
 impl RecurrenceRepository for RecurrenceRepositoryImpl {
-    async fn list(&self) -> HttpResult<Vec<Recurrence>> {
-        let rows =
-            sqlx::query(r#"SELECT * FROM finance_manager.recurrence ORDER BY created_at DESC"#)
-                .fetch_all(&self.pool)
-                .await?;
+    async fn list(&self, filters: &RecurrenceFilters) -> HttpResult<Vec<Recurrence>> {
+        let mut builder = QueryBuilder::new("SELECT * FROM finance_manager.recurrence");
+        let mut has_where = false;
+        if let Some(next_run_date) = filters.next_run_date() {
+            builder.push(if has_where { " AND " } else { " WHERE " });
+            builder.push("next_run_date = ");
+            builder.push_bind(next_run_date);
+            has_where = true;
+        }
+        if let Some(active) = filters.active() {
+            builder.push(if has_where { " AND " } else { " WHERE " });
+            builder.push("active = ");
+            builder.push_bind(active);
+            // has_where = true;
+        }
+        let query = builder.build();
+        let rows = query.fetch_all(&self.pool).await?;
 
         let results: Vec<RecurrenceEntity> = rows
             .into_iter()
@@ -130,7 +142,7 @@ mod entity {
                 amount: *recurrence.amount(),
                 active: *recurrence.active(),
                 start_date: *recurrence.start_date(),
-                end_date: recurrence.end_date().clone(),
+                end_date: *recurrence.end_date(),
                 day_of_month: *recurrence.day_of_month(),
                 next_run_date: *recurrence.next_run_date(),
                 created_at: recurrence.created_at().naive_utc(),

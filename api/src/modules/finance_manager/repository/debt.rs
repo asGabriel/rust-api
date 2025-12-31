@@ -1,12 +1,11 @@
 use async_trait::async_trait;
-// use database::push_filter;
 use http_error::{ext::OptionHttpExt, HttpResult};
-use sqlx::{Pool, Postgres, QueryBuilder, Row};
+use sqlx::{Pool, Postgres, QueryBuilder};
 use uuid::Uuid;
 
 use crate::modules::finance_manager::domain::debt::{Debt, DebtFilters};
 
-pub mod category;
+pub mod installment;
 
 #[async_trait]
 pub trait DebtRepository {
@@ -42,79 +41,47 @@ impl DebtRepository for DebtRepositoryImpl {
         let row = sqlx::query(
             r#"
             UPDATE finance_manager.debt SET 
-                account_id = $1, 
-                category_name = $2,
-                description = $3, 
-                total_amount = $4, 
-                paid_amount = $5, 
-                discount_amount = $6, 
-                remaining_amount = $7, 
-                due_date = $8, 
-                status = $9, 
-                updated_at = $10
-            WHERE id = $11 
+                category = $2,
+                tags = $3,
+                description = $4, 
+                total_amount = $5, 
+                paid_amount = $6, 
+                discount_amount = $7, 
+                remaining_amount = $8, 
+                due_date = $9, 
+                status = $10, 
+                installment_count = $11,
+                updated_at = $12
+            WHERE id = $1 
             RETURNING *
             "#,
         )
-        .bind(debt_dto.account_id)
-        .bind(debt_dto.category_name)
-        .bind(debt_dto.description)
+        .bind(debt_dto.id)
+        .bind(&debt_dto.category)
+        .bind(&debt_dto.tags)
+        .bind(&debt_dto.description)
         .bind(debt_dto.total_amount)
         .bind(debt_dto.paid_amount)
         .bind(debt_dto.discount_amount)
         .bind(debt_dto.remaining_amount)
         .bind(debt_dto.due_date)
-        .bind(debt_dto.status)
+        .bind(&debt_dto.status)
+        .bind(debt_dto.installment_count)
         .bind(debt_dto.updated_at)
-        .bind(debt_dto.id)
         .fetch_optional(&self.pool)
         .await?
-        .or_not_found("debt", &debt_dto.id.to_string())?;
+        .or_not_found("debt", debt_dto.id.to_string())?;
 
-        let debt_dto = entity::DebtEntity {
-            id: row.get("id"),
-            account_id: row.get("account_id"),
-            identification: row.get::<i32, _>("identification").to_string(),
-            category_name: row.get("category_name"),
-            description: row.get("description"),
-            total_amount: row.get("total_amount"),
-            paid_amount: row.get("paid_amount"),
-            discount_amount: row.get("discount_amount"),
-            remaining_amount: row.get("remaining_amount"),
-            due_date: row.get("due_date"),
-            status: row.get("status"),
-            created_at: row.get("created_at"),
-            updated_at: row.get("updated_at"),
-        };
-
-        Ok(Debt::from(debt_dto))
+        Ok(Debt::from(entity::DebtEntity::from(&row)))
     }
 
     async fn get_by_id(&self, id: &Uuid) -> HttpResult<Option<Debt>> {
-        let row = sqlx::query(
-            r#"SELECT id, account_id, category_name, identification, description, total_amount, paid_amount, discount_amount, remaining_amount, due_date, status, created_at, updated_at FROM finance_manager.debt WHERE id = $1"#
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row = sqlx::query(r#"SELECT * FROM finance_manager.debt WHERE id = $1"#)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
 
-        let debt = row.map(|r| entity::DebtEntity {
-            id: r.get("id"),
-            account_id: r.get("account_id"),
-            identification: r.get::<i32, _>("identification").to_string(),
-            category_name: r.get("category_name"),
-            description: r.get("description"),
-            total_amount: r.get("total_amount"),
-            paid_amount: r.get("paid_amount"),
-            discount_amount: r.get("discount_amount"),
-            remaining_amount: r.get("remaining_amount"),
-            due_date: r.get("due_date"),
-            status: r.get("status"),
-            created_at: r.get("created_at"),
-            updated_at: r.get("updated_at"),
-        });
-
-        Ok(debt.map(Debt::from))
+        Ok(row.map(|r| Debt::from(entity::DebtEntity::from(&r))))
     }
 
     async fn get_by_identification(&self, identification: &str) -> HttpResult<Option<Debt>> {
@@ -125,30 +92,12 @@ impl DebtRepository for DebtRepositoryImpl {
             ))
         })?;
 
-        let row = sqlx::query(
-            r#"SELECT id, account_id, category_name, identification, description, total_amount, paid_amount, discount_amount, remaining_amount, due_date, status, created_at, updated_at FROM finance_manager.debt WHERE identification = $1"#
-        )
-        .bind(identification_num)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row = sqlx::query(r#"SELECT * FROM finance_manager.debt WHERE identification = $1"#)
+            .bind(identification_num)
+            .fetch_optional(&self.pool)
+            .await?;
 
-        let debt = row.map(|r| entity::DebtEntity {
-            id: r.get("id"),
-            account_id: r.get("account_id"),
-            identification: r.get::<i32, _>("identification").to_string(),
-            category_name: r.get("category_name"),
-            description: r.get("description"),
-            total_amount: r.get("total_amount"),
-            paid_amount: r.get("paid_amount"),
-            discount_amount: r.get("discount_amount"),
-            remaining_amount: r.get("remaining_amount"),
-            due_date: r.get("due_date"),
-            status: r.get("status"),
-            created_at: r.get("created_at"),
-            updated_at: r.get("updated_at"),
-        });
-
-        Ok(debt.map(Debt::from))
+        Ok(row.map(|r| Debt::from(entity::DebtEntity::from(&r))))
     }
 
     async fn insert(&self, debt: Debt) -> HttpResult<Debt> {
@@ -158,8 +107,8 @@ impl DebtRepository for DebtRepositoryImpl {
             r#"
             INSERT INTO finance_manager.debt (
                 id, 
-                account_id, 
-                category_name,
+                category,
+                tags,
                 description, 
                 total_amount, 
                 paid_amount, 
@@ -167,45 +116,31 @@ impl DebtRepository for DebtRepositoryImpl {
                 remaining_amount, 
                 due_date,
                 status,
+                installment_count,
                 created_at,
                 updated_at
             ) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-            RETURNING id, account_id, category_name, identification, description, total_amount, paid_amount, discount_amount, remaining_amount, due_date, status, created_at, updated_at
-        "#
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            RETURNING *
+        "#,
         )
         .bind(debt_dto.id)
-        .bind(debt_dto.account_id)
-        .bind(debt_dto.category_name)
-        .bind(debt_dto.description)
+        .bind(&debt_dto.category)
+        .bind(&debt_dto.tags)
+        .bind(&debt_dto.description)
         .bind(debt_dto.total_amount)
         .bind(debt_dto.paid_amount)
         .bind(debt_dto.discount_amount)
         .bind(debt_dto.remaining_amount)
         .bind(debt_dto.due_date)
         .bind(debt_dto.status)
+        .bind(debt_dto.installment_count)
         .bind(debt_dto.created_at)
         .bind(debt_dto.updated_at)
         .fetch_one(&self.pool)
         .await?;
 
-        let debt_dto = entity::DebtEntity {
-            id: row.get("id"),
-            account_id: row.get("account_id"),
-            identification: row.get::<i32, _>("identification").to_string(),
-            category_name: row.get("category_name"),
-            description: row.get("description"),
-            total_amount: row.get("total_amount"),
-            paid_amount: row.get("paid_amount"),
-            discount_amount: row.get("discount_amount"),
-            remaining_amount: row.get("remaining_amount"),
-            due_date: row.get("due_date"),
-            status: row.get("status"),
-            created_at: row.get("created_at"),
-            updated_at: row.get("updated_at"),
-        };
-
-        Ok(Debt::from(debt_dto))
+        Ok(Debt::from(entity::DebtEntity::from(&row)))
     }
 
     async fn list(&self, filters: &DebtFilters) -> HttpResult<Vec<Debt>> {
@@ -226,20 +161,12 @@ impl DebtRepository for DebtRepositoryImpl {
             has_where = true;
         }
 
-        if let Some(account_ids) = filters.account_ids() {
-            if !account_ids.is_empty() {
-                builder.push(if has_where { " AND " } else { " WHERE " });
-                builder.push("account_id = ANY(");
-                builder.push_bind(account_ids);
-                builder.push(")");
-            }
-        }
-
         if let Some(category_names) = filters.category_names() {
             builder.push(if has_where { " AND " } else { " WHERE " });
-            builder.push("category_name = ANY(");
+            builder.push("category = ANY(");
             builder.push_bind(category_names);
             builder.push(")");
+            has_where = true;
         }
 
         if let Some(statuses) = filters.statuses() {
@@ -257,26 +184,10 @@ impl DebtRepository for DebtRepositoryImpl {
         let query = builder.build();
         let rows = query.fetch_all(&self.pool).await?;
 
-        let debt_dtos: Vec<entity::DebtEntity> = rows
+        let debts: Vec<Debt> = rows
             .into_iter()
-            .map(|row| entity::DebtEntity {
-                id: row.get("id"),
-                account_id: row.get("account_id"),
-                identification: row.get::<i32, _>("identification").to_string(),
-                category_name: row.get("category_name"),
-                description: row.get("description"),
-                total_amount: row.get("total_amount"),
-                paid_amount: row.get("paid_amount"),
-                discount_amount: row.get("discount_amount"),
-                remaining_amount: row.get("remaining_amount"),
-                due_date: row.get("due_date"),
-                status: row.get("status"),
-                created_at: row.get("created_at"),
-                updated_at: row.get("updated_at"),
-            })
+            .map(|row| Debt::from(entity::DebtEntity::from(&row)))
             .collect();
-
-        let debts = debt_dtos.into_iter().map(Debt::from).collect();
         Ok(debts)
     }
 }
@@ -285,16 +196,18 @@ pub mod entity {
     use chrono::{NaiveDate, NaiveDateTime};
     use rust_decimal::Decimal;
     use serde::{Deserialize, Serialize};
+    use sqlx::postgres::PgRow;
+    use sqlx::Row;
     use uuid::Uuid;
 
-    use crate::modules::finance_manager::domain::debt::Debt;
+    use crate::modules::finance_manager::domain::debt::{Debt, DebtCategory};
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct DebtEntity {
         pub id: Uuid,
-        pub account_id: Uuid,
         pub identification: String,
-        pub category_name: String,
+        pub category: String,
+        pub tags: Vec<String>,
         pub description: String,
         pub total_amount: Decimal,
         pub paid_amount: Decimal,
@@ -302,17 +215,39 @@ pub mod entity {
         pub remaining_amount: Decimal,
         pub due_date: NaiveDate,
         pub status: String,
+        pub installment_count: Option<i32>,
         pub created_at: NaiveDateTime,
         pub updated_at: Option<NaiveDateTime>,
+    }
+
+    impl From<&PgRow> for DebtEntity {
+        fn from(row: &PgRow) -> Self {
+            Self {
+                id: row.get("id"),
+                identification: row.get::<i32, _>("identification").to_string(),
+                category: row.get::<String, _>("category"),
+                tags: row.get::<Vec<String>, _>("tags"),
+                description: row.get("description"),
+                total_amount: row.get("total_amount"),
+                paid_amount: row.get("paid_amount"),
+                discount_amount: row.get("discount_amount"),
+                remaining_amount: row.get("remaining_amount"),
+                due_date: row.get("due_date"),
+                status: row.get("status"),
+                installment_count: row.get("installment_count"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            }
+        }
     }
 
     impl From<Debt> for DebtEntity {
         fn from(debt: Debt) -> Self {
             DebtEntity {
                 id: *debt.id(),
-                account_id: *debt.account_id(),
                 identification: debt.identification().to_string(),
-                category_name: debt.category_name().to_string(),
+                category: String::from(debt.category().clone()),
+                tags: debt.tags().clone(),
                 description: debt.description().clone(),
                 total_amount: *debt.total_amount(),
                 paid_amount: *debt.paid_amount(),
@@ -320,6 +255,7 @@ pub mod entity {
                 remaining_amount: *debt.remaining_amount(),
                 due_date: *debt.due_date(),
                 status: debt.status().clone().into(),
+                installment_count: *debt.installment_count(),
                 created_at: debt.created_at().naive_utc(),
                 updated_at: debt.updated_at().map(|dt| dt.naive_utc()),
             }
@@ -330,8 +266,8 @@ pub mod entity {
         fn from(dto: DebtEntity) -> Self {
             Debt::from_row(
                 dto.id,
-                dto.account_id,
-                dto.category_name,
+                DebtCategory::from(dto.category),
+                dto.tags,
                 dto.identification,
                 dto.description,
                 dto.total_amount,
@@ -340,6 +276,7 @@ pub mod entity {
                 dto.remaining_amount,
                 dto.due_date,
                 dto.status.into(),
+                dto.installment_count,
                 dto.created_at.and_utc(),
                 dto.updated_at.map(|dt| dt.and_utc()),
             )

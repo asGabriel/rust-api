@@ -51,18 +51,7 @@ pub struct ChatBotHandlerImpl {
 
 impl ChatBotHandlerImpl {
     pub async fn handle_list_debts(&self, chat_id: i64, filters: SummaryFilters) -> HttpResult<()> {
-        let (mut debt_filters, income_filters) = filters.to_filters();
-
-        if let Some(account_identifications) = &filters.account_identifications {
-            let accounts = self
-                .account_handler
-                .list_accounts(
-                    AccountListFilters::new().with_identifications(account_identifications.clone()),
-                )
-                .await?;
-            debt_filters = debt_filters
-                .with_account_ids(accounts.into_iter().map(|a| a.id().clone()).collect());
-        }
+        let (debt_filters, income_filters) = filters.to_filters();
 
         let result = self.debt_handler.list_debts(&debt_filters).await;
 
@@ -97,11 +86,33 @@ impl ChatBotHandlerImpl {
     }
 
     async fn handle_new_debt(&self, request: NewDebtData, chat_id: i64) -> HttpResult<()> {
+        let account_id = if let Some(account_identification) = &request.account_identification {
+            let account = self
+                .account_handler
+                .list_accounts(
+                    AccountListFilters::new()
+                        .with_identifications(vec![account_identification.clone()]),
+                )
+                .await?
+                .into_iter()
+                .next()
+                .ok_or_else(|| {
+                    Box::new(http_error::HttpError::not_found(
+                        "account",
+                        account_identification.clone(),
+                    ))
+                })?;
+
+            Some(*account.id())
+        } else {
+            None
+        };
+
         let result = self
             .debt_handler
-            .create_debt(CreateDebtRequest {
-                account_identification: request.account_identification.clone(),
-                category_name: request.category_name.clone(),
+            .register_new_debt(CreateDebtRequest {
+                category: None,
+                tags: None,
                 description: request.description.clone(),
                 total_amount: request.amount,
                 paid_amount: None,
@@ -109,6 +120,8 @@ impl ChatBotHandlerImpl {
                 due_date: request.due_date,
                 status: Some(DebtStatus::Unpaid),
                 is_paid: request.is_paid(),
+                account_id,
+                installment_count: request.installment_number,
             })
             .await;
 
@@ -153,12 +166,13 @@ impl ChatBotHandlerImpl {
             .create_payment(CreatePaymentRequest::PaymentRequestFromIdentification(
                 PaymentRequestFromIdentification {
                     debt_identification: payment.debt_identification,
+                    account_identification: payment.account_identification,
+                    reconcile: payment.settled,
                     payment_basic_data: PaymentBasicData {
                         amount: payment.amount,
                         payment_date: payment
                             .payment_date
                             .unwrap_or(chrono::Utc::now().date_naive()),
-                        force_settlement: payment.settled,
                     },
                 },
             ))

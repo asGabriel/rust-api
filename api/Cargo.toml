@@ -13,6 +13,7 @@ chrono = { workspace = true }
 rust_decimal = { workspace = true }
 uuid = { workspace = true }
 async-trait = { workspace = true }
+serde_plain = { workspace = true }
 
 ## libs
 database = { workspace = true }
