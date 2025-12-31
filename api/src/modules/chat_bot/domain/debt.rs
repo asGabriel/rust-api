@@ -1,4 +1,4 @@
-use chrono::NaiveDate;
+use chrono::{NaiveDate, Utc};
 use http_error::{HttpError, HttpResult};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -10,7 +10,8 @@ pub struct NewDebtData {
     pub description: String,
     pub amount: Decimal,
     pub due_date: NaiveDate,
-    pub category_name: String,
+    pub tags: Option<Vec<String>>,
+    pub category: Option<String>,
     pub account_identification: Option<String>,
     pub installment_number: Option<i32>,
 }
@@ -36,8 +37,9 @@ impl NewDebtData {
 
         let mut description_parts = Vec::new();
         let mut amount: Option<Decimal> = None;
-        let mut due_date: Option<NaiveDate> = None;
-        let mut category_name: Option<String> = None;
+        let mut due_date: NaiveDate = Utc::now().date_naive();
+        let mut category: Option<String> = None;
+        let mut tags: Option<Vec<String>> = None;
         let mut account_identification: Option<String> = None;
         let mut installment_number: Option<i32> = None;
 
@@ -46,23 +48,13 @@ impl NewDebtData {
 
             match param.split_once(':') {
                 Some(("c", id)) => {
-                    if id.is_empty() {
-                        return Err(Box::new(HttpError::bad_request(
-                            "Identificação da conta (c:) não pode estar vazia. Exemplo: c:1",
-                        )));
-                    }
                     account_identification = Some(id.to_string());
                 }
                 Some(("d", date_str)) => {
-                    due_date = Some(utils::parse_date(date_str)?);
+                    due_date = utils::parse_date(date_str)?;
                 }
                 Some(("cat", name)) => {
-                    if name.is_empty() {
-                        return Err(Box::new(HttpError::bad_request(
-                            "Nome da categoria (cat:) não pode estar vazio. Exemplo: cat:Alimentação",
-                        )));
-                    }
-                    category_name = Some(name.to_uppercase());
+                    category = Some(name.to_uppercase());
                 }
                 Some(("i", number)) => {
                     let num = number.parse::<i32>().map_err(|_| {
@@ -77,6 +69,15 @@ impl NewDebtData {
                     }
                     installment_number = Some(num);
                 }
+                Some(("t", tag_str)) => {
+                    tags = Some(
+                        tag_str
+                            .split(',')
+                            .map(|t| t.trim().to_string())
+                            .filter(|t| !t.is_empty())
+                            .collect(),
+                    );
+                }
                 None => {
                     // Try to parse as number for amount
                     if let Ok(num) = param.parse::<Decimal>() {
@@ -87,7 +88,6 @@ impl NewDebtData {
                         }
                         amount = Some(num);
                     } else {
-                        // It's a string = part of description
                         description_parts.push(param);
                     }
                 }
@@ -98,7 +98,6 @@ impl NewDebtData {
             }
         }
 
-        // Validation
         let description = description_parts.join(" ");
         if description.is_empty() {
             return Err(Box::new(HttpError::bad_request(
@@ -112,23 +111,12 @@ impl NewDebtData {
             ))
         })?;
 
-        let category_name = category_name.ok_or_else(|| {
-            Box::new(HttpError::bad_request(
-                "Categoria é obrigatória. Use o formato cat:Nome (ex: cat:Alimentação)",
-            ))
-        })?;
-
-        let due_date = due_date.ok_or_else(|| {
-            Box::new(HttpError::bad_request(
-                "Data de vencimento é obrigatória. Use o formato d:YYYY-MM-DD, d:DD/MM/YYYY, d:DD/MM, d:hoje ou d:+N/-N (ex: d:2025-01-15, d:15/01/2025, d:hoje, d:+1)",
-            ))
-        })?;
-
         Ok(NewDebtData {
             description,
             amount,
             due_date,
-            category_name,
+            category,
+            tags,
             account_identification,
             installment_number,
         })
@@ -154,7 +142,7 @@ mod tests {
         assert_eq!(data.description, "natação");
         assert_eq!(data.amount, Decimal::new(150, 0));
         assert_eq!(data.is_paid(), false);
-        assert_eq!(data.category_name, "ESPORTES");
+        assert_eq!(data.category, Some("ESPORTES".to_string()));
         assert_eq!(data.account_identification, None);
     }
 
@@ -174,7 +162,7 @@ mod tests {
         assert_eq!(data.description, "mercado");
         assert_eq!(data.amount, Decimal::new(400, 0));
         assert_eq!(data.is_paid(), true);
-        assert_eq!(data.category_name, "ALIMENTAÇÃO");
+        assert_eq!(data.category, Some("ALIMENTAÇÃO".to_string()));
         assert_eq!(data.account_identification, Some("1".to_string()));
     }
 
@@ -271,18 +259,16 @@ mod tests {
     }
 
     #[test]
-    fn test_try_from_missing_due_date() {
+    fn test_try_from_missing_due_date_uses_today() {
         let params = vec![
             "mercado".to_string(),
             "100".to_string(),
             "cat:Alimentação".to_string(),
         ];
         let result = NewDebtData::try_from(&params);
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .message
-            .contains("Data de vencimento é obrigatória"));
+        assert!(result.is_ok());
+        let data = result.unwrap();
+        assert_eq!(data.due_date, Utc::now().date_naive());
     }
 
     #[test]
@@ -298,7 +284,7 @@ mod tests {
     }
 
     #[test]
-    fn test_try_from_invalid_date() {
+    fn test_try_from_invalid_date_uses_today() {
         let params = vec![
             "mercado".to_string(),
             "100".to_string(),
@@ -306,7 +292,10 @@ mod tests {
             "cat:Alimentação".to_string(),
         ];
         let result = NewDebtData::try_from(&params);
-        assert!(result.is_err());
+        assert!(result.is_ok());
+        let data = result.unwrap();
+        // Data inválida usa a data de hoje como fallback
+        assert_eq!(data.due_date, Utc::now().date_naive());
     }
 
     #[test]
@@ -326,18 +315,16 @@ mod tests {
     }
 
     #[test]
-    fn test_try_from_missing_category() {
+    fn test_try_from_without_category() {
         let params = vec![
             "mercado".to_string(),
             "100".to_string(),
             "d:2025-01-15".to_string(),
         ];
         let result = NewDebtData::try_from(&params);
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .message
-            .contains("Categoria é obrigatória"));
+        assert!(result.is_ok());
+        let data = result.unwrap();
+        assert_eq!(data.category, None);
     }
 
     #[test]
@@ -355,7 +342,7 @@ mod tests {
         let data = result.unwrap();
         assert_eq!(data.description, "Psicóloga");
         assert_eq!(data.amount, Decimal::new(300, 0));
-        assert_eq!(data.category_name, "SAÚDE"); // Deve ser SAÚDE, não Psicóloga!
+        assert_eq!(data.category, Some("SAÚDE".to_string())); // Deve ser SAÚDE, não Psicóloga!
         assert_eq!(data.is_paid(), true);
         assert_eq!(data.account_identification, Some("9".to_string()));
     }
@@ -410,5 +397,60 @@ mod tests {
         // Se tem conta, é considerado pago
         assert_eq!(data.is_paid(), true);
         assert_eq!(data.account_identification, Some("2".to_string()));
+    }
+
+    #[test]
+    fn test_try_from_with_single_tag() {
+        let params = vec![
+            "mercado".to_string(),
+            "100".to_string(),
+            "d:2025-01-15".to_string(),
+            "t:compras".to_string(),
+        ];
+        let result = NewDebtData::try_from(&params);
+        assert!(result.is_ok());
+
+        let data = result.unwrap();
+        assert_eq!(data.tags, Some(vec!["compras".to_string()]));
+    }
+
+    #[test]
+    fn test_try_from_with_multiple_tags() {
+        let params = vec![
+            "mercado".to_string(),
+            "100".to_string(),
+            "d:2025-01-15".to_string(),
+            "t:mercado,compra da semana".to_string(),
+        ];
+        let result = NewDebtData::try_from(&params);
+        assert!(result.is_ok());
+
+        let data = result.unwrap();
+        assert_eq!(
+            data.tags,
+            Some(vec!["mercado".to_string(), "compra da semana".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_try_from_with_multiple_tags_with_spaces() {
+        let params = vec![
+            "mercado".to_string(),
+            "100".to_string(),
+            "d:2025-01-15".to_string(),
+            "t:tag1, tag2 , tag3".to_string(),
+        ];
+        let result = NewDebtData::try_from(&params);
+        assert!(result.is_ok());
+
+        let data = result.unwrap();
+        assert_eq!(
+            data.tags,
+            Some(vec![
+                "tag1".to_string(),
+                "tag2".to_string(),
+                "tag3".to_string()
+            ])
+        );
     }
 }
