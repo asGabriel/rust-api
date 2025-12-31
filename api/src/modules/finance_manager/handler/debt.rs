@@ -1,27 +1,21 @@
 use async_trait::async_trait;
-use http_error::{ext::OptionHttpExt, HttpResult};
+use http_error::HttpResult;
 
 use crate::modules::finance_manager::{
     domain::{
         debt::{
-            category::DebtCategory,
             installment::{Installment, InstallmentFilters},
-            recurrence::RecurrenceFilters,
             Debt, DebtFilters,
         },
         payment::Payment,
     },
     handler::{
-        debt::use_cases::{CreateCategoryRequest, CreateDebtRequest},
-        payment::use_cases::PaymentBasicData,
+        debt::use_cases::CreateDebtRequest, payment::use_cases::PaymentBasicData,
         pubsub::DynPubSubHandler,
     },
     repository::{
         account::DynAccountRepository,
-        debt::{
-            category::DynDebtCategoryRepository, installment::DynInstallmentRepository,
-            DynDebtRepository,
-        },
+        debt::{installment::DynInstallmentRepository, DynDebtRepository},
         payment::DynPaymentRepository,
         recurrence::DynRecurrenceRepository,
     },
@@ -41,13 +35,6 @@ pub trait DebtHandler {
     ) -> HttpResult<Vec<Installment>>;
 
     // async fn generate_debt_recurrences(&self) -> HttpResult<()>;
-
-    // DEBT_CATEGORY
-    async fn create_debt_category(
-        &self,
-        request: CreateCategoryRequest,
-    ) -> HttpResult<DebtCategory>;
-    async fn list_debt_categories(&self) -> HttpResult<Vec<DebtCategory>>;
 }
 
 #[derive(Clone)]
@@ -56,7 +43,6 @@ pub struct DebtHandlerImpl {
     pub installment_repository: Arc<DynInstallmentRepository>,
     pub account_repository: Arc<DynAccountRepository>,
     pub payment_repository: Arc<DynPaymentRepository>,
-    pub debt_category_repository: Arc<DynDebtCategoryRepository>,
     pub recurrence_repository: Arc<DynRecurrenceRepository>,
     pub pubsub: Arc<DynPubSubHandler>,
 }
@@ -86,24 +72,7 @@ impl DebtHandler for DebtHandlerImpl {
         self.installment_repository.list(filters).await
     }
 
-    async fn create_debt_category(
-        &self,
-        request: CreateCategoryRequest,
-    ) -> HttpResult<DebtCategory> {
-        let category = DebtCategory::new(request.name);
-        self.debt_category_repository.insert(category).await
-    }
-
-    async fn list_debt_categories(&self) -> HttpResult<Vec<DebtCategory>> {
-        self.debt_category_repository.list().await
-    }
-
     async fn register_new_debt(&self, request: CreateDebtRequest) -> HttpResult<Debt> {
-        self.debt_category_repository
-            .get_by_name(&request.category_name)
-            .await?
-            .or_not_found("category", &request.category_name)?;
-
         let mut debt = self.create_debt(request.clone()).await?;
 
         if request.is_paid() {
@@ -141,12 +110,13 @@ pub mod use_cases {
     use serde::{Deserialize, Serialize};
     use uuid::Uuid;
 
-    use crate::modules::finance_manager::domain::debt::DebtStatus;
+    use crate::modules::finance_manager::domain::debt::{DebtCategory, DebtStatus};
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "camelCase")]
     pub struct CreateDebtRequest {
-        pub category_name: String,
+        pub category: Option<DebtCategory>,
+        pub tags: Option<Vec<String>>,
         pub description: String,
         pub due_date: NaiveDate,
         pub total_amount: Decimal,
@@ -160,7 +130,8 @@ pub mod use_cases {
 
     impl CreateDebtRequest {
         pub fn new(
-            category_name: String,
+            category: Option<DebtCategory>,
+            tags: Option<Vec<String>>,
             description: String,
             total_amount: Decimal,
             due_date: NaiveDate,
@@ -168,7 +139,8 @@ pub mod use_cases {
             installment_count: Option<i32>,
         ) -> Self {
             Self {
-                category_name,
+                category,
+                tags,
                 description,
                 total_amount,
                 paid_amount: None,

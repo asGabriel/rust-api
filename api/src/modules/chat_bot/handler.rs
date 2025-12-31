@@ -111,7 +111,8 @@ impl ChatBotHandlerImpl {
         let result = self
             .debt_handler
             .register_new_debt(CreateDebtRequest {
-                category_name: request.category_name.clone(),
+                category: None,
+                tags: None,
                 description: request.description.clone(),
                 total_amount: request.amount,
                 paid_amount: None,

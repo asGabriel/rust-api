@@ -25,7 +25,9 @@ pub struct Debt {
     /// Unique identifier
     id: Uuid,
     /// The category of the debt
-    category_name: String,
+    category: DebtCategory,
+    /// Tags that identify the debt, it's like a category but more flexible
+    tags: Vec<String>,
     /// The identification of the debt for human readability
     identification: String,
 
@@ -63,7 +65,8 @@ impl Debt {
         paid_amount: Option<Decimal>,
         discount_amount: Option<Decimal>,
         due_date: NaiveDate,
-        category_name: String,
+        category: Option<DebtCategory>,
+        tags: Option<Vec<String>>,
         installment_count: Option<i32>,
     ) -> Self {
         let uuid = Uuid::new_v4();
@@ -73,7 +76,8 @@ impl Debt {
 
         Self {
             id: uuid,
-            category_name,
+            category: category.unwrap_or_default(),
+            tags: tags.unwrap_or_default(),
             identification: String::new(), // database auto increment
             description,
             total_amount,
@@ -202,9 +206,60 @@ impl From<CreateDebtRequest> for Debt {
             request.paid_amount,
             request.discount_amount,
             request.due_date,
-            request.category_name,
+            request.category,
+            request.tags,
             request.installment_count,
         )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum DebtCategory {
+    #[default]
+    Unknown,
+    Home,
+    Food,
+    Transport,
+    Health,
+    Entertainment,
+    ShoppingAndGifts,
+    Education,
+    Services,
+    Investments,
+}
+
+impl From<String> for DebtCategory {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "HOME" => DebtCategory::Home,
+            "FOOD" => DebtCategory::Food,
+            "TRANSPORT" => DebtCategory::Transport,
+            "HEALTH" => DebtCategory::Health,
+            "ENTERTAINMENT" => DebtCategory::Entertainment,
+            "SHOPPING_AND_GIFTS" => DebtCategory::ShoppingAndGifts,
+            "EDUCATION" => DebtCategory::Education,
+            "SERVICES" => DebtCategory::Services,
+            "INVESTMENTS" => DebtCategory::Investments,
+            _ => DebtCategory::Unknown,
+        }
+    }
+}
+
+impl From<DebtCategory> for String {
+    fn from(category: DebtCategory) -> Self {
+        match category {
+            DebtCategory::Home => "HOME".to_string(),
+            DebtCategory::Food => "FOOD".to_string(),
+            DebtCategory::Transport => "TRANSPORT".to_string(),
+            DebtCategory::Health => "HEALTH".to_string(),
+            DebtCategory::Entertainment => "ENTERTAINMENT".to_string(),
+            DebtCategory::ShoppingAndGifts => "SHOPPING_AND_GIFTS".to_string(),
+            DebtCategory::Education => "EDUCATION".to_string(),
+            DebtCategory::Services => "SERVICES".to_string(),
+            DebtCategory::Investments => "INVESTMENTS".to_string(),
+            DebtCategory::Unknown => "UNKNOWN".to_string(),
+        }
     }
 }
 
@@ -290,7 +345,8 @@ impl DebtStatus {
 getters!(
     Debt {
         id: Uuid,
-        category_name: String,
+        category: DebtCategory,
+        tags: Vec<String>,
         identification: String,
         description: String,
         total_amount: Decimal,
@@ -308,7 +364,8 @@ getters!(
 from_row_constructor! {
     Debt {
         id: Uuid,
-        category_name: String,
+        category: DebtCategory,
+        tags: Vec<String>,
         identification: String,
         description: String,
         total_amount: Decimal,

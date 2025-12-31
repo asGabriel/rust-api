@@ -10,10 +10,7 @@ use api::modules::{
         },
         repository::{
             account::AccountRepositoryImpl,
-            debt::{
-                category::DebtCategoryRepositoryImpl, installment::InstallmentRepositoryImpl,
-                DebtRepositoryImpl,
-            },
+            debt::{installment::InstallmentRepositoryImpl, DebtRepositoryImpl},
             income::IncomeRepositoryImpl,
             payment::PaymentRepositoryImpl,
             recurrence::RecurrenceRepositoryImpl,
@@ -98,7 +95,6 @@ fn build_debt_handler(pool: &Pool<Postgres>, pubsub: &PubSubHandlerImpl) -> Debt
         debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
         account_repository: Arc::new(AccountRepositoryImpl::new(pool)),
         payment_repository: Arc::new(PaymentRepositoryImpl::new(pool)),
-        debt_category_repository: Arc::new(DebtCategoryRepositoryImpl::new(pool)),
         installment_repository: Arc::new(InstallmentRepositoryImpl::new(pool)),
         recurrence_repository: Arc::new(RecurrenceRepositoryImpl::new(pool)),
         pubsub: Arc::new(pubsub.clone()),

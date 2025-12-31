@@ -5,7 +5,6 @@ use uuid::Uuid;
 
 use crate::modules::finance_manager::domain::debt::{Debt, DebtFilters};
 
-pub mod category;
 pub mod installment;
 
 #[async_trait]
@@ -42,29 +41,31 @@ impl DebtRepository for DebtRepositoryImpl {
         let row = sqlx::query(
             r#"
             UPDATE finance_manager.debt SET 
-                category_name = $2,
-                description = $3, 
-                total_amount = $4, 
-                paid_amount = $5, 
-                discount_amount = $6, 
-                remaining_amount = $7, 
-                due_date = $8, 
-                status = $9, 
-                installment_count = $10,
-                updated_at = $11
+                category = $2,
+                tags = $3,
+                description = $4, 
+                total_amount = $5, 
+                paid_amount = $6, 
+                discount_amount = $7, 
+                remaining_amount = $8, 
+                due_date = $9, 
+                status = $10, 
+                installment_count = $11,
+                updated_at = $12
             WHERE id = $1 
             RETURNING *
             "#,
         )
         .bind(debt_dto.id)
-        .bind(debt_dto.category_name)
-        .bind(debt_dto.description)
+        .bind(&debt_dto.category)
+        .bind(&debt_dto.tags)
+        .bind(&debt_dto.description)
         .bind(debt_dto.total_amount)
         .bind(debt_dto.paid_amount)
         .bind(debt_dto.discount_amount)
         .bind(debt_dto.remaining_amount)
         .bind(debt_dto.due_date)
-        .bind(debt_dto.status)
+        .bind(&debt_dto.status)
         .bind(debt_dto.installment_count)
         .bind(debt_dto.updated_at)
         .fetch_optional(&self.pool)
@@ -106,7 +107,8 @@ impl DebtRepository for DebtRepositoryImpl {
             r#"
             INSERT INTO finance_manager.debt (
                 id, 
-                category_name,
+                category,
+                tags,
                 description, 
                 total_amount, 
                 paid_amount, 
@@ -118,13 +120,14 @@ impl DebtRepository for DebtRepositoryImpl {
                 created_at,
                 updated_at
             ) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             RETURNING *
         "#,
         )
         .bind(debt_dto.id)
-        .bind(debt_dto.category_name)
-        .bind(debt_dto.description)
+        .bind(&debt_dto.category)
+        .bind(&debt_dto.tags)
+        .bind(&debt_dto.description)
         .bind(debt_dto.total_amount)
         .bind(debt_dto.paid_amount)
         .bind(debt_dto.discount_amount)
@@ -160,9 +163,10 @@ impl DebtRepository for DebtRepositoryImpl {
 
         if let Some(category_names) = filters.category_names() {
             builder.push(if has_where { " AND " } else { " WHERE " });
-            builder.push("category_name = ANY(");
+            builder.push("category = ANY(");
             builder.push_bind(category_names);
             builder.push(")");
+            has_where = true;
         }
 
         if let Some(statuses) = filters.statuses() {
@@ -196,13 +200,14 @@ pub mod entity {
     use sqlx::Row;
     use uuid::Uuid;
 
-    use crate::modules::finance_manager::domain::debt::Debt;
+    use crate::modules::finance_manager::domain::debt::{Debt, DebtCategory};
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct DebtEntity {
         pub id: Uuid,
         pub identification: String,
-        pub category_name: String,
+        pub category: String,
+        pub tags: Vec<String>,
         pub description: String,
         pub total_amount: Decimal,
         pub paid_amount: Decimal,
@@ -220,7 +225,8 @@ pub mod entity {
             Self {
                 id: row.get("id"),
                 identification: row.get::<i32, _>("identification").to_string(),
-                category_name: row.get("category_name"),
+                category: row.get::<String, _>("category"),
+                tags: row.get::<Vec<String>, _>("tags"),
                 description: row.get("description"),
                 total_amount: row.get("total_amount"),
                 paid_amount: row.get("paid_amount"),
@@ -240,7 +246,8 @@ pub mod entity {
             DebtEntity {
                 id: *debt.id(),
                 identification: debt.identification().to_string(),
-                category_name: debt.category_name().to_string(),
+                category: String::from(debt.category().clone()),
+                tags: debt.tags().clone(),
                 description: debt.description().clone(),
                 total_amount: *debt.total_amount(),
                 paid_amount: *debt.paid_amount(),
@@ -259,7 +266,8 @@ pub mod entity {
         fn from(dto: DebtEntity) -> Self {
             Debt::from_row(
                 dto.id,
-                dto.category_name,
+                DebtCategory::from(dto.category),
+                dto.tags,
                 dto.identification,
                 dto.description,
                 dto.total_amount,
