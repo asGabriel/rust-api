@@ -69,9 +69,7 @@ impl BankAccount {
 
 impl From<CreateAccountRequest> for BankAccount {
     fn from(request: CreateAccountRequest) -> Self {
-        let configuration = request
-            .configuration
-            .unwrap_or_default();
+        let configuration = request.configuration.unwrap_or_default();
         BankAccount::new(request.name, request.owner, configuration)
     }
 }

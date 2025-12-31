@@ -103,12 +103,24 @@ impl InstallmentRepository for InstallmentRepositoryImpl {
 
     async fn list(&self, filters: &InstallmentFilters) -> HttpResult<Vec<Installment>> {
         let mut builder = QueryBuilder::new("SELECT * FROM finance_manager.debt_installment");
-        let has_where = false;
+        let mut has_where = false;
 
-        if let Some(debt_id) = filters.debt_id {
+        if let Some(debt_ids) = &filters.debt_ids {
             builder.push(if has_where { " AND " } else { " WHERE " });
-            builder.push("debt_id = ");
-            builder.push_bind(debt_id);
+            builder.push("debt_id = ANY(");
+            let mut separated = builder.separated(", ");
+            for debt_id in debt_ids {
+                separated.push_bind(debt_id);
+            }
+            separated.push_unseparated(")");
+            has_where = true;
+        }
+
+        if let Some(is_paid) = filters.is_paid {
+            builder.push(if has_where { " AND " } else { " WHERE " });
+            builder.push("is_paid = ");
+            builder.push_bind(is_paid);
+            // has_where = true;
         }
 
         let query = builder.build();

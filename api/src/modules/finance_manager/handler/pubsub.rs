@@ -45,7 +45,7 @@ impl PubSubHandlerImpl {
 
         let installments = self
             .installment_repository
-            .list(&InstallmentFilters::new().with_debt_id(*debt.id()))
+            .list(&InstallmentFilters::new().with_debt_ids(&[*debt.id()]))
             .await?;
         if let Some(latest_unpaid) = Installment::get_latest_unpaid(&installments) {
             let mut latest_unpaid = latest_unpaid.clone();

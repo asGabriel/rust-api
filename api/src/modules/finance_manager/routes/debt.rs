@@ -3,13 +3,22 @@ use http_error::HttpResult;
 
 use crate::modules::{
     finance_manager::{
-        domain::debt::DebtFilters,
+        domain::debt::{installment::InstallmentFilters, DebtFilters},
         handler::debt::use_cases::{CreateCategoryRequest, CreateDebtRequest},
     },
     routes::AppState,
 };
 
 pub fn configure_routes() -> Router<AppState> {
+    let main_debt_routes = Router::new()
+        .route("/list", post(list_debts))
+        .route("/", post(create_debt));
+
+    let installment_routes = Router::new().nest(
+        "/installment",
+        Router::new().route("/list", post(list_debt_installments)),
+    );
+
     let category_routes = Router::new().nest(
         "/category",
         Router::new()
@@ -19,11 +28,21 @@ pub fn configure_routes() -> Router<AppState> {
 
     Router::new().nest(
         "/debt",
-        Router::new()
-            .route("/list", post(list_debts))
-            .route("/", post(create_debt))
-            .merge(category_routes),
+        Router::new().merge(main_debt_routes).merge(category_routes).merge(installment_routes),
     )
+}
+
+async fn list_debt_installments(
+    state: State<AppState>,
+    Json(filters): Json<InstallmentFilters>,
+) -> HttpResult<impl IntoResponse> {
+    let installments = state
+        .finance_manager_state
+        .debt_handler
+        .list_debt_installments(&filters)
+        .await?;
+
+    Ok(Json(installments))
 }
 
 async fn create_category(
