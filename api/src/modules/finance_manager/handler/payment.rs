@@ -132,7 +132,7 @@ pub mod use_cases {
 
     impl PaymentBasicData {
         pub fn amount(&self, debt: &Debt) -> Decimal {
-            self.amount.unwrap_or(*debt.remaining_amount())
+            self.amount.unwrap_or_else(|| debt.installment_amount())
         }
     }
 }

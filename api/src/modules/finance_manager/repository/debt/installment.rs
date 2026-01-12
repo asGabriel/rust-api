@@ -34,18 +34,15 @@ impl InstallmentRepository for InstallmentRepositoryImpl {
         let row = sqlx::query(
             r#"
             UPDATE finance_manager.debt_installment SET 
-                debt_id = $2,
-                installment_id = $3,
-                due_date = $4,
-                amount = $5,
-                is_paid = $6,
-                payment_id = $7,
-                updated_at = $8
-            WHERE installment_id = $1
+                due_date = $3,
+                amount = $4,
+                is_paid = $5,
+                payment_id = $6,
+                updated_at = $7
+            WHERE debt_id = $1 AND installment_id = $2
             RETURNING *
             "#,
         )
-        .bind(installment_dto.installment_id)
         .bind(installment_dto.debt_id)
         .bind(installment_dto.installment_id)
         .bind(installment_dto.due_date)
@@ -108,11 +105,8 @@ impl InstallmentRepository for InstallmentRepositoryImpl {
         if let Some(debt_ids) = &filters.debt_ids {
             builder.push(if has_where { " AND " } else { " WHERE " });
             builder.push("debt_id = ANY(");
-            let mut separated = builder.separated(", ");
-            for debt_id in debt_ids {
-                separated.push_bind(debt_id);
-            }
-            separated.push_unseparated(")");
+            builder.push_bind(debt_ids);
+            builder.push(")");
             has_where = true;
         }
 
