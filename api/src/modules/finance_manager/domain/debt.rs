@@ -155,6 +155,18 @@ impl Debt {
         self.installment_count.is_some() && self.installment_count.unwrap() > 0
     }
 
+    /// Returns the installment amount if the debt has installments,
+    /// otherwise returns the remaining amount
+    pub fn installment_amount(&self) -> Decimal {
+        match self.installment_count {
+            Some(count) if count > 1 => {
+                let (base_amount, _) = self.calculate_installment_amount(count);
+                base_amount
+            }
+            _ => self.remaining_amount,
+        }
+    }
+
     // PRIVATE METHODS
 
     /// Checks if the payment amount is valid to be processed
@@ -529,17 +541,29 @@ impl ChatFormatter for Debt {
                 )
             };
 
-            // Formato compacto: emoji ID - Descrição | DD/MM | 💵Valor
             let date_str = due_date.format("%d/%m").to_string();
-            let value_str = format!("{:.0}", value);
+
+            // Formata valor considerando parcelas (valor da parcela é o principal)
+            let value_display = match debt.installment_count() {
+                Some(count) if *count > 1 => {
+                    let installment_value = value / Decimal::from(*count);
+                    format!(
+                        "💵{:.0} ({count}x total 💵{:.0})",
+                        installment_value,
+                        value,
+                        count = count
+                    )
+                }
+                _ => format!("💵{:.0}", value),
+            };
 
             writeln!(
                 output,
-                "{}{}: {} 💵{} - {}",
+                "{}{}: {} {} - {}",
                 debt.status().emoji(),
                 debt.identification(),
                 date_str,
-                value_str,
+                value_display,
                 debt.description(),
             )
             .unwrap();

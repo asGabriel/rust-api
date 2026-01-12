@@ -32,19 +32,19 @@ pub struct PaymentHandlerImpl {
 #[async_trait]
 impl PaymentHandler for PaymentHandlerImpl {
     async fn create_payment(&self, request: CreatePaymentRequest) -> HttpResult<Payment> {
-        let (mut debt, account, payment_data, reconcile) =
+        let (debt, account, payment_data, reconcile) =
             self.extract_payment_data_from_request(request).await?;
         let payment = Payment::new(&debt, account.id(), &payment_data);
 
+        let payment = self.payment_repository.insert(payment).await?;
+
         if reconcile {
-            debt = self
-                .pubsub
+            self.pubsub
                 .reconcile_debt_with_actual_payment(debt, &payment)
                 .await?;
+        } else {
+            self.pubsub.process_debt_payment(debt, &payment).await?;
         }
-
-        let payment = self.payment_repository.insert(payment).await?;
-        _ = self.pubsub.process_debt_payment(debt, &payment).await?;
 
         Ok(payment)
     }
@@ -132,7 +132,7 @@ pub mod use_cases {
 
     impl PaymentBasicData {
         pub fn amount(&self, debt: &Debt) -> Decimal {
-            self.amount.unwrap_or(*debt.remaining_amount())
+            self.amount.unwrap_or_else(|| debt.installment_amount())
         }
     }
 }

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use http_error::HttpResult;
+use http_error::{ext::OptionHttpExt, HttpResult};
 
 use crate::modules::finance_manager::{
     domain::{
@@ -38,22 +38,21 @@ pub struct PubSubHandlerImpl {
 }
 
 impl PubSubHandlerImpl {
-    // TODO: understand if this is needed
-    async fn process_installments(&self, debt: &Debt, payment: &Payment) -> HttpResult<()> {
-        if !debt.has_installments() {
-            return Ok(());
-        }
-
+    async fn process_latest_installment_for_debt(&self, payment: &Payment) -> HttpResult<()> {
         let installments = self
             .installment_repository
-            .list(&InstallmentFilters::new().with_debt_ids(&[*debt.id()]))
+            .list(&InstallmentFilters::new().with_debt_ids(&[*payment.debt_id()]))
             .await?;
-        if let Some(latest_unpaid) = Installment::get_latest_unpaid(&installments) {
-            let mut latest_unpaid = latest_unpaid.clone();
 
-            latest_unpaid.process_payment(payment)?;
-            self.installment_repository.update(latest_unpaid).await?;
-        }
+        let mut latest_installment = Installment::get_latest_unpaid(&installments)
+            .or_not_found("latest installment for debt", payment.debt_id().to_string())?
+            .clone();
+
+        latest_installment.process_payment(payment)?;
+
+        self.installment_repository
+            .update(latest_installment.clone())
+            .await?;
 
         Ok(())
     }
@@ -74,10 +73,12 @@ impl PubSubHandler for PubSubHandlerImpl {
     }
 
     async fn process_debt_payment(&self, mut debt: Debt, payment: &Payment) -> HttpResult<Debt> {
-        debt.process_payment(&payment)?;
+        if debt.has_installments() {
+            self.process_latest_installment_for_debt(payment).await?;
+        }
+        debt.process_payment(payment)?;
 
         self.debt_repository.update(debt.clone()).await?;
-
         Ok(debt)
     }
 }

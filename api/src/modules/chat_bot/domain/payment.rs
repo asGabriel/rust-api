@@ -78,6 +78,18 @@ impl NewPaymentData {
             }
         }
 
+        if debt_identification.is_empty() {
+            return Err(Box::new(HttpError::bad_request(
+                "Identificação da dívida (id:) é obrigatória. Exemplo: pagamento id:83 c:1",
+            )));
+        }
+
+        if account_identification.is_empty() {
+            return Err(Box::new(HttpError::bad_request(
+                "Identificação da conta (c:) é obrigatória. Exemplo: pagamento id:83 c:1",
+            )));
+        }
+
         Ok(NewPaymentData {
             debt_identification,
             account_identification,
@@ -96,15 +108,17 @@ mod tests {
     #[test]
     fn test_try_from_valid_data_with_date() {
         let params = vec![
-            "ABCD".to_string(),
+            "id:83".to_string(),
+            "c:1".to_string(),
             "500".to_string(),
-            "2025-01-01".to_string(),
+            "d:2025-01-01".to_string(),
         ];
         let result = NewPaymentData::try_from(&params);
         assert!(result.is_ok());
 
         let payment_data = result.unwrap();
-        assert_eq!(payment_data.debt_identification, "ABCD");
+        assert_eq!(payment_data.debt_identification, "83");
+        assert_eq!(payment_data.account_identification, "1");
         assert_eq!(
             payment_data.amount,
             Some(rust_decimal::Decimal::new(500, 0))
@@ -117,34 +131,72 @@ mod tests {
 
     #[test]
     fn test_try_from_valid_data_without_date() {
-        let params = vec!["ABCD".to_string(), "500".to_string()];
+        let params = vec!["id:83".to_string(), "c:1".to_string(), "500".to_string()];
         let result = NewPaymentData::try_from(&params);
         assert!(result.is_ok());
 
         let payment_data = result.unwrap();
-        assert_eq!(payment_data.debt_identification, "ABCD");
+        assert_eq!(payment_data.debt_identification, "83");
+        assert_eq!(payment_data.account_identification, "1");
         assert_eq!(
             payment_data.amount,
             Some(rust_decimal::Decimal::new(500, 0))
         );
-        assert!(payment_data.payment_date.is_some()); // Should use today's date
+        assert_eq!(payment_data.payment_date, None);
     }
 
     #[test]
     fn test_try_from_without_amount() {
-        let params = vec!["ABCD".to_string()];
+        let params = vec!["id:83".to_string(), "c:1".to_string()];
         let result = NewPaymentData::try_from(&params);
         assert!(result.is_ok());
 
         let payment_data = result.unwrap();
-        assert_eq!(payment_data.debt_identification, "ABCD");
+        assert_eq!(payment_data.debt_identification, "83");
+        assert_eq!(payment_data.account_identification, "1");
         assert_eq!(payment_data.amount, None);
     }
 
     #[test]
-    fn test_try_from_invalid_amount() {
-        let params = vec!["ABCD".to_string(), "abc".to_string()];
+    fn test_try_from_missing_debt_id() {
+        let params = vec!["c:1".to_string(), "500".to_string()];
         let result = NewPaymentData::try_from(&params);
         assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .message
+            .contains("Identificação da dívida"));
+    }
+
+    #[test]
+    fn test_try_from_missing_account_id() {
+        let params = vec!["id:83".to_string(), "500".to_string()];
+        let result = NewPaymentData::try_from(&params);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .message
+            .contains("Identificação da conta"));
+    }
+
+    #[test]
+    fn test_try_from_empty_params() {
+        let params = vec![];
+        let result = NewPaymentData::try_from(&params);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_try_from_with_baixa_flag() {
+        let params = vec![
+            "id:83".to_string(),
+            "c:1".to_string(),
+            "baixa:s".to_string(),
+        ];
+        let result = NewPaymentData::try_from(&params);
+        assert!(result.is_ok());
+
+        let payment_data = result.unwrap();
+        assert_eq!(payment_data.settled, true);
     }
 }
