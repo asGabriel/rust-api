@@ -2,16 +2,14 @@ use async_trait::async_trait;
 use http_error::HttpResult;
 
 use crate::modules::finance_manager::{
-    domain::{
+    domain::
         debt::{
             installment::{Installment, InstallmentFilters},
             Debt, DebtFilters,
-        },
-        payment::Payment,
-    },
+        }
+    ,
     handler::{
-        debt::use_cases::CreateDebtRequest, payment::use_cases::PaymentBasicData,
-        pubsub::DynPubSubHandler,
+        debt::use_cases::CreateDebtRequest, pubsub::DynPubSubHandler,
     },
     repository::{
         account::DynAccountRepository,
@@ -73,28 +71,28 @@ impl DebtHandler for DebtHandlerImpl {
     }
 
     async fn register_new_debt(&self, request: CreateDebtRequest) -> HttpResult<Debt> {
-        let mut debt = self.create_debt(request.clone()).await?;
+        let debt = self.create_debt(request.clone()).await?;
 
-        if request.is_paid() {
-            let account_id = request.account_id.ok_or_else(|| {
-                Box::new(http_error::HttpError::bad_request(
-                    "Account ID é obrigatório quando a despesa está paga",
-                ))
-            })?;
+        // if request.should_process_initial_payment() {
+        //     let account_id = request.account_id.ok_or_else(|| {
+        //         Box::new(http_error::HttpError::bad_request(
+        //             "Account ID é obrigatório quando a despesa está paga",
+        //         ))
+        //     })?;
 
-            let payment = Payment::new(
-                &debt,
-                &account_id,
-                &PaymentBasicData {
-                    amount: Some(*debt.total_amount()),
-                    payment_date: *debt.due_date(),
-                },
-            );
+        //     let payment = Payment::new(
+        //         &debt,
+        //         &account_id,
+        //         &PaymentBasicData {
+        //             amount: Some(*debt.total_amount()),
+        //             payment_date: *debt.due_date(),
+        //         },
+        //     );
 
-            let payment = self.payment_repository.insert(payment).await?;
+        //     let payment = self.payment_repository.insert(payment).await?;
 
-            debt = self.pubsub.process_debt_payment(debt, &payment).await?;
-        }
+        //     debt = self.pubsub.process_debt_payment(debt, &payment).await?;
+        // }
 
         Ok(debt)
     }
@@ -153,8 +151,10 @@ pub mod use_cases {
             }
         }
 
-        pub fn is_paid(&self) -> bool {
-            self.account_id.is_some()
+        /// Verify if the debt should be processed as a initial payment
+        /// If the debt is paid and has an account ID, and doesn't have installments, it should be processed as a initial payment
+        pub fn should_process_initial_payment(&self) -> bool {
+            self.is_paid && self.account_id.is_some() && self.installment_count.is_none()
         }
     }
 
