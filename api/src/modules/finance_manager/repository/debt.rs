@@ -181,6 +181,8 @@ impl DebtRepository for DebtRepositoryImpl {
             builder.push(")");
         }
 
+        builder.push(" ORDER BY due_date ASC, status DESC");
+
         let query = builder.build();
         let rows = query.fetch_all(&self.pool).await?;
 
