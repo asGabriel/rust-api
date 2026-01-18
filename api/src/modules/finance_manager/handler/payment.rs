@@ -10,7 +10,9 @@ use crate::modules::finance_manager::{
         pubsub::DynPubSubHandler,
     },
     repository::{
-        account::DynAccountRepository, debt::DynDebtRepository, payment::DynPaymentRepository,
+        account::DynAccountRepository,
+        debt::DynDebtRepository,
+        payment::{use_cases::PaymentFilters, DynPaymentRepository},
     },
 };
 
@@ -19,6 +21,7 @@ pub type DynPaymentHandler = dyn PaymentHandler + Send + Sync;
 #[async_trait]
 pub trait PaymentHandler {
     async fn create_payment(&self, request: CreatePaymentRequest) -> HttpResult<Payment>;
+    async fn list_payments(&self, filters: PaymentFilters) -> HttpResult<Vec<Payment>>;
 }
 
 #[derive(Clone)]
@@ -47,6 +50,10 @@ impl PaymentHandler for PaymentHandlerImpl {
         }
 
         Ok(payment)
+    }
+
+    async fn list_payments(&self, filters: PaymentFilters) -> HttpResult<Vec<Payment>> {
+        self.payment_repository.list(&filters).await
     }
 }
 
