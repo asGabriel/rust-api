@@ -1,9 +1,10 @@
 use async_trait::async_trait;
 use http_error::HttpResult;
-use sqlx::{Pool, Postgres, Row};
+use sqlx::{Pool, Postgres, QueryBuilder, Row};
 
 use crate::modules::finance_manager::{
-    domain::payment::Payment, repository::payment::dto::PaymentDto,
+    domain::payment::Payment,
+    repository::payment::{dto::PaymentDto, use_cases::PaymentFilters},
 };
 
 pub type DynPaymentRepository = dyn PaymentRepository + Send + Sync;
@@ -11,6 +12,7 @@ pub type DynPaymentRepository = dyn PaymentRepository + Send + Sync;
 #[async_trait]
 pub trait PaymentRepository {
     async fn insert(&self, payment: Payment) -> HttpResult<Payment>;
+    async fn list(&self, filters: &PaymentFilters) -> HttpResult<Vec<Payment>>;
 }
 
 #[derive(Clone)]
@@ -66,6 +68,60 @@ impl PaymentRepository for PaymentRepositoryImpl {
 
         Ok(Payment::from(result))
     }
+
+    async fn list(&self, filters: &PaymentFilters) -> HttpResult<Vec<Payment>> {
+        let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
+            r#"
+                SELECT id, debt_id, account_id, amount, payment_date, created_at, updated_at
+                FROM finance_manager.payment
+                WHERE 1=1
+            "#,
+        );
+
+        if let Some(debt_ids) = &filters.debt_ids {
+            builder.push(" AND debt_id = ANY(");
+            builder.push_bind(debt_ids);
+            builder.push(")");
+        }
+
+        if let Some(account_ids) = &filters.account_ids {
+            builder.push(" AND account_id = ANY(");
+            builder.push_bind(account_ids);
+            builder.push(")");
+        }
+
+        if let Some(start_date) = &filters.start_date {
+            builder.push(" AND payment_date >= ");
+            builder.push_bind(start_date);
+        }
+
+        if let Some(end_date) = &filters.end_date {
+            builder.push(" AND payment_date <= ");
+            builder.push_bind(end_date);
+        }
+
+        builder.push(" ORDER BY payment_date DESC");
+
+        let query = builder.build();
+        let rows = query.fetch_all(&self.pool).await?;
+
+        let payments: Vec<Payment> = rows
+            .iter()
+            .map(|row| {
+                Payment::from(PaymentDto {
+                    id: row.get("id"),
+                    debt_id: row.get("debt_id"),
+                    account_id: row.get("account_id"),
+                    amount: row.get("amount"),
+                    payment_date: row.get("payment_date"),
+                    created_at: row.get("created_at"),
+                    updated_at: row.get("updated_at"),
+                })
+            })
+            .collect();
+
+        Ok(payments)
+    }
 }
 
 pub mod dto {
@@ -112,6 +168,47 @@ pub mod dto {
                 dto.created_at.and_utc(),
                 dto.updated_at.map(|dt| dt.and_utc()),
             )
+        }
+    }
+}
+
+pub mod use_cases {
+    use chrono::NaiveDate;
+    use serde::{Deserialize, Serialize};
+    use uuid::Uuid;
+
+    #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+    #[serde(rename_all = "camelCase")]
+    pub struct PaymentFilters {
+        pub debt_ids: Option<Vec<Uuid>>,
+        pub account_ids: Option<Vec<Uuid>>,
+        pub start_date: Option<NaiveDate>,
+        pub end_date: Option<NaiveDate>,
+    }
+
+    impl PaymentFilters {
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        pub fn with_debt_ids(mut self, debt_ids: Vec<Uuid>) -> Self {
+            self.debt_ids = Some(debt_ids);
+            self
+        }
+
+        pub fn with_account_ids(mut self, account_ids: Vec<Uuid>) -> Self {
+            self.account_ids = Some(account_ids);
+            self
+        }
+
+        pub fn with_start_date(mut self, start_date: NaiveDate) -> Self {
+            self.start_date = Some(start_date);
+            self
+        }
+
+        pub fn with_end_date(mut self, end_date: NaiveDate) -> Self {
+            self.end_date = Some(end_date);
+            self
         }
     }
 }
