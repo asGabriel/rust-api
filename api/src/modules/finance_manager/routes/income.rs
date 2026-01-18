@@ -31,11 +31,14 @@ async fn create_income(
     Ok(Json(income))
 }
 
-async fn list_incomes(state: State<AppState>) -> HttpResult<impl IntoResponse> {
+async fn list_incomes(
+    state: State<AppState>,
+    Json(filters): Json<IncomeListFilters>,
+) -> HttpResult<impl IntoResponse> {
     let incomes = state
         .finance_manager_state
         .income_handler
-        .list_incomes(IncomeListFilters::default())
+        .list_incomes(filters)
         .await?;
 
     Ok(Json(incomes))
