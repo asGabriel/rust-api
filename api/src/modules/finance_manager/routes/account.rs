@@ -1,5 +1,6 @@
 use axum::{
     extract::State,
+    http::HeaderMap,
     response::IntoResponse,
     routing::{patch, post},
     Json, Router,
@@ -25,12 +26,14 @@ pub fn configure_routes() -> Router<AppState> {
 
 async fn update_account(
     state: State<AppState>,
+    headers: HeaderMap,
     Json(request): Json<UpdateAccountRequest>,
 ) -> HttpResult<impl IntoResponse> {
+    let user = state.auth_state.auth_handler.authenticate(&headers).await?;
     let account = state
         .finance_manager_state
         .account_handler
-        .update_account(request)
+        .update_account(*user.client_id(), request)
         .await?;
 
     Ok(Json(account))
@@ -38,12 +41,14 @@ async fn update_account(
 
 async fn create_account(
     state: State<AppState>,
+    headers: HeaderMap,
     Json(request): Json<CreateAccountRequest>,
 ) -> HttpResult<impl IntoResponse> {
+    let user = state.auth_state.auth_handler.authenticate(&headers).await?;
     let account = state
         .finance_manager_state
         .account_handler
-        .create_account(request)
+        .create_account(*user.client_id(), request)
         .await?;
 
     Ok(Json(account))
@@ -51,12 +56,14 @@ async fn create_account(
 
 async fn list_accounts(
     state: State<AppState>,
+    headers: HeaderMap,
     Json(filters): Json<AccountListFilters>,
 ) -> HttpResult<impl IntoResponse> {
+    let user = state.auth_state.auth_handler.authenticate(&headers).await?;
     let accounts = state
         .finance_manager_state
         .account_handler
-        .list_accounts(filters)
+        .list_accounts(*user.client_id(), filters)
         .await?;
 
     Ok(Json(accounts))

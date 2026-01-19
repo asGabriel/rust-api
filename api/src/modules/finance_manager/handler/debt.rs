@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use http_error::HttpResult;
+use uuid::Uuid;
 
 use crate::modules::finance_manager::{
     domain::{
@@ -26,15 +27,17 @@ pub type DynDebtHandler = dyn DebtHandler + Send + Sync;
 
 #[async_trait]
 pub trait DebtHandler {
-    async fn list_debts(&self, filters: &DebtFilters) -> HttpResult<Vec<Debt>>;
-    async fn register_new_debt(&self, request: CreateDebtRequest) -> HttpResult<Debt>;
+    async fn list_debts(&self, client_id: Uuid, filters: &DebtFilters) -> HttpResult<Vec<Debt>>;
+    async fn register_new_debt(
+        &self,
+        client_id: Uuid,
+        request: CreateDebtRequest,
+    ) -> HttpResult<Debt>;
 
     async fn list_debt_installments(
         &self,
         filters: &InstallmentFilters,
     ) -> HttpResult<Vec<Installment>>;
-
-    // async fn generate_debt_recurrences(&self) -> HttpResult<()>;
 }
 
 #[derive(Clone)]
@@ -48,8 +51,18 @@ pub struct DebtHandlerImpl {
 }
 
 impl DebtHandlerImpl {
-    async fn create_debt(&self, request: CreateDebtRequest) -> HttpResult<Debt> {
-        let debt = Debt::from(request);
+    async fn create_debt(&self, client_id: Uuid, request: CreateDebtRequest) -> HttpResult<Debt> {
+        let debt = Debt::new(
+            client_id,
+            request.description,
+            request.total_amount,
+            request.paid_amount,
+            request.discount_amount,
+            request.due_date,
+            request.category,
+            request.tags,
+            request.installment_count,
+        );
         let debt = self.debt_repository.insert(debt).await?;
 
         if let Some(installments) = debt.generate_installments()? {
@@ -72,8 +85,12 @@ impl DebtHandler for DebtHandlerImpl {
         self.installment_repository.list(filters).await
     }
 
-    async fn register_new_debt(&self, request: CreateDebtRequest) -> HttpResult<Debt> {
-        let mut debt = self.create_debt(request.clone()).await?;
+    async fn register_new_debt(
+        &self,
+        client_id: Uuid,
+        request: CreateDebtRequest,
+    ) -> HttpResult<Debt> {
+        let mut debt = self.create_debt(client_id, request.clone()).await?;
 
         if request.is_paid() {
             let account_id = request.account_id.ok_or_else(|| {
@@ -99,8 +116,23 @@ impl DebtHandler for DebtHandlerImpl {
         Ok(debt)
     }
 
-    async fn list_debts(&self, filters: &DebtFilters) -> HttpResult<Vec<Debt>> {
-        self.debt_repository.list(filters).await
+    async fn list_debts(&self, client_id: Uuid, filters: &DebtFilters) -> HttpResult<Vec<Debt>> {
+        let mut new_filters = DebtFilters::new(client_id);
+
+        if let Some(statuses) = filters.statuses() {
+            new_filters = new_filters.with_statuses(statuses.clone());
+        }
+        if let Some(start_date) = filters.start_date() {
+            new_filters = new_filters.with_start_date(*start_date);
+        }
+        if let Some(end_date) = filters.end_date() {
+            new_filters = new_filters.with_end_date(*end_date);
+        }
+        if let Some(category_names) = filters.category_names() {
+            new_filters = new_filters.with_category_names(category_names.clone());
+        }
+
+        self.debt_repository.list(&new_filters).await
     }
 }
 

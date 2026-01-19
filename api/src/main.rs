@@ -23,6 +23,7 @@ use api::modules::{
 use axum::Router;
 use database::DbPool;
 use sqlx::{Pool, Postgres};
+use uuid::Uuid;
 
 #[tokio::main]
 async fn main() {
@@ -47,6 +48,11 @@ async fn main() {
         income_handler: Arc::new(income_handler.clone()),
     };
 
+    let telegram_client_id = std::env::var("TELEGRAM_CLIENT_ID")
+        .ok()
+        .and_then(|s| Uuid::parse_str(&s).ok())
+        .unwrap_or(Uuid::nil());
+
     let chat_bot_state = ChatBotState {
         chat_bot_handler: Arc::new(ChatBotHandlerImpl {
             income_handler: Arc::new(income_handler.clone()),
@@ -54,6 +60,7 @@ async fn main() {
             debt_handler: Arc::new(debt_handler.clone()),
             account_handler: Arc::new(account_handler.clone()),
             telegram_gateway: TelegramGateway::new(),
+            client_id: telegram_client_id,
         }),
         payment_handler: Arc::new(payment_handler.clone()),
         telegram_gateway: TelegramGateway::new(),
@@ -129,8 +136,7 @@ fn build_income_handler(pool: &Pool<Postgres>) -> IncomeHandlerImpl {
 }
 
 fn build_auth_handler(pool: &Pool<Postgres>) -> AuthHandlerImpl {
-    let jwt_secret = std::env::var("JWT_SECRET")
-        .unwrap_or_else(|_| "your-secret-key-change-in-production".to_string());
+    let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
 
     AuthHandlerImpl {
         user_repository: Arc::new(UserRepositoryImpl::new(pool)),

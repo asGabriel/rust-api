@@ -7,6 +7,7 @@ use uuid::Uuid;
 #[serde(rename_all = "camelCase")]
 pub struct User {
     id: Uuid,
+    client_id: Uuid,
     username: String,
     email: String,
     #[serde(skip_serializing)]
@@ -18,9 +19,16 @@ pub struct User {
 }
 
 impl User {
-    pub fn new(username: String, email: String, password_hash: String, name: String) -> Self {
+    pub fn new(
+        client_id: Uuid,
+        username: String,
+        email: String,
+        password_hash: String,
+        name: String,
+    ) -> Self {
         Self {
             id: Uuid::new_v4(),
+            client_id,
             username,
             email,
             password_hash,
@@ -43,6 +51,7 @@ impl User {
 getters! {
     User {
         id: Uuid,
+        client_id: Uuid,
         username: String,
         email: String,
         password_hash: String,
@@ -56,6 +65,7 @@ getters! {
 from_row_constructor! {
     User {
         id: Uuid,
+        client_id: Uuid,
         username: String,
         email: String,
         password_hash: String,
@@ -70,6 +80,7 @@ from_row_constructor! {
 #[serde(rename_all = "camelCase")]
 pub struct UserResponse {
     pub id: Uuid,
+    pub client_id: Uuid,
     pub username: String,
     pub email: String,
     pub name: String,
@@ -82,6 +93,7 @@ impl From<User> for UserResponse {
     fn from(user: User) -> Self {
         Self {
             id: *user.id(),
+            client_id: *user.client_id(),
             username: user.username().clone(),
             email: user.email().clone(),
             name: user.name().clone(),

@@ -8,10 +8,7 @@ use uuid::Uuid;
 
 use crate::modules::{
     chat_bot::domain::formatter::{ChatFormatter, ChatFormatterUtils},
-    finance_manager::{
-        domain::{debt::installment::Installment, payment::Payment},
-        handler::debt::use_cases::CreateDebtRequest,
-    },
+    finance_manager::domain::{debt::installment::Installment, payment::Payment},
 };
 
 pub mod category;
@@ -22,44 +19,27 @@ pub mod recurrence_run;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Debt {
-    /// Unique identifier
     id: Uuid,
-    /// The category of the debt
+    client_id: Uuid,
     category: DebtCategory,
-    /// Tags that identify the debt, it's like a category but more flexible
     tags: Vec<String>,
-    /// The identification of the debt for human readability
     identification: String,
-
-    /// The description of the debt
     description: String,
-
-    /// The total value of the debt
     total_amount: Decimal,
-    /// The paid value of the debt
     paid_amount: Decimal,
-    /// The discount amount of the debt
     discount_amount: Decimal,
-    /// The remaining value of the debt
     remaining_amount: Decimal,
-    /// The due date of the debt
     due_date: NaiveDate,
-
-    /// The status of the debt
     #[serde(default)]
     status: DebtStatus,
-
-    /// The number of installments of the debt
     installment_count: Option<i32>,
-
-    /// The date of the creation of the debt
     created_at: DateTime<Utc>,
-    /// The date of the last update of the debt
     updated_at: Option<DateTime<Utc>>,
 }
 
 impl Debt {
     pub fn new(
+        client_id: Uuid,
         description: String,
         total_amount: Decimal,
         paid_amount: Option<Decimal>,
@@ -76,9 +56,10 @@ impl Debt {
 
         Self {
             id: uuid,
+            client_id,
             category: category.unwrap_or_default(),
             tags: tags.unwrap_or_default(),
-            identification: String::new(), // database auto increment
+            identification: String::new(),
             description,
             total_amount,
             paid_amount: paid_amount.unwrap_or(Decimal::ZERO),
@@ -210,20 +191,6 @@ impl Debt {
     }
 }
 
-impl From<CreateDebtRequest> for Debt {
-    fn from(request: CreateDebtRequest) -> Self {
-        Self::new(
-            request.description,
-            request.total_amount,
-            request.paid_amount,
-            request.discount_amount,
-            request.due_date,
-            request.category,
-            request.tags,
-            request.installment_count,
-        )
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -357,6 +324,7 @@ impl DebtStatus {
 getters!(
     Debt {
         id: Uuid,
+        client_id: Uuid,
         category: DebtCategory,
         tags: Vec<String>,
         identification: String,
@@ -376,6 +344,7 @@ getters!(
 from_row_constructor! {
     Debt {
         id: Uuid,
+        client_id: Uuid,
         category: DebtCategory,
         tags: Vec<String>,
         identification: String,
@@ -395,6 +364,7 @@ from_row_constructor! {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct DebtFilters {
+    client_id: Option<Uuid>,
     ids: Option<Vec<Uuid>>,
     statuses: Option<Vec<DebtStatus>>,
     start_date: Option<NaiveDate>,
@@ -404,6 +374,7 @@ pub struct DebtFilters {
 
 getters!(
     DebtFilters {
+        client_id: Option<Uuid>,
         ids: Option<Vec<Uuid>>,
         statuses: Option<Vec<DebtStatus>>,
         start_date: Option<NaiveDate>,
@@ -413,8 +384,9 @@ getters!(
 );
 
 impl DebtFilters {
-    pub fn new() -> Self {
+    pub fn new(client_id: Uuid) -> Self {
         Self {
+            client_id: Some(client_id),
             ..Default::default()
         }
     }

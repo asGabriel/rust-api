@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use http_error::{ext::OptionHttpExt, HttpResult};
+use uuid::Uuid;
 
 use crate::modules::finance_manager::{
     domain::account::BankAccount,
@@ -13,11 +14,11 @@ pub type DynAccountHandler = dyn AccountHandler + Send + Sync;
 
 #[async_trait]
 pub trait AccountHandler {
-    async fn create_account(&self, request: CreateAccountRequest) -> HttpResult<BankAccount>;
+    async fn create_account(&self, client_id: Uuid, request: CreateAccountRequest) -> HttpResult<BankAccount>;
 
-    async fn list_accounts(&self, filters: AccountListFilters) -> HttpResult<Vec<BankAccount>>;
+    async fn list_accounts(&self, client_id: Uuid, filters: AccountListFilters) -> HttpResult<Vec<BankAccount>>;
 
-    async fn update_account(&self, request: UpdateAccountRequest) -> HttpResult<BankAccount>;
+    async fn update_account(&self, client_id: Uuid, request: UpdateAccountRequest) -> HttpResult<BankAccount>;
 }
 
 #[derive(Clone)]
@@ -27,7 +28,7 @@ pub struct AccountHandlerImpl {
 
 #[async_trait]
 impl AccountHandler for AccountHandlerImpl {
-    async fn update_account(&self, request: UpdateAccountRequest) -> HttpResult<BankAccount> {
+    async fn update_account(&self, _client_id: Uuid, request: UpdateAccountRequest) -> HttpResult<BankAccount> {
         let mut account = self
             .account_repository
             .get_by_identification(&request.identification)
@@ -35,19 +36,20 @@ impl AccountHandler for AccountHandlerImpl {
             .or_not_found("account", &request.identification)?;
 
         account.update(&request);
-        // Safe unwrap because we already checked if the account exists
         self.account_repository.update(account.clone()).await?;
 
         Ok(account)
     }
 
-    async fn create_account(&self, request: CreateAccountRequest) -> HttpResult<BankAccount> {
-        let bank_account = BankAccount::from(request);
+    async fn create_account(&self, client_id: Uuid, request: CreateAccountRequest) -> HttpResult<BankAccount> {
+        let configuration = request.configuration.unwrap_or_default();
+        let bank_account = BankAccount::new(client_id, request.name, request.owner, configuration);
 
         self.account_repository.insert(bank_account).await
     }
 
-    async fn list_accounts(&self, filters: AccountListFilters) -> HttpResult<Vec<BankAccount>> {
+    async fn list_accounts(&self, client_id: Uuid, filters: AccountListFilters) -> HttpResult<Vec<BankAccount>> {
+        let filters = filters.with_client_id(client_id);
         self.account_repository.list(filters).await
     }
 }
@@ -61,6 +63,7 @@ pub mod use_cases {
     #[derive(Debug, Clone, Default, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct AccountListFilters {
+        pub client_id: Option<Uuid>,
         pub ids: Option<Vec<Uuid>>,
         pub identifications: Option<Vec<String>>,
     }
@@ -70,6 +73,11 @@ pub mod use_cases {
             Self {
                 ..Default::default()
             }
+        }
+
+        pub fn with_client_id(mut self, client_id: Uuid) -> Self {
+            self.client_id = Some(client_id);
+            self
         }
 
         pub fn with_ids(mut self, ids: Vec<Uuid>) -> Self {

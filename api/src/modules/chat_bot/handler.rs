@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use http_error::HttpResult;
 use rust_decimal::Decimal;
 use telegram_api::domain::send_message::SendMessageRequest;
+use uuid::Uuid;
 
 use crate::modules::{
     chat_bot::{
@@ -47,15 +48,16 @@ pub struct ChatBotHandlerImpl {
     pub account_handler: Arc<DynAccountHandler>,
     pub payment_handler: Arc<DynPaymentHandler>,
     pub income_handler: Arc<DynIncomeHandler>,
+    pub client_id: Uuid,
 }
 
 impl ChatBotHandlerImpl {
     pub async fn handle_list_debts(&self, chat_id: i64, filters: SummaryFilters) -> HttpResult<()> {
         let (debt_filters, income_filters) = filters.to_filters();
 
-        let result = self.debt_handler.list_debts(&debt_filters).await;
+        let result = self.debt_handler.list_debts(self.client_id, &debt_filters).await;
 
-        let income_result = match self.income_handler.list_incomes(income_filters).await {
+        let income_result = match self.income_handler.list_incomes(self.client_id, income_filters).await {
             Ok(incomes) => {
                 let total_income: Decimal = incomes.iter().map(|i| *i.amount()).sum();
                 format!(
@@ -90,6 +92,7 @@ impl ChatBotHandlerImpl {
             let account = self
                 .account_handler
                 .list_accounts(
+                    self.client_id,
                     AccountListFilters::new()
                         .with_identifications(vec![account_identification.clone()]),
                 )
@@ -110,7 +113,7 @@ impl ChatBotHandlerImpl {
 
         let result = self
             .debt_handler
-            .register_new_debt(CreateDebtRequest {
+            .register_new_debt(self.client_id, CreateDebtRequest {
                 category: None,
                 tags: None,
                 description: request.description.clone(),
@@ -142,7 +145,7 @@ impl ChatBotHandlerImpl {
     async fn handle_list_accounts(&self, chat_id: i64) -> HttpResult<()> {
         let result = self
             .account_handler
-            .list_accounts(AccountListFilters::default())
+            .list_accounts(self.client_id, AccountListFilters::default())
             .await;
 
         let message = match result {
@@ -190,7 +193,7 @@ impl ChatBotHandlerImpl {
     async fn handle_list_incomes(&self, chat_id: i64) -> HttpResult<()> {
         let result = self
             .income_handler
-            .list_incomes(IncomeListFilters::default())
+            .list_incomes(self.client_id, IncomeListFilters::default())
             .await;
         let message = match result {
             Ok(incomes) => ChatFormatter::format_list_for_chat(&incomes),
@@ -203,7 +206,7 @@ impl ChatBotHandlerImpl {
     async fn handle_new_income(&self, income: NewIncomeData, chat_id: i64) -> HttpResult<()> {
         let result = self
             .income_handler
-            .create_income(CreateIncomeRequest {
+            .create_income(self.client_id, CreateIncomeRequest {
                 account_identification: income.account_identification,
                 description: income.description,
                 amount: income.amount,

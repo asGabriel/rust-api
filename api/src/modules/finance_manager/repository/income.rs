@@ -29,19 +29,20 @@ impl IncomeRepositoryImpl {
 #[async_trait]
 impl IncomeRepository for IncomeRepositoryImpl {
     async fn list(&self, filters: &IncomeListFilters) -> HttpResult<Vec<Income>> {
-        let mut builder = QueryBuilder::new("SELECT * FROM finance_manager.income");
-        let mut has_where = false;
+        let mut builder = QueryBuilder::new("SELECT * FROM finance_manager.income WHERE 1=1");
+
+        if let Some(client_id) = filters.client_id() {
+            builder.push(" AND client_id = ");
+            builder.push_bind(client_id);
+        }
 
         if let Some(start_date) = filters.start_date() {
-            builder.push(if has_where { " AND " } else { " WHERE " });
-            builder.push("reference >= ");
+            builder.push(" AND reference >= ");
             builder.push_bind(start_date);
-            has_where = true;
         }
 
         if let Some(end_date) = filters.end_date() {
-            builder.push(if has_where { " AND " } else { " WHERE " });
-            builder.push("reference <= ");
+            builder.push(" AND reference <= ");
             builder.push_bind(end_date);
         }
 
@@ -53,6 +54,7 @@ impl IncomeRepository for IncomeRepositoryImpl {
             .map(|row| {
                 Income::from(entity::IncomeEntity {
                     id: row.get("id"),
+                    client_id: row.get("client_id"),
                     account_id: row.get("account_id"),
                     description: row.get("description"),
                     amount: row.get("amount"),
@@ -71,6 +73,7 @@ impl IncomeRepository for IncomeRepositoryImpl {
             r#"
             INSERT INTO finance_manager.income (
                 id,
+                client_id,
                 account_id,
                 description,
                 amount,
@@ -78,11 +81,12 @@ impl IncomeRepository for IncomeRepositoryImpl {
                 created_at,
                 updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            RETURNING id, account_id, description, amount, reference, created_at, updated_at
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING *
             "#,
         )
         .bind(income_entity.id)
+        .bind(income_entity.client_id)
         .bind(income_entity.account_id)
         .bind(income_entity.description)
         .bind(income_entity.amount)
@@ -94,6 +98,7 @@ impl IncomeRepository for IncomeRepositoryImpl {
 
         let income_entity = entity::IncomeEntity {
             id: row.get("id"),
+            client_id: row.get("client_id"),
             account_id: row.get("account_id"),
             description: row.get("description"),
             amount: row.get("amount"),
@@ -110,10 +115,12 @@ pub mod use_cases {
     use chrono::NaiveDate;
     use serde::{Deserialize, Serialize};
     use util::getters;
+    use uuid::Uuid;
 
     #[derive(Debug, Clone, Default, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct IncomeListFilters {
+        client_id: Option<Uuid>,
         start_date: Option<NaiveDate>,
         end_date: Option<NaiveDate>,
     }
@@ -121,6 +128,11 @@ pub mod use_cases {
     impl IncomeListFilters {
         pub fn new() -> Self {
             Self::default()
+        }
+
+        pub fn with_client_id(mut self, client_id: Uuid) -> Self {
+            self.client_id = Some(client_id);
+            self
         }
 
         pub fn with_start_date(mut self, start_date: NaiveDate) -> Self {
@@ -136,6 +148,7 @@ pub mod use_cases {
 
     getters!(
         IncomeListFilters {
+            client_id: Option<Uuid>,
             start_date: Option<NaiveDate>,
             end_date: Option<NaiveDate>,
         }
@@ -154,6 +167,7 @@ pub mod entity {
     #[serde(rename_all = "camelCase")]
     pub struct IncomeEntity {
         pub id: Uuid,
+        pub client_id: Uuid,
         pub account_id: Uuid,
         pub description: String,
         pub amount: Decimal,
@@ -166,6 +180,7 @@ pub mod entity {
         fn from(income: Income) -> Self {
             IncomeEntity {
                 id: *income.id(),
+                client_id: *income.client_id(),
                 account_id: *income.account_id(),
                 description: income.description().clone(),
                 amount: *income.amount(),
@@ -180,6 +195,7 @@ pub mod entity {
         fn from(entity: IncomeEntity) -> Self {
             Income::from_row(
                 entity.id,
+                entity.client_id,
                 entity.account_id,
                 entity.description,
                 entity.amount,

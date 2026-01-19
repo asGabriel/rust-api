@@ -1,4 +1,10 @@
-use axum::{extract::State, response::IntoResponse, routing::post, Json, Router};
+use axum::{
+    extract::State,
+    http::HeaderMap,
+    response::IntoResponse,
+    routing::post,
+    Json, Router,
+};
 use http_error::HttpResult;
 
 use crate::modules::{
@@ -20,12 +26,14 @@ pub fn configure_routes() -> Router<AppState> {
 
 async fn create_income(
     state: State<AppState>,
+    headers: HeaderMap,
     Json(request): Json<CreateIncomeRequest>,
 ) -> HttpResult<impl IntoResponse> {
+    let user = state.auth_state.auth_handler.authenticate(&headers).await?;
     let income = state
         .finance_manager_state
         .income_handler
-        .create_income(request)
+        .create_income(*user.client_id(), request)
         .await?;
 
     Ok(Json(income))
@@ -33,12 +41,14 @@ async fn create_income(
 
 async fn list_incomes(
     state: State<AppState>,
+    headers: HeaderMap,
     Json(filters): Json<IncomeListFilters>,
 ) -> HttpResult<impl IntoResponse> {
+    let user = state.auth_state.auth_handler.authenticate(&headers).await?;
     let incomes = state
         .finance_manager_state
         .income_handler
-        .list_incomes(filters)
+        .list_incomes(*user.client_id(), filters)
         .await?;
 
     Ok(Json(incomes))
