@@ -15,6 +15,10 @@ uuid = { workspace = true }
 async-trait = { workspace = true }
 serde_plain = { workspace = true }
 
+## Auth
+bcrypt = { workspace = true }
+jsonwebtoken = { workspace = true }
+
 ## libs
 database = { workspace = true }
 http-error = { workspace = true }

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use api::modules::{
+    auth::{handler::AuthHandlerImpl, repository::user::UserRepositoryImpl, AuthState},
     chat_bot::{gateway::TelegramGateway, handler::ChatBotHandlerImpl, ChatBotState},
     finance_manager::{
         handler::{
@@ -58,9 +59,16 @@ async fn main() {
         telegram_gateway: TelegramGateway::new(),
     };
 
+    // Build auth state
+    let auth_handler = build_auth_handler(pool);
+    let auth_state = AuthState {
+        auth_handler: Arc::new(auth_handler),
+    };
+
     let app_state = AppState {
         finance_manager_state: Arc::new(finance_manager_state),
         chat_bot_state: Arc::new(chat_bot_state),
+        auth_state: Arc::new(auth_state),
     };
 
     let app: Router = routes::configure_services().with_state(app_state);
@@ -118,5 +126,14 @@ fn build_income_handler(pool: &Pool<Postgres>) -> IncomeHandlerImpl {
     IncomeHandlerImpl {
         income_repository: Arc::new(IncomeRepositoryImpl::new(pool)),
         account_repository: Arc::new(AccountRepositoryImpl::new(pool)),
+    }
+}
+
+fn build_auth_handler(pool: &Pool<Postgres>) -> AuthHandlerImpl {
+    let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "your-secret-key-change-in-production".to_string());
+    
+    AuthHandlerImpl {
+        user_repository: Arc::new(UserRepositoryImpl::new(pool)),
+        jwt_secret,
     }
 }
