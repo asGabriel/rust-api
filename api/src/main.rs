@@ -59,7 +59,6 @@ async fn main() {
         telegram_gateway: TelegramGateway::new(),
     };
 
-    // Build auth state
     let auth_handler = build_auth_handler(pool);
     let auth_state = AuthState {
         auth_handler: Arc::new(auth_handler),
@@ -130,8 +129,9 @@ fn build_income_handler(pool: &Pool<Postgres>) -> IncomeHandlerImpl {
 }
 
 fn build_auth_handler(pool: &Pool<Postgres>) -> AuthHandlerImpl {
-    let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "your-secret-key-change-in-production".to_string());
-    
+    let jwt_secret = std::env::var("JWT_SECRET")
+        .unwrap_or_else(|_| "your-secret-key-change-in-production".to_string());
+
     AuthHandlerImpl {
         user_repository: Arc::new(UserRepositoryImpl::new(pool)),
         jwt_secret,

@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use http_error::HttpResult;
-use sqlx::{Pool, Postgres, Row};
+use sqlx::{Pool, Postgres};
 use uuid::Uuid;
 
 use crate::modules::auth::domain::user::User;
@@ -34,19 +34,7 @@ impl UserRepository for UserRepositoryImpl {
             .fetch_optional(&self.pool)
             .await?;
 
-        Ok(row.map(|r| {
-            User::from_row(
-                r.get("id"),
-                r.get("username"),
-                r.get("email"),
-                r.get("password_hash"),
-                r.get("name"),
-                r.get("is_active"),
-                r.get::<chrono::NaiveDateTime, _>("created_at").and_utc(),
-                r.get::<Option<chrono::NaiveDateTime>, _>("updated_at")
-                    .map(|dt| dt.and_utc()),
-            )
-        }))
+        Ok(row.map(|r| User::from(entity::UserEntity::from(&r))))
     }
 
     async fn get_by_username(&self, username: &str) -> HttpResult<Option<User>> {
@@ -55,19 +43,7 @@ impl UserRepository for UserRepositoryImpl {
             .fetch_optional(&self.pool)
             .await?;
 
-        Ok(row.map(|r| {
-            User::from_row(
-                r.get("id"),
-                r.get("username"),
-                r.get("email"),
-                r.get("password_hash"),
-                r.get("name"),
-                r.get("is_active"),
-                r.get::<chrono::NaiveDateTime, _>("created_at").and_utc(),
-                r.get::<Option<chrono::NaiveDateTime>, _>("updated_at")
-                    .map(|dt| dt.and_utc()),
-            )
-        }))
+        Ok(row.map(|r| User::from(entity::UserEntity::from(&r))))
     }
 
     async fn get_by_email(&self, email: &str) -> HttpResult<Option<User>> {
@@ -76,53 +52,36 @@ impl UserRepository for UserRepositoryImpl {
             .fetch_optional(&self.pool)
             .await?;
 
-        Ok(row.map(|r| {
-            User::from_row(
-                r.get("id"),
-                r.get("username"),
-                r.get("email"),
-                r.get("password_hash"),
-                r.get("name"),
-                r.get("is_active"),
-                r.get::<chrono::NaiveDateTime, _>("created_at").and_utc(),
-                r.get::<Option<chrono::NaiveDateTime>, _>("updated_at")
-                    .map(|dt| dt.and_utc()),
-            )
-        }))
+        Ok(row.map(|r| User::from(entity::UserEntity::from(&r))))
     }
 
     async fn insert(&self, user: User) -> HttpResult<User> {
+        let entity = entity::UserEntity::from(user);
+
         let row = sqlx::query(
             r#"
             INSERT INTO auth.users (id, username, email, password_hash, name, is_active, created_at, updated_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            RETURNING id, username, email, password_hash, name, is_active, created_at, updated_at
+            RETURNING *
             "#,
         )
-        .bind(user.id())
-        .bind(user.username())
-        .bind(user.email())
-        .bind(user.password_hash())
-        .bind(user.name())
-        .bind(user.is_active())
-        .bind(user.created_at().naive_utc())
-        .bind(user.updated_at().map(|dt| dt.naive_utc()))
+        .bind(entity.id)
+        .bind(&entity.username)
+        .bind(&entity.email)
+        .bind(&entity.password_hash)
+        .bind(&entity.name)
+        .bind(entity.is_active)
+        .bind(entity.created_at)
+        .bind(entity.updated_at)
         .fetch_one(&self.pool)
         .await?;
 
-        Ok(User::from_row(
-            row.get("id"),
-            row.get("username"),
-            row.get("email"),
-            row.get("password_hash"),
-            row.get("name"),
-            row.get("is_active"),
-            row.get::<chrono::NaiveDateTime, _>("created_at").and_utc(),
-            row.get::<Option<chrono::NaiveDateTime>, _>("updated_at").map(|dt| dt.and_utc()),
-        ))
+        Ok(User::from(entity::UserEntity::from(&row)))
     }
 
     async fn update(&self, user: User) -> HttpResult<()> {
+        let entity = entity::UserEntity::from(user);
+
         sqlx::query(
             r#"
             UPDATE auth.users SET 
@@ -135,16 +94,80 @@ impl UserRepository for UserRepositoryImpl {
             WHERE id = $1
             "#,
         )
-        .bind(user.id())
-        .bind(user.username())
-        .bind(user.email())
-        .bind(user.password_hash())
-        .bind(user.name())
-        .bind(user.is_active())
+        .bind(entity.id)
+        .bind(&entity.username)
+        .bind(&entity.email)
+        .bind(&entity.password_hash)
+        .bind(&entity.name)
+        .bind(entity.is_active)
         .bind(chrono::Utc::now().naive_utc())
         .execute(&self.pool)
         .await?;
 
         Ok(())
+    }
+}
+
+pub mod entity {
+    use chrono::NaiveDateTime;
+    use sqlx::{postgres::PgRow, Row};
+    use uuid::Uuid;
+
+    use crate::modules::auth::domain::user::User;
+
+    pub struct UserEntity {
+        pub id: Uuid,
+        pub username: String,
+        pub email: String,
+        pub password_hash: String,
+        pub name: String,
+        pub is_active: bool,
+        pub created_at: NaiveDateTime,
+        pub updated_at: Option<NaiveDateTime>,
+    }
+
+    impl From<&PgRow> for UserEntity {
+        fn from(row: &PgRow) -> Self {
+            Self {
+                id: row.get("id"),
+                username: row.get("username"),
+                email: row.get("email"),
+                password_hash: row.get("password_hash"),
+                name: row.get("name"),
+                is_active: row.get("is_active"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            }
+        }
+    }
+
+    impl From<User> for UserEntity {
+        fn from(user: User) -> Self {
+            Self {
+                id: *user.id(),
+                username: user.username().clone(),
+                email: user.email().clone(),
+                password_hash: user.password_hash().clone(),
+                name: user.name().clone(),
+                is_active: *user.is_active(),
+                created_at: user.created_at().naive_utc(),
+                updated_at: user.updated_at().map(|dt| dt.naive_utc()),
+            }
+        }
+    }
+
+    impl From<UserEntity> for User {
+        fn from(entity: UserEntity) -> Self {
+            User::from_row(
+                entity.id,
+                entity.username,
+                entity.email,
+                entity.password_hash,
+                entity.name,
+                entity.is_active,
+                entity.created_at.and_utc(),
+                entity.updated_at.map(|dt| dt.and_utc()),
+            )
+        }
     }
 }
