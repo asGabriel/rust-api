@@ -129,8 +129,7 @@ fn build_income_handler(pool: &Pool<Postgres>) -> IncomeHandlerImpl {
 }
 
 fn build_auth_handler(pool: &Pool<Postgres>) -> AuthHandlerImpl {
-    let jwt_secret = std::env::var("JWT_SECRET")
-        .unwrap_or_else(|_| "your-secret-key-change-in-production".to_string());
+    let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
 
     AuthHandlerImpl {
         user_repository: Arc::new(UserRepositoryImpl::new(pool)),

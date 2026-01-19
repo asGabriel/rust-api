@@ -147,7 +147,7 @@ impl AuthHandlerImpl {
         let claims = JwtClaims {
             sub: user.id().to_string(),
             username: user.username().clone(),
-            exp: (chrono::Utc::now() + chrono::Duration::days(7)).timestamp() as usize,
+            exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
             iat: chrono::Utc::now().timestamp() as usize,
         };
 
