@@ -54,7 +54,13 @@ impl AuthHandler for AuthHandlerImpl {
         let password_hash = User::hash_password(&request.password)
             .map_err(|_| Box::new(HttpError::internal("Failed to hash password")))?;
 
-        let user = User::new(request.username, request.email, password_hash, request.name);
+        let user = User::new(
+            request.client_id,
+            request.username,
+            request.email,
+            password_hash,
+            request.name,
+        );
         let user = self.user_repository.insert(user).await?;
         let token = self.generate_token(&user)?;
 
@@ -146,6 +152,7 @@ impl AuthHandlerImpl {
     fn generate_token(&self, user: &User) -> HttpResult<String> {
         let claims = JwtClaims {
             sub: user.id().to_string(),
+            client_id: user.client_id().to_string(),
             username: user.username().clone(),
             exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
             iat: chrono::Utc::now().timestamp() as usize,
@@ -162,10 +169,12 @@ impl AuthHandlerImpl {
 
 pub mod use_cases {
     use serde::{Deserialize, Serialize};
+    use uuid::Uuid;
 
     #[derive(Debug, Clone, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct RegisterRequest {
+        pub client_id: Uuid,
         pub username: String,
         pub email: String,
         pub password: String,
@@ -192,6 +201,7 @@ pub struct AuthResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JwtClaims {
     pub sub: String,
+    pub client_id: String,
     pub username: String,
     pub exp: usize,
     pub iat: usize,

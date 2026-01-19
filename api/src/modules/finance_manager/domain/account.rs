@@ -10,37 +10,33 @@ use crate::modules::{
     chat_bot::domain::formatter::ChatFormatter,
     finance_manager::{
         domain::account::configuration::AccountConfiguration,
-        handler::account::use_cases::{CreateAccountRequest, UpdateAccountRequest},
+        handler::account::use_cases::UpdateAccountRequest,
     },
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BankAccount {
-    /// Unique identifier
     id: Uuid,
-    /// The name of the bank account
+    client_id: Uuid,
     name: String,
-    /// The owner of the bank account
     owner: String,
-    /// The identification of the account; It's a human readable identifier for the account.
     identification: String,
-    /// The configuration of the bank account
     configuration: AccountConfiguration,
-
     created_at: DateTime<Utc>,
     updated_at: Option<DateTime<Utc>>,
 }
 
 impl BankAccount {
-    pub fn new(name: String, owner: String, configuration: AccountConfiguration) -> Self {
+    pub fn new(client_id: Uuid, name: String, owner: String, configuration: AccountConfiguration) -> Self {
         let uuid = Uuid::new_v4();
 
         Self {
             id: uuid,
+            client_id,
             name,
             owner,
-            identification: String::new(), // Will be set by database autoincrement
+            identification: String::new(),
             configuration,
             created_at: Utc::now(),
             updated_at: None,
@@ -67,16 +63,11 @@ impl BankAccount {
     }
 }
 
-impl From<CreateAccountRequest> for BankAccount {
-    fn from(request: CreateAccountRequest) -> Self {
-        let configuration = request.configuration.unwrap_or_default();
-        BankAccount::new(request.name, request.owner, configuration)
-    }
-}
 
 getters! {
     BankAccount {
         id: Uuid,
+        client_id: Uuid,
         name: String,
         owner: String,
         identification: String,
@@ -89,6 +80,7 @@ getters! {
 from_row_constructor! {
     BankAccount {
         id: Uuid,
+        client_id: Uuid,
         name: String,
         owner: String,
         identification: String,

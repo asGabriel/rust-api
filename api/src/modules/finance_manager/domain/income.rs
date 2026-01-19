@@ -13,6 +13,7 @@ use crate::modules::{
 #[serde(rename_all = "camelCase")]
 pub struct Income {
     id: Uuid,
+    client_id: Uuid,
     account_id: Uuid,
     description: String,
     amount: Decimal,
@@ -22,9 +23,10 @@ pub struct Income {
 }
 
 impl Income {
-    pub fn from_request(request: CreateIncomeRequest, account_id: Uuid) -> Self {
+    pub fn from_request(request: CreateIncomeRequest, client_id: Uuid, account_id: Uuid) -> Self {
         Self {
             id: Uuid::new_v4(),
+            client_id,
             account_id,
             description: request.description,
             amount: request.amount,
@@ -38,6 +40,7 @@ impl Income {
 getters! {
     Income {
         id: Uuid,
+        client_id: Uuid,
         account_id: Uuid,
         description: String,
         amount: Decimal,
@@ -50,6 +53,7 @@ getters! {
 from_row_constructor! {
     Income {
         id: Uuid,
+        client_id: Uuid,
         account_id: Uuid,
         description: String,
         amount: Decimal,

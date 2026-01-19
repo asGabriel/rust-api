@@ -11,24 +11,13 @@ use crate::modules::finance_manager::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Payment {
-    /// Unique identifier
     id: Uuid,
-    /// Unique identifier of the debt
-    /// The debt that the payment belongs to
+    client_id: Uuid,
     debt_id: Uuid,
-    /// Unique identifier of the account
-    /// The account that the payment belongs to
-    /// a.k.a. "Conta de pagamento"
     account_id: Uuid,
-
-    /// The amount of the payment
     amount: Decimal,
-    /// The date of the payment
     payment_date: NaiveDate,
-
-    /// The date of the creation of the payment
     created_at: DateTime<Utc>,
-    /// The date of the last update of the payment
     updated_at: Option<DateTime<Utc>>,
 }
 
@@ -36,6 +25,7 @@ impl Payment {
     pub fn new(debt: &Debt, account_id: &Uuid, payment_data: &PaymentBasicData) -> Self {
         Self {
             id: Uuid::new_v4(),
+            client_id: *debt.client_id(),
             debt_id: *debt.id(),
             account_id: *account_id,
             amount: payment_data.amount(debt),
@@ -49,6 +39,7 @@ impl Payment {
 getters! {
     Payment {
         id: Uuid,
+        client_id: Uuid,
         debt_id: Uuid,
         account_id: Uuid,
         amount: Decimal,
@@ -61,6 +52,7 @@ getters! {
 from_row_constructor! {
     Payment {
         id: Uuid,
+        client_id: Uuid,
         debt_id: Uuid,
         account_id: Uuid,
         amount: Decimal,

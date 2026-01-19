@@ -72,6 +72,7 @@ impl AccountRepository for AccountRepositoryImpl {
 
         let result = row.map(|r| BankAccountEntity {
             id: r.get("id"),
+            client_id: r.get("client_id"),
             name: r.get("name"),
             owner: r.get("owner"),
             identification: r.get::<i32, _>("identification").to_string(),
@@ -91,6 +92,7 @@ impl AccountRepository for AccountRepositoryImpl {
 
         let result = row.map(|r| BankAccountEntity {
             id: r.get("id"),
+            client_id: r.get("client_id"),
             name: r.get("name"),
             owner: r.get("owner"),
             identification: r.get::<i32, _>("identification").to_string(),
@@ -103,15 +105,17 @@ impl AccountRepository for AccountRepositoryImpl {
     }
 
     async fn list(&self, filters: AccountListFilters) -> HttpResult<Vec<BankAccount>> {
-        let mut builder = QueryBuilder::new("SELECT * FROM finance_manager.account");
-        let mut has_where = false;
+        let mut builder = QueryBuilder::new("SELECT * FROM finance_manager.account WHERE 1=1");
+
+        if let Some(client_id) = filters.client_id {
+            builder.push(" AND client_id = ");
+            builder.push_bind(client_id);
+        }
 
         if let Some(ids) = filters.ids {
-            builder.push(if has_where { " AND " } else { " WHERE " });
-            builder.push("id = ANY(");
+            builder.push(" AND id = ANY(");
             builder.push_bind(ids);
             builder.push(")");
-            has_where = true;
         }
 
         if let Some(identifications) = filters.identifications {
@@ -119,8 +123,7 @@ impl AccountRepository for AccountRepositoryImpl {
                 .iter()
                 .map(|i| i.parse::<i32>().unwrap())
                 .collect();
-            builder.push(if has_where { " AND " } else { " WHERE " });
-            builder.push("identification = ANY(");
+            builder.push(" AND identification = ANY(");
             builder.push_bind(identifications);
             builder.push(")");
         }
@@ -132,6 +135,7 @@ impl AccountRepository for AccountRepositoryImpl {
             .into_iter()
             .map(|r| BankAccountEntity {
                 id: r.get("id"),
+                client_id: r.get("client_id"),
                 name: r.get("name"),
                 owner: r.get("owner"),
                 identification: r.get::<i32, _>("identification").to_string(),
@@ -149,12 +153,13 @@ impl AccountRepository for AccountRepositoryImpl {
 
         let row = sqlx::query(
             r#"
-            INSERT INTO finance_manager.account (id, name, owner, configuration, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING id, name, owner, identification, configuration, created_at, updated_at
+            INSERT INTO finance_manager.account (id, client_id, name, owner, configuration, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING *
         "#,
         )
         .bind(payload.id)
+        .bind(payload.client_id)
         .bind(payload.name)
         .bind(payload.owner)
         .bind(serde_json::to_value(payload.configuration).unwrap())
@@ -165,6 +170,7 @@ impl AccountRepository for AccountRepositoryImpl {
 
         let result = BankAccountEntity {
             id: row.get("id"),
+            client_id: row.get("client_id"),
             name: row.get("name"),
             owner: row.get("owner"),
             identification: row.get::<i32, _>("identification").to_string(),
@@ -190,6 +196,7 @@ pub mod entity {
     #[serde(rename_all = "camelCase")]
     pub struct BankAccountEntity {
         pub id: Uuid,
+        pub client_id: Uuid,
         pub name: String,
         pub owner: String,
         pub identification: String,
@@ -202,6 +209,7 @@ pub mod entity {
         fn from(bank_account: BankAccount) -> Self {
             BankAccountEntity {
                 id: *bank_account.id(),
+                client_id: *bank_account.client_id(),
                 name: bank_account.name().to_string(),
                 owner: bank_account.owner().to_string(),
                 identification: bank_account.identification().to_string(),
@@ -216,6 +224,7 @@ pub mod entity {
         fn from(dto: BankAccountEntity) -> Self {
             BankAccount::from_row(
                 dto.id,
+                dto.client_id,
                 dto.name,
                 dto.owner,
                 dto.identification,

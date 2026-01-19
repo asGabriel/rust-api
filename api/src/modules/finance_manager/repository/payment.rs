@@ -35,6 +35,7 @@ impl PaymentRepository for PaymentRepositoryImpl {
             r#"
                 INSERT INTO finance_manager.payment (
                     id,
+                    client_id,
                     debt_id,
                     account_id,
                     amount,
@@ -42,11 +43,12 @@ impl PaymentRepository for PaymentRepositoryImpl {
                     created_at,
                     updated_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
-                RETURNING id, debt_id, account_id, amount, payment_date, created_at, updated_at
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                RETURNING *
             "#,
         )
         .bind(payload.id)
+        .bind(payload.client_id)
         .bind(payload.debt_id)
         .bind(payload.account_id)
         .bind(payload.amount)
@@ -58,6 +60,7 @@ impl PaymentRepository for PaymentRepositoryImpl {
 
         let result = PaymentDto {
             id: row.get("id"),
+            client_id: row.get("client_id"),
             debt_id: row.get("debt_id"),
             account_id: row.get("account_id"),
             amount: row.get("amount"),
@@ -72,11 +75,14 @@ impl PaymentRepository for PaymentRepositoryImpl {
     async fn list(&self, filters: &PaymentFilters) -> HttpResult<Vec<Payment>> {
         let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
             r#"
-                SELECT id, debt_id, account_id, amount, payment_date, created_at, updated_at
-                FROM finance_manager.payment
-                WHERE 1=1
+                SELECT * FROM finance_manager.payment WHERE 1=1
             "#,
         );
+
+        if let Some(client_id) = &filters.client_id {
+            builder.push(" AND client_id = ");
+            builder.push_bind(client_id);
+        }
 
         if let Some(debt_ids) = &filters.debt_ids {
             builder.push(" AND debt_id = ANY(");
@@ -110,6 +116,7 @@ impl PaymentRepository for PaymentRepositoryImpl {
             .map(|row| {
                 Payment::from(PaymentDto {
                     id: row.get("id"),
+                    client_id: row.get("client_id"),
                     debt_id: row.get("debt_id"),
                     account_id: row.get("account_id"),
                     amount: row.get("amount"),
@@ -135,6 +142,7 @@ pub mod dto {
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct PaymentDto {
         pub id: Uuid,
+        pub client_id: Uuid,
         pub debt_id: Uuid,
         pub account_id: Uuid,
         pub amount: Decimal,
@@ -147,6 +155,7 @@ pub mod dto {
         fn from(payment: Payment) -> Self {
             PaymentDto {
                 id: *payment.id(),
+                client_id: *payment.client_id(),
                 debt_id: *payment.debt_id(),
                 account_id: *payment.account_id(),
                 amount: *payment.amount(),
@@ -161,6 +170,7 @@ pub mod dto {
         fn from(dto: PaymentDto) -> Self {
             Payment::from_row(
                 dto.id,
+                dto.client_id,
                 dto.debt_id,
                 dto.account_id,
                 dto.amount,
@@ -180,6 +190,7 @@ pub mod use_cases {
     #[derive(Debug, Clone, Serialize, Deserialize, Default)]
     #[serde(rename_all = "camelCase")]
     pub struct PaymentFilters {
+        pub client_id: Option<Uuid>,
         pub debt_ids: Option<Vec<Uuid>>,
         pub account_ids: Option<Vec<Uuid>>,
         pub start_date: Option<NaiveDate>,
@@ -189,6 +200,11 @@ pub mod use_cases {
     impl PaymentFilters {
         pub fn new() -> Self {
             Self::default()
+        }
+
+        pub fn with_client_id(mut self, client_id: Uuid) -> Self {
+            self.client_id = Some(client_id);
+            self
         }
 
         pub fn with_debt_ids(mut self, debt_ids: Vec<Uuid>) -> Self {

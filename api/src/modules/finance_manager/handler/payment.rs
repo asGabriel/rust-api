@@ -18,10 +18,12 @@ use crate::modules::finance_manager::{
 
 pub type DynPaymentHandler = dyn PaymentHandler + Send + Sync;
 
+use uuid::Uuid;
+
 #[async_trait]
 pub trait PaymentHandler {
     async fn create_payment(&self, request: CreatePaymentRequest) -> HttpResult<Payment>;
-    async fn list_payments(&self, filters: PaymentFilters) -> HttpResult<Vec<Payment>>;
+    async fn list_payments(&self, client_id: Uuid, filters: PaymentFilters) -> HttpResult<Vec<Payment>>;
 }
 
 #[derive(Clone)]
@@ -52,7 +54,8 @@ impl PaymentHandler for PaymentHandlerImpl {
         Ok(payment)
     }
 
-    async fn list_payments(&self, filters: PaymentFilters) -> HttpResult<Vec<Payment>> {
+    async fn list_payments(&self, client_id: Uuid, filters: PaymentFilters) -> HttpResult<Vec<Payment>> {
+        let filters = filters.with_client_id(client_id);
         self.payment_repository.list(&filters).await
     }
 }

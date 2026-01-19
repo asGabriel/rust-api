@@ -106,7 +106,8 @@ impl DebtRepository for DebtRepositoryImpl {
         let row = sqlx::query(
             r#"
             INSERT INTO finance_manager.debt (
-                id, 
+                id,
+                client_id,
                 category,
                 tags,
                 description, 
@@ -120,11 +121,12 @@ impl DebtRepository for DebtRepositoryImpl {
                 created_at,
                 updated_at
             ) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             RETURNING *
         "#,
         )
         .bind(debt_dto.id)
+        .bind(debt_dto.client_id)
         .bind(&debt_dto.category)
         .bind(&debt_dto.tags)
         .bind(&debt_dto.description)
@@ -133,7 +135,7 @@ impl DebtRepository for DebtRepositoryImpl {
         .bind(debt_dto.discount_amount)
         .bind(debt_dto.remaining_amount)
         .bind(debt_dto.due_date)
-        .bind(debt_dto.status)
+        .bind(&debt_dto.status)
         .bind(debt_dto.installment_count)
         .bind(debt_dto.created_at)
         .bind(debt_dto.updated_at)
@@ -144,34 +146,31 @@ impl DebtRepository for DebtRepositoryImpl {
     }
 
     async fn list(&self, filters: &DebtFilters) -> HttpResult<Vec<Debt>> {
-        let mut builder = QueryBuilder::new("SELECT * FROM finance_manager.debt");
-        let mut has_where = false;
+        let mut builder = QueryBuilder::new("SELECT * FROM finance_manager.debt WHERE 1=1");
+
+        if let Some(client_id) = filters.client_id() {
+            builder.push(" AND client_id = ");
+            builder.push_bind(client_id);
+        }
 
         if let Some(start_date) = filters.start_date() {
-            builder.push(if has_where { " AND " } else { " WHERE " });
-            builder.push("due_date >= ");
+            builder.push(" AND due_date >= ");
             builder.push_bind(start_date);
-            has_where = true;
         }
 
         if let Some(end_date) = filters.end_date() {
-            builder.push(if has_where { " AND " } else { " WHERE " });
-            builder.push("due_date <= ");
+            builder.push(" AND due_date <= ");
             builder.push_bind(end_date);
-            has_where = true;
         }
 
         if let Some(category_names) = filters.category_names() {
-            builder.push(if has_where { " AND " } else { " WHERE " });
-            builder.push("category = ANY(");
+            builder.push(" AND category = ANY(");
             builder.push_bind(category_names);
             builder.push(")");
-            has_where = true;
         }
 
         if let Some(statuses) = filters.statuses() {
-            builder.push(if has_where { " AND " } else { " WHERE " });
-            builder.push("status = ANY(");
+            builder.push(" AND status = ANY(");
             builder.push_bind(
                 statuses
                     .iter()
@@ -207,6 +206,7 @@ pub mod entity {
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct DebtEntity {
         pub id: Uuid,
+        pub client_id: Uuid,
         pub identification: String,
         pub category: String,
         pub tags: Vec<String>,
@@ -226,6 +226,7 @@ pub mod entity {
         fn from(row: &PgRow) -> Self {
             Self {
                 id: row.get("id"),
+                client_id: row.get("client_id"),
                 identification: row.get::<i32, _>("identification").to_string(),
                 category: row.get::<String, _>("category"),
                 tags: row.get::<Vec<String>, _>("tags"),
@@ -247,6 +248,7 @@ pub mod entity {
         fn from(debt: Debt) -> Self {
             DebtEntity {
                 id: *debt.id(),
+                client_id: *debt.client_id(),
                 identification: debt.identification().to_string(),
                 category: String::from(debt.category().clone()),
                 tags: debt.tags().clone(),
@@ -268,6 +270,7 @@ pub mod entity {
         fn from(dto: DebtEntity) -> Self {
             Debt::from_row(
                 dto.id,
+                dto.client_id,
                 DebtCategory::from(dto.category),
                 dto.tags,
                 dto.identification,

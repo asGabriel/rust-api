@@ -1,4 +1,4 @@
-use axum::{extract::State, response::IntoResponse, routing::post, Json, Router};
+use axum::{extract::State, http::HeaderMap, response::IntoResponse, routing::post, Json, Router};
 use http_error::HttpResult;
 
 use crate::modules::{
@@ -42,12 +42,14 @@ async fn list_debt_installments(
 
 async fn create_debt(
     state: State<AppState>,
+    headers: HeaderMap,
     Json(request): Json<CreateDebtRequest>,
 ) -> HttpResult<impl IntoResponse> {
+    let user = state.auth_state.auth_handler.authenticate(&headers).await?;
     let debt = state
         .finance_manager_state
         .debt_handler
-        .register_new_debt(request)
+        .register_new_debt(*user.client_id(), request)
         .await?;
 
     Ok(Json(debt))
@@ -55,12 +57,14 @@ async fn create_debt(
 
 pub async fn list_debts(
     state: State<AppState>,
+    headers: HeaderMap,
     Json(filters): Json<DebtFilters>,
 ) -> HttpResult<impl IntoResponse> {
+    let user = state.auth_state.auth_handler.authenticate(&headers).await?;
     let debts = state
         .finance_manager_state
         .debt_handler
-        .list_debts(&filters)
+        .list_debts(*user.client_id(), &filters)
         .await?;
 
     Ok(Json(debts))

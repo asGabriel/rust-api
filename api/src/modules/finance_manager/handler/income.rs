@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use http_error::{ext::OptionHttpExt, HttpResult};
+use uuid::Uuid;
 
 use crate::modules::finance_manager::{
     domain::income::Income,
@@ -14,8 +15,8 @@ use crate::modules::finance_manager::{
 
 #[async_trait]
 pub trait IncomeHandler {
-    async fn list_incomes(&self, filters: IncomeListFilters) -> HttpResult<Vec<Income>>;
-    async fn create_income(&self, request: CreateIncomeRequest) -> HttpResult<Income>;
+    async fn list_incomes(&self, client_id: Uuid, filters: IncomeListFilters) -> HttpResult<Vec<Income>>;
+    async fn create_income(&self, client_id: Uuid, request: CreateIncomeRequest) -> HttpResult<Income>;
 }
 
 pub type DynIncomeHandler = dyn IncomeHandler + Send + Sync;
@@ -28,18 +29,19 @@ pub struct IncomeHandlerImpl {
 
 #[async_trait]
 impl IncomeHandler for IncomeHandlerImpl {
-    async fn list_incomes(&self, filters: IncomeListFilters) -> HttpResult<Vec<Income>> {
+    async fn list_incomes(&self, client_id: Uuid, filters: IncomeListFilters) -> HttpResult<Vec<Income>> {
+        let filters = filters.with_client_id(client_id);
         self.income_repository.list(&filters).await
     }
 
-    async fn create_income(&self, request: CreateIncomeRequest) -> HttpResult<Income> {
+    async fn create_income(&self, client_id: Uuid, request: CreateIncomeRequest) -> HttpResult<Income> {
         let account = self
             .account_repository
             .get_by_identification(&request.account_identification)
             .await?
             .or_not_found("account", &request.account_identification)?;
 
-        let income = Income::from_request(request, *account.id());
+        let income = Income::from_request(request, client_id, *account.id());
         let income = self.income_repository.insert(income).await?;
 
         Ok(income)

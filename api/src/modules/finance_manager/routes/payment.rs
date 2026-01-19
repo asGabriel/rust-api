@@ -1,4 +1,10 @@
-use axum::{extract::State, response::IntoResponse, routing::post, Json, Router};
+use axum::{
+    extract::State,
+    http::HeaderMap,
+    response::IntoResponse,
+    routing::post,
+    Json, Router,
+};
 use http_error::HttpResult;
 
 use crate::modules::{
@@ -33,12 +39,14 @@ async fn create_payment(
 
 async fn list_payments(
     state: State<AppState>,
+    headers: HeaderMap,
     Json(filters): Json<PaymentFilters>,
 ) -> HttpResult<impl IntoResponse> {
+    let user = state.auth_state.auth_handler.authenticate(&headers).await?;
     let payments = state
         .finance_manager_state
         .payment_handler
-        .list_payments(filters)
+        .list_payments(*user.client_id(), filters)
         .await?;
 
     Ok(Json(payments))

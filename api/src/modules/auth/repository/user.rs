@@ -60,12 +60,13 @@ impl UserRepository for UserRepositoryImpl {
 
         let row = sqlx::query(
             r#"
-            INSERT INTO auth.users (id, username, email, password_hash, name, is_active, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO auth.users (id, client_id, username, email, password_hash, name, is_active, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING *
             "#,
         )
         .bind(entity.id)
+        .bind(entity.client_id)
         .bind(&entity.username)
         .bind(&entity.email)
         .bind(&entity.password_hash)
@@ -85,16 +86,18 @@ impl UserRepository for UserRepositoryImpl {
         sqlx::query(
             r#"
             UPDATE auth.users SET 
-                username = $2,
-                email = $3,
-                password_hash = $4,
-                name = $5,
-                is_active = $6,
-                updated_at = $7
+                client_id = $2,
+                username = $3,
+                email = $4,
+                password_hash = $5,
+                name = $6,
+                is_active = $7,
+                updated_at = $8
             WHERE id = $1
             "#,
         )
         .bind(entity.id)
+        .bind(entity.client_id)
         .bind(&entity.username)
         .bind(&entity.email)
         .bind(&entity.password_hash)
@@ -117,6 +120,7 @@ pub mod entity {
 
     pub struct UserEntity {
         pub id: Uuid,
+        pub client_id: Uuid,
         pub username: String,
         pub email: String,
         pub password_hash: String,
@@ -130,6 +134,7 @@ pub mod entity {
         fn from(row: &PgRow) -> Self {
             Self {
                 id: row.get("id"),
+                client_id: row.get("client_id"),
                 username: row.get("username"),
                 email: row.get("email"),
                 password_hash: row.get("password_hash"),
@@ -145,6 +150,7 @@ pub mod entity {
         fn from(user: User) -> Self {
             Self {
                 id: *user.id(),
+                client_id: *user.client_id(),
                 username: user.username().clone(),
                 email: user.email().clone(),
                 password_hash: user.password_hash().clone(),
@@ -160,6 +166,7 @@ pub mod entity {
         fn from(entity: UserEntity) -> Self {
             User::from_row(
                 entity.id,
+                entity.client_id,
                 entity.username,
                 entity.email,
                 entity.password_hash,
