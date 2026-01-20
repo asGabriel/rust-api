@@ -125,7 +125,6 @@ impl ChatBotHandlerImpl {
                 discount_amount: Some(rust_decimal::Decimal::ZERO),
                 due_date: request.due_date,
                 status: Some(DebtStatus::Unpaid),
-                is_paid: request.is_paid(),
                 financial_instrument_id: instrument_id,
                 installment_count: request.installment_number,
             })

@@ -133,7 +133,6 @@ pub mod use_cases {
         pub paid_amount: Option<Decimal>,
         pub discount_amount: Option<Decimal>,
         pub status: Option<DebtStatus>,
-        pub is_paid: bool,
         pub financial_instrument_id: Option<Uuid>,
         pub installment_count: Option<i32>,
     }
@@ -145,7 +144,6 @@ pub mod use_cases {
             description: String,
             total_amount: Decimal,
             due_date: NaiveDate,
-            is_paid: Option<bool>,
             installment_count: Option<i32>,
         ) -> Self {
             Self {
@@ -158,7 +156,6 @@ pub mod use_cases {
                 discount_amount: None,
                 due_date,
                 status: Some(DebtStatus::Unpaid),
-                is_paid: is_paid.unwrap_or(false),
                 financial_instrument_id: None,
                 installment_count,
             }
@@ -181,15 +178,11 @@ pub mod use_cases {
         }
 
         fn invalid_installment(&self) -> bool {
-            self.installment_count.is_some() && self.financial_instrument_id.is_some()
+            self.installment_count.is_some() && self.financial_instrument_id.is_none()
         }
 
         fn invalid_total_amount(&self) -> bool {
             self.total_amount <= Decimal::ZERO
-        }
-
-        pub fn is_paid(&self) -> bool {
-            self.financial_instrument_id.is_some()
         }
     }
 

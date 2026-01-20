@@ -17,7 +17,7 @@ use crate::modules::{
 
 pub fn configure_routes() -> Router<AppState> {
     Router::new().nest(
-        "/financial-instrument",
+        "/financialInstrument",
         Router::new()
             .route("/", post(create_financial_instrument))
             .route("/list", post(list_financial_instruments))
