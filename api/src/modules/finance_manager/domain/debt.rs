@@ -154,7 +154,7 @@ impl Debt {
     // PRIVATE METHODS
 
     /// Checks if the payment amount is valid to be processed
-    fn validate_payment_amount(&self, payment: &Payment) -> HttpResult<()> {
+    pub fn validate_payment_amount(&self, payment: &Payment) -> HttpResult<()> {
         if self.paid_amount >= self.total_amount {
             return Err(Box::new(HttpError::bad_request("Debt already paid")));
         }
