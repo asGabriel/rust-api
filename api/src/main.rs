@@ -5,13 +5,13 @@ use api::modules::{
     chat_bot::{gateway::TelegramGateway, handler::ChatBotHandlerImpl, ChatBotState},
     finance_manager::{
         handler::{
-            account::AccountHandlerImpl, debt::DebtHandlerImpl, income::IncomeHandlerImpl,
-            payment::PaymentHandlerImpl, pubsub::PubSubHandlerImpl,
+            debt::DebtHandlerImpl, financial_instrument::FinancialInstrumentHandlerImpl,
+            income::IncomeHandlerImpl, payment::PaymentHandlerImpl, pubsub::PubSubHandlerImpl,
             recurrence::RecurrenceHandlerImpl,
         },
         repository::{
-            account::AccountRepositoryImpl,
             debt::{installment::InstallmentRepositoryImpl, DebtRepositoryImpl},
+            financial_instrument::FinancialInstrumentRepositoryImpl,
             income::IncomeRepositoryImpl,
             payment::PaymentRepositoryImpl,
             recurrence::RecurrenceRepositoryImpl,
@@ -35,7 +35,7 @@ async fn main() {
     // Build handlers
     let payment_handler = build_payment_handler(pool, &pubsub);
     let debt_handler = build_debt_handler(pool, &pubsub);
-    let account_handler = build_account_handler(pool);
+    let financial_instrument_handler = build_financial_instrument_handler(pool);
     let recurrence_handler = build_recurrence_handler(pool);
     let income_handler = build_income_handler(pool);
 
@@ -43,7 +43,7 @@ async fn main() {
     let finance_manager_state = FinanceManagerState {
         payment_handler: Arc::new(payment_handler.clone()),
         debt_handler: Arc::new(debt_handler.clone()),
-        account_handler: Arc::new(account_handler.clone()),
+        financial_instrument_handler: Arc::new(financial_instrument_handler.clone()),
         recurrence_handler: Arc::new(recurrence_handler.clone()),
         income_handler: Arc::new(income_handler.clone()),
     };
@@ -58,7 +58,7 @@ async fn main() {
             income_handler: Arc::new(income_handler.clone()),
             payment_handler: Arc::new(payment_handler.clone()),
             debt_handler: Arc::new(debt_handler.clone()),
-            account_handler: Arc::new(account_handler.clone()),
+            financial_instrument_handler: Arc::new(financial_instrument_handler.clone()),
             telegram_gateway: TelegramGateway::new(),
             client_id: telegram_client_id,
         }),
@@ -99,7 +99,7 @@ fn build_payment_handler(pool: &Pool<Postgres>, pubsub: &PubSubHandlerImpl) -> P
     PaymentHandlerImpl {
         payment_repository: Arc::new(PaymentRepositoryImpl::new(pool)),
         debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
-        account_repository: Arc::new(AccountRepositoryImpl::new(pool)),
+        financial_instrument_repository: Arc::new(FinancialInstrumentRepositoryImpl::new(pool)),
         pubsub: Arc::new(pubsub.clone()),
     }
 }
@@ -107,7 +107,7 @@ fn build_payment_handler(pool: &Pool<Postgres>, pubsub: &PubSubHandlerImpl) -> P
 fn build_debt_handler(pool: &Pool<Postgres>, pubsub: &PubSubHandlerImpl) -> DebtHandlerImpl {
     DebtHandlerImpl {
         debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
-        account_repository: Arc::new(AccountRepositoryImpl::new(pool)),
+        financial_instrument_repository: Arc::new(FinancialInstrumentRepositoryImpl::new(pool)),
         payment_repository: Arc::new(PaymentRepositoryImpl::new(pool)),
         installment_repository: Arc::new(InstallmentRepositoryImpl::new(pool)),
         recurrence_repository: Arc::new(RecurrenceRepositoryImpl::new(pool)),
@@ -115,23 +115,23 @@ fn build_debt_handler(pool: &Pool<Postgres>, pubsub: &PubSubHandlerImpl) -> Debt
     }
 }
 
-fn build_account_handler(pool: &Pool<Postgres>) -> AccountHandlerImpl {
-    AccountHandlerImpl {
-        account_repository: Arc::new(AccountRepositoryImpl::new(pool)),
+fn build_financial_instrument_handler(pool: &Pool<Postgres>) -> FinancialInstrumentHandlerImpl {
+    FinancialInstrumentHandlerImpl {
+        financial_instrument_repository: Arc::new(FinancialInstrumentRepositoryImpl::new(pool)),
     }
 }
 
 fn build_recurrence_handler(pool: &Pool<Postgres>) -> RecurrenceHandlerImpl {
     RecurrenceHandlerImpl {
         recurrence_repository: Arc::new(RecurrenceRepositoryImpl::new(pool)),
-        account_repository: Arc::new(AccountRepositoryImpl::new(pool)),
+        financial_instrument_repository: Arc::new(FinancialInstrumentRepositoryImpl::new(pool)),
     }
 }
 
 fn build_income_handler(pool: &Pool<Postgres>) -> IncomeHandlerImpl {
     IncomeHandlerImpl {
         income_repository: Arc::new(IncomeRepositoryImpl::new(pool)),
-        account_repository: Arc::new(AccountRepositoryImpl::new(pool)),
+        financial_instrument_repository: Arc::new(FinancialInstrumentRepositoryImpl::new(pool)),
     }
 }
 

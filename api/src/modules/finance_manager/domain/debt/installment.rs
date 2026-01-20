@@ -53,7 +53,7 @@ impl Installment {
 
     fn validate_payment(&self, payment: &Payment) -> HttpResult<()> {
         if *self.is_paid() {
-            return Err(Box::new(HttpError::bad_request("Parcela já paga")));
+            return Err(Box::new(HttpError::bad_request("Installment already paid")));
         }
 
         if *payment.amount() != *self.amount() {

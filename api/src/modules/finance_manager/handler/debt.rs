@@ -3,20 +3,14 @@ use http_error::HttpResult;
 use uuid::Uuid;
 
 use crate::modules::finance_manager::{
-    domain::{
-        debt::{
-            installment::{Installment, InstallmentFilters},
-            Debt, DebtFilters,
-        },
-        payment::Payment,
+    domain::debt::{
+        installment::{Installment, InstallmentFilters},
+        Debt, DebtFilters,
     },
-    handler::{
-        debt::use_cases::CreateDebtRequest, payment::use_cases::PaymentBasicData,
-        pubsub::DynPubSubHandler,
-    },
+    handler::{debt::use_cases::CreateDebtRequest, pubsub::DynPubSubHandler},
     repository::{
-        account::DynAccountRepository,
         debt::{installment::DynInstallmentRepository, DynDebtRepository},
+        financial_instrument::DynFinancialInstrumentRepository,
         payment::DynPaymentRepository,
         recurrence::DynRecurrenceRepository,
     },
@@ -44,7 +38,7 @@ pub trait DebtHandler {
 pub struct DebtHandlerImpl {
     pub debt_repository: Arc<DynDebtRepository>,
     pub installment_repository: Arc<DynInstallmentRepository>,
-    pub account_repository: Arc<DynAccountRepository>,
+    pub financial_instrument_repository: Arc<DynFinancialInstrumentRepository>,
     pub payment_repository: Arc<DynPaymentRepository>,
     pub recurrence_repository: Arc<DynRecurrenceRepository>,
     pub pubsub: Arc<DynPubSubHandler>,
@@ -52,6 +46,8 @@ pub struct DebtHandlerImpl {
 
 impl DebtHandlerImpl {
     async fn create_debt(&self, client_id: Uuid, request: CreateDebtRequest) -> HttpResult<Debt> {
+        request.validate()?;
+
         let debt = Debt::new(
             client_id,
             request.description,
@@ -60,6 +56,7 @@ impl DebtHandlerImpl {
             request.discount_amount,
             request.due_date,
             request.category,
+            request.expense_type,
             request.tags,
             request.installment_count,
         );
@@ -90,28 +87,7 @@ impl DebtHandler for DebtHandlerImpl {
         client_id: Uuid,
         request: CreateDebtRequest,
     ) -> HttpResult<Debt> {
-        let mut debt = self.create_debt(client_id, request.clone()).await?;
-
-        if request.is_paid() {
-            let account_id = request.account_id.ok_or_else(|| {
-                Box::new(http_error::HttpError::bad_request(
-                    "Account ID é obrigatório quando a despesa está paga",
-                ))
-            })?;
-
-            let payment = Payment::new(
-                &debt,
-                &account_id,
-                &PaymentBasicData {
-                    amount: Some(*debt.total_amount()),
-                    payment_date: *debt.due_date(),
-                },
-            );
-
-            let payment = self.payment_repository.insert(payment).await?;
-
-            debt = self.pubsub.process_debt_payment(debt, &payment).await?;
-        }
+        let debt = self.create_debt(client_id, request.clone()).await?;
 
         Ok(debt)
     }
@@ -138,16 +114,18 @@ impl DebtHandler for DebtHandlerImpl {
 
 pub mod use_cases {
     use chrono::NaiveDate;
+    use http_error::{HttpError, HttpResult};
     use rust_decimal::Decimal;
     use serde::{Deserialize, Serialize};
     use uuid::Uuid;
 
-    use crate::modules::finance_manager::domain::debt::{DebtCategory, DebtStatus};
+    use crate::modules::finance_manager::domain::debt::{DebtCategory, DebtStatus, ExpenseType};
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "camelCase")]
     pub struct CreateDebtRequest {
         pub category: Option<DebtCategory>,
+        pub expense_type: Option<ExpenseType>,
         pub tags: Option<Vec<String>>,
         pub description: String,
         pub due_date: NaiveDate,
@@ -156,7 +134,7 @@ pub mod use_cases {
         pub discount_amount: Option<Decimal>,
         pub status: Option<DebtStatus>,
         pub is_paid: bool,
-        pub account_id: Option<Uuid>,
+        pub financial_instrument_id: Option<Uuid>,
         pub installment_count: Option<i32>,
     }
 
@@ -172,6 +150,7 @@ pub mod use_cases {
         ) -> Self {
             Self {
                 category,
+                expense_type: None,
                 tags,
                 description,
                 total_amount,
@@ -180,13 +159,37 @@ pub mod use_cases {
                 due_date,
                 status: Some(DebtStatus::Unpaid),
                 is_paid: is_paid.unwrap_or(false),
-                account_id: None,
+                financial_instrument_id: None,
                 installment_count,
             }
         }
 
+        pub fn validate(&self) -> HttpResult<()> {
+            if self.invalid_total_amount() {
+                return Err(Box::new(HttpError::bad_request(
+                    "Total amount must be greater than zero",
+                )));
+            }
+
+            if self.invalid_installment() {
+                return Err(Box::new(HttpError::bad_request(
+                    "Installment count and financial instrument must be provided for installment debts",
+                )));
+            }
+
+            Ok(())
+        }
+
+        fn invalid_installment(&self) -> bool {
+            self.installment_count.is_some() && self.financial_instrument_id.is_some()
+        }
+
+        fn invalid_total_amount(&self) -> bool {
+            self.total_amount <= Decimal::ZERO
+        }
+
         pub fn is_paid(&self) -> bool {
-            self.account_id.is_some()
+            self.financial_instrument_id.is_some()
         }
     }
 

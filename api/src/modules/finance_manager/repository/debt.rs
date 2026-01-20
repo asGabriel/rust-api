@@ -42,22 +42,24 @@ impl DebtRepository for DebtRepositoryImpl {
             r#"
             UPDATE finance_manager.debt SET 
                 category = $2,
-                tags = $3,
-                description = $4, 
-                total_amount = $5, 
-                paid_amount = $6, 
-                discount_amount = $7, 
-                remaining_amount = $8, 
-                due_date = $9, 
-                status = $10, 
-                installment_count = $11,
-                updated_at = $12
+                expense_type = $3,
+                tags = $4,
+                description = $5, 
+                total_amount = $6, 
+                paid_amount = $7, 
+                discount_amount = $8, 
+                remaining_amount = $9, 
+                due_date = $10, 
+                status = $11, 
+                installment_count = $12,
+                updated_at = $13
             WHERE id = $1 
             RETURNING *
             "#,
         )
         .bind(debt_dto.id)
         .bind(&debt_dto.category)
+        .bind(&debt_dto.expense_type)
         .bind(&debt_dto.tags)
         .bind(&debt_dto.description)
         .bind(debt_dto.total_amount)
@@ -109,6 +111,7 @@ impl DebtRepository for DebtRepositoryImpl {
                 id,
                 client_id,
                 category,
+                expense_type,
                 tags,
                 description, 
                 total_amount, 
@@ -121,13 +124,14 @@ impl DebtRepository for DebtRepositoryImpl {
                 created_at,
                 updated_at
             ) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             RETURNING *
         "#,
         )
         .bind(debt_dto.id)
         .bind(debt_dto.client_id)
         .bind(&debt_dto.category)
+        .bind(&debt_dto.expense_type)
         .bind(&debt_dto.tags)
         .bind(&debt_dto.description)
         .bind(debt_dto.total_amount)
@@ -201,7 +205,7 @@ pub mod entity {
     use sqlx::Row;
     use uuid::Uuid;
 
-    use crate::modules::finance_manager::domain::debt::{Debt, DebtCategory};
+    use crate::modules::finance_manager::domain::debt::{Debt, DebtCategory, ExpenseType};
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct DebtEntity {
@@ -209,6 +213,7 @@ pub mod entity {
         pub client_id: Uuid,
         pub identification: String,
         pub category: String,
+        pub expense_type: String,
         pub tags: Vec<String>,
         pub description: String,
         pub total_amount: Decimal,
@@ -229,6 +234,7 @@ pub mod entity {
                 client_id: row.get("client_id"),
                 identification: row.get::<i32, _>("identification").to_string(),
                 category: row.get::<String, _>("category"),
+                expense_type: row.get::<String, _>("expense_type"),
                 tags: row.get::<Vec<String>, _>("tags"),
                 description: row.get("description"),
                 total_amount: row.get("total_amount"),
@@ -251,6 +257,7 @@ pub mod entity {
                 client_id: *debt.client_id(),
                 identification: debt.identification().to_string(),
                 category: String::from(debt.category().clone()),
+                expense_type: debt.expense_type().as_str().to_string(),
                 tags: debt.tags().clone(),
                 description: debt.description().clone(),
                 total_amount: *debt.total_amount(),
@@ -272,6 +279,7 @@ pub mod entity {
                 dto.id,
                 dto.client_id,
                 DebtCategory::from(dto.category),
+                ExpenseType::from_str(&dto.expense_type),
                 dto.tags,
                 dto.identification,
                 dto.description,
