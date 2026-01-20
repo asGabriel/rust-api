@@ -74,7 +74,7 @@ impl FinancialInstrumentHandler for FinancialInstrumentHandlerImpl {
             && configuration.default_due_date.is_none()
         {
             return Err(Box::new(HttpError::bad_request(
-                "Cartão de crédito requer configuração de data de vencimento",
+                "Credit card requires due date configuration",
             )));
         }
 

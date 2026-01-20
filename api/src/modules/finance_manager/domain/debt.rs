@@ -121,7 +121,7 @@ impl Debt {
                 .checked_add_months(chrono::Months::new((i - 1) as u32))
                 .ok_or_else(|| {
                     Box::new(HttpError::bad_request(format!(
-                        "Não foi possível calcular a data da parcela {}",
+                        "Could not calculate due date for installment {}",
                         i
                     )))
                 })?;
@@ -153,12 +153,12 @@ impl Debt {
     /// Checks if the payment amount is valid to be processed
     fn validate_payment_amount(&self, payment: &Payment) -> HttpResult<()> {
         if self.paid_amount >= self.total_amount {
-            return Err(Box::new(HttpError::bad_request("Débito quitado")));
+            return Err(Box::new(HttpError::bad_request("Debt already paid")));
         }
 
         if *payment.amount() > self.remaining_amount {
             return Err(Box::new(HttpError::bad_request(format!(
-                "Valor do pagamento (R$ {:.2}) ultrapassa o valor restante (R$ {:.2}). Caso queira forçar a baixa adicione 'baixa:s' ao comando",
+                "Payment amount ({:.2}) exceeds remaining amount ({:.2})",
                 payment.amount(),
                 self.remaining_amount
             ))));
@@ -190,7 +190,6 @@ impl Debt {
         (base_amount, remainder)
     }
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]

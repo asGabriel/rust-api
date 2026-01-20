@@ -164,13 +164,13 @@ pub mod use_cases {
         pub fn validate(&self) -> HttpResult<()> {
             if self.invalid_total_amount() {
                 return Err(Box::new(HttpError::bad_request(
-                    "Valor total da despesa deve ser maior que zero",
+                    "Total amount must be greater than zero",
                 )));
             }
 
             if self.invalid_installment() {
                 return Err(Box::new(HttpError::bad_request(
-                    "Número de parcelas e instrumento financeiro devem ser informados quando a despesa está parcelada",
+                    "Installment count and financial instrument must be provided for installment debts",
                 )));
             }
 
