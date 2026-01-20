@@ -22,6 +22,7 @@ pub struct Debt {
     id: Uuid,
     client_id: Uuid,
     category: DebtCategory,
+    expense_type: ExpenseType,
     tags: Vec<String>,
     identification: String,
     description: String,
@@ -46,6 +47,7 @@ impl Debt {
         discount_amount: Option<Decimal>,
         due_date: NaiveDate,
         category: Option<DebtCategory>,
+        expense_type: Option<ExpenseType>,
         tags: Option<Vec<String>>,
         installment_count: Option<i32>,
     ) -> Self {
@@ -58,6 +60,7 @@ impl Debt {
             id: uuid,
             client_id,
             category: category.unwrap_or_default(),
+            expense_type: expense_type.unwrap_or_default(),
             tags: tags.unwrap_or_default(),
             identification: String::new(),
             description,
@@ -197,28 +200,26 @@ pub enum DebtCategory {
     #[default]
     Unknown,
     Home,
-    Food,
     Transport,
     Health,
-    Entertainment,
-    ShoppingAndGifts,
+    Food,
+    Lifestyle,
     Education,
-    Services,
-    Investments,
+    Goals,
+    Personal,
 }
 
 impl From<String> for DebtCategory {
     fn from(s: String) -> Self {
         match s.as_str() {
             "HOME" => DebtCategory::Home,
-            "FOOD" => DebtCategory::Food,
             "TRANSPORT" => DebtCategory::Transport,
             "HEALTH" => DebtCategory::Health,
-            "ENTERTAINMENT" => DebtCategory::Entertainment,
-            "SHOPPING_AND_GIFTS" => DebtCategory::ShoppingAndGifts,
+            "FOOD" => DebtCategory::Food,
+            "LIFESTYLE" => DebtCategory::Lifestyle,
             "EDUCATION" => DebtCategory::Education,
-            "SERVICES" => DebtCategory::Services,
-            "INVESTMENTS" => DebtCategory::Investments,
+            "GOALS" => DebtCategory::Goals,
+            "PERSONAL" => DebtCategory::Personal,
             _ => DebtCategory::Unknown,
         }
     }
@@ -228,15 +229,39 @@ impl From<DebtCategory> for String {
     fn from(category: DebtCategory) -> Self {
         match category {
             DebtCategory::Home => "HOME".to_string(),
-            DebtCategory::Food => "FOOD".to_string(),
             DebtCategory::Transport => "TRANSPORT".to_string(),
             DebtCategory::Health => "HEALTH".to_string(),
-            DebtCategory::Entertainment => "ENTERTAINMENT".to_string(),
-            DebtCategory::ShoppingAndGifts => "SHOPPING_AND_GIFTS".to_string(),
+            DebtCategory::Food => "FOOD".to_string(),
+            DebtCategory::Lifestyle => "LIFESTYLE".to_string(),
             DebtCategory::Education => "EDUCATION".to_string(),
-            DebtCategory::Services => "SERVICES".to_string(),
-            DebtCategory::Investments => "INVESTMENTS".to_string(),
+            DebtCategory::Goals => "GOALS".to_string(),
+            DebtCategory::Personal => "PERSONAL".to_string(),
             DebtCategory::Unknown => "UNKNOWN".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ExpenseType {
+    Fixed,
+    #[default]
+    Variable,
+}
+
+impl ExpenseType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ExpenseType::Fixed => "FIXED",
+            ExpenseType::Variable => "VARIABLE",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "FIXED" => ExpenseType::Fixed,
+            "VARIABLE" => ExpenseType::Variable,
+            _ => ExpenseType::Variable,
         }
     }
 }
@@ -325,6 +350,7 @@ getters!(
         id: Uuid,
         client_id: Uuid,
         category: DebtCategory,
+        expense_type: ExpenseType,
         tags: Vec<String>,
         identification: String,
         description: String,
@@ -345,6 +371,7 @@ from_row_constructor! {
         id: Uuid,
         client_id: Uuid,
         category: DebtCategory,
+        expense_type: ExpenseType,
         tags: Vec<String>,
         identification: String,
         description: String,

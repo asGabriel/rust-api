@@ -117,6 +117,7 @@ impl ChatBotHandlerImpl {
             .debt_handler
             .register_new_debt(self.client_id, CreateDebtRequest {
                 category: None,
+                expense_type: None,
                 tags: None,
                 description: request.description.clone(),
                 total_amount: request.amount,

@@ -56,6 +56,7 @@ impl DebtHandlerImpl {
             request.discount_amount,
             request.due_date,
             request.category,
+            request.expense_type,
             request.tags,
             request.installment_count,
         );
@@ -118,12 +119,13 @@ pub mod use_cases {
     use serde::{Deserialize, Serialize};
     use uuid::Uuid;
 
-    use crate::modules::finance_manager::domain::debt::{DebtCategory, DebtStatus};
+    use crate::modules::finance_manager::domain::debt::{DebtCategory, DebtStatus, ExpenseType};
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "camelCase")]
     pub struct CreateDebtRequest {
         pub category: Option<DebtCategory>,
+        pub expense_type: Option<ExpenseType>,
         pub tags: Option<Vec<String>>,
         pub description: String,
         pub due_date: NaiveDate,
@@ -148,6 +150,7 @@ pub mod use_cases {
         ) -> Self {
             Self {
                 category,
+                expense_type: None,
                 tags,
                 description,
                 total_amount,
