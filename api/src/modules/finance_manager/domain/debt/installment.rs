@@ -51,14 +51,14 @@ impl Installment {
         Ok(())
     }
 
-    fn validate_payment(&self, payment: &Payment) -> HttpResult<()> {
+    pub fn validate_payment(&self, payment: &Payment) -> HttpResult<()> {
         if *self.is_paid() {
             return Err(Box::new(HttpError::bad_request("Installment already paid")));
         }
 
         if *payment.amount() != *self.amount() {
             return Err(Box::new(HttpError::bad_request(
-                "Valor do pagamento diferente do valor da parcela",
+                "Payment amount differs from installment amount",
             )));
         }
 

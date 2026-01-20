@@ -18,6 +18,9 @@ pub type DynPubSubHandler = dyn PubSubHandler + Send + Sync;
 
 #[async_trait]
 pub trait PubSubHandler {
+    /// Validates payment before inserting into database.
+    async fn validate_payment(&self, debt: &Debt, payment: &Payment) -> HttpResult<()>;
+
     /// Processes the debt payment and updates the debt data.
     async fn process_debt_payment(&self, debt: Debt, payment: &Payment) -> HttpResult<Debt>;
 
@@ -60,6 +63,24 @@ impl PubSubHandlerImpl {
 
 #[async_trait]
 impl PubSubHandler for PubSubHandlerImpl {
+    async fn validate_payment(&self, debt: &Debt, payment: &Payment) -> HttpResult<()> {
+        if debt.has_installments() {
+            let installments = self
+                .installment_repository
+                .list(&InstallmentFilters::new().with_debt_ids(&[*debt.id()]))
+                .await?;
+
+            let latest_installment = Installment::get_latest_unpaid(&installments)
+                .or_not_found("unpaid installment", debt.id().to_string())?;
+
+            latest_installment.validate_payment(payment)?;
+        } else {
+            debt.validate_payment_amount(payment)?;
+        }
+
+        Ok(())
+    }
+
     async fn reconcile_debt_with_actual_payment(
         &self,
         mut debt: Debt,

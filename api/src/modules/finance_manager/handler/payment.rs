@@ -23,7 +23,11 @@ use uuid::Uuid;
 #[async_trait]
 pub trait PaymentHandler {
     async fn create_payment(&self, request: CreatePaymentRequest) -> HttpResult<Payment>;
-    async fn list_payments(&self, client_id: Uuid, filters: PaymentFilters) -> HttpResult<Vec<Payment>>;
+    async fn list_payments(
+        &self,
+        client_id: Uuid,
+        filters: PaymentFilters,
+    ) -> HttpResult<Vec<Payment>>;
 }
 
 #[derive(Clone)]
@@ -41,6 +45,11 @@ impl PaymentHandler for PaymentHandlerImpl {
             self.extract_payment_data_from_request(request).await?;
         let payment = Payment::new(&debt, instrument.id(), &payment_data);
 
+        // Validate BEFORE inserting (skip validation when reconcile is true)
+        if !reconcile {
+            self.pubsub.validate_payment(&debt, &payment).await?;
+        }
+
         let payment = self.payment_repository.insert(payment).await?;
 
         if reconcile {
@@ -54,7 +63,11 @@ impl PaymentHandler for PaymentHandlerImpl {
         Ok(payment)
     }
 
-    async fn list_payments(&self, client_id: Uuid, filters: PaymentFilters) -> HttpResult<Vec<Payment>> {
+    async fn list_payments(
+        &self,
+        client_id: Uuid,
+        filters: PaymentFilters,
+    ) -> HttpResult<Vec<Payment>> {
         let filters = filters.with_client_id(client_id);
         self.payment_repository.list(&filters).await
     }
@@ -74,7 +87,10 @@ impl PaymentHandlerImpl {
                 self.financial_instrument_repository
                     .get_by_identification(&data.financial_instrument_identification)
                     .await?
-                    .or_not_found("financial_instrument", &data.financial_instrument_identification)?,
+                    .or_not_found(
+                        "financial_instrument",
+                        &data.financial_instrument_identification,
+                    )?,
                 data.payment_basic_data,
                 data.reconcile,
             ),
@@ -86,7 +102,10 @@ impl PaymentHandlerImpl {
                 self.financial_instrument_repository
                     .get_by_id(data.financial_instrument_id)
                     .await?
-                    .or_not_found("financial_instrument", data.financial_instrument_id.to_string())?,
+                    .or_not_found(
+                        "financial_instrument",
+                        data.financial_instrument_id.to_string(),
+                    )?,
                 data.payment_basic_data,
                 data.reconcile,
             ),
