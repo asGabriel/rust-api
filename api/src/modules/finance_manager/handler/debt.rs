@@ -3,16 +3,14 @@ use http_error::HttpResult;
 use uuid::Uuid;
 
 use crate::modules::finance_manager::{
-    domain::{
+    domain::
         debt::{
             installment::{Installment, InstallmentFilters},
             Debt, DebtFilters,
-        },
-        payment::Payment,
-    },
+        }
+    ,
     handler::{
-        debt::use_cases::CreateDebtRequest, payment::use_cases::PaymentBasicData,
-        pubsub::DynPubSubHandler,
+        debt::use_cases::CreateDebtRequest, pubsub::DynPubSubHandler,
     },
     repository::{
         account::DynAccountRepository,
@@ -52,6 +50,8 @@ pub struct DebtHandlerImpl {
 
 impl DebtHandlerImpl {
     async fn create_debt(&self, client_id: Uuid, request: CreateDebtRequest) -> HttpResult<Debt> {
+        request.validate()?;
+
         let debt = Debt::new(
             client_id,
             request.description,
@@ -90,28 +90,7 @@ impl DebtHandler for DebtHandlerImpl {
         client_id: Uuid,
         request: CreateDebtRequest,
     ) -> HttpResult<Debt> {
-        let mut debt = self.create_debt(client_id, request.clone()).await?;
-
-        if request.is_paid() {
-            let account_id = request.account_id.ok_or_else(|| {
-                Box::new(http_error::HttpError::bad_request(
-                    "Account ID é obrigatório quando a despesa está paga",
-                ))
-            })?;
-
-            let payment = Payment::new(
-                &debt,
-                &account_id,
-                &PaymentBasicData {
-                    amount: Some(*debt.total_amount()),
-                    payment_date: *debt.due_date(),
-                },
-            );
-
-            let payment = self.payment_repository.insert(payment).await?;
-
-            debt = self.pubsub.process_debt_payment(debt, &payment).await?;
-        }
+        let debt = self.create_debt(client_id, request.clone()).await?;
 
         Ok(debt)
     }
@@ -138,6 +117,7 @@ impl DebtHandler for DebtHandlerImpl {
 
 pub mod use_cases {
     use chrono::NaiveDate;
+    use http_error::{HttpError, HttpResult};
     use rust_decimal::Decimal;
     use serde::{Deserialize, Serialize};
     use uuid::Uuid;
@@ -183,6 +163,30 @@ pub mod use_cases {
                 account_id: None,
                 installment_count,
             }
+        }
+
+        pub fn validate(&self) -> HttpResult<()> {
+            if self.invalid_total_amount() {
+                return Err(Box::new(HttpError::bad_request(
+                    "Valor total da despesa deve ser maior que zero",
+                )));
+            }
+
+            if self.invalid_installment() {
+                return Err(Box::new(HttpError::bad_request(
+                    "Número de parcelas e conta devem ser informados quando a despesa está parcelada",
+                )));
+            }
+
+            Ok(())
+        }
+
+        fn invalid_installment(&self) -> bool {
+            self.installment_count.is_some() && self.account_id.is_some()
+        }
+
+        fn invalid_total_amount(&self) -> bool {
+            self.total_amount <= Decimal::ZERO
         }
 
         pub fn is_paid(&self) -> bool {
