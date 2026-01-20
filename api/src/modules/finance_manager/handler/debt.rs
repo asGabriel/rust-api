@@ -3,18 +3,14 @@ use http_error::HttpResult;
 use uuid::Uuid;
 
 use crate::modules::finance_manager::{
-    domain::
-        debt::{
-            installment::{Installment, InstallmentFilters},
-            Debt, DebtFilters,
-        }
-    ,
-    handler::{
-        debt::use_cases::CreateDebtRequest, pubsub::DynPubSubHandler,
+    domain::debt::{
+        installment::{Installment, InstallmentFilters},
+        Debt, DebtFilters,
     },
+    handler::{debt::use_cases::CreateDebtRequest, pubsub::DynPubSubHandler},
     repository::{
-        account::DynAccountRepository,
         debt::{installment::DynInstallmentRepository, DynDebtRepository},
+        financial_instrument::DynFinancialInstrumentRepository,
         payment::DynPaymentRepository,
         recurrence::DynRecurrenceRepository,
     },
@@ -42,7 +38,7 @@ pub trait DebtHandler {
 pub struct DebtHandlerImpl {
     pub debt_repository: Arc<DynDebtRepository>,
     pub installment_repository: Arc<DynInstallmentRepository>,
-    pub account_repository: Arc<DynAccountRepository>,
+    pub financial_instrument_repository: Arc<DynFinancialInstrumentRepository>,
     pub payment_repository: Arc<DynPaymentRepository>,
     pub recurrence_repository: Arc<DynRecurrenceRepository>,
     pub pubsub: Arc<DynPubSubHandler>,
@@ -136,7 +132,7 @@ pub mod use_cases {
         pub discount_amount: Option<Decimal>,
         pub status: Option<DebtStatus>,
         pub is_paid: bool,
-        pub account_id: Option<Uuid>,
+        pub financial_instrument_id: Option<Uuid>,
         pub installment_count: Option<i32>,
     }
 
@@ -160,7 +156,7 @@ pub mod use_cases {
                 due_date,
                 status: Some(DebtStatus::Unpaid),
                 is_paid: is_paid.unwrap_or(false),
-                account_id: None,
+                financial_instrument_id: None,
                 installment_count,
             }
         }
@@ -174,7 +170,7 @@ pub mod use_cases {
 
             if self.invalid_installment() {
                 return Err(Box::new(HttpError::bad_request(
-                    "Número de parcelas e conta devem ser informados quando a despesa está parcelada",
+                    "Número de parcelas e instrumento financeiro devem ser informados quando a despesa está parcelada",
                 )));
             }
 
@@ -182,7 +178,7 @@ pub mod use_cases {
         }
 
         fn invalid_installment(&self) -> bool {
-            self.installment_count.is_some() && self.account_id.is_some()
+            self.installment_count.is_some() && self.financial_instrument_id.is_some()
         }
 
         fn invalid_total_amount(&self) -> bool {
@@ -190,7 +186,7 @@ pub mod use_cases {
         }
 
         pub fn is_paid(&self) -> bool {
-            self.account_id.is_some()
+            self.financial_instrument_id.is_some()
         }
     }
 

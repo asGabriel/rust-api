@@ -4,14 +4,14 @@ use async_trait::async_trait;
 use http_error::{ext::OptionHttpExt, HttpResult};
 
 use crate::modules::finance_manager::{
-    domain::{account::BankAccount, debt::Debt, payment::Payment},
+    domain::{debt::Debt, financial_instrument::FinancialInstrument, payment::Payment},
     handler::{
         payment::use_cases::{CreatePaymentRequest, PaymentBasicData},
         pubsub::DynPubSubHandler,
     },
     repository::{
-        account::DynAccountRepository,
         debt::DynDebtRepository,
+        financial_instrument::DynFinancialInstrumentRepository,
         payment::{use_cases::PaymentFilters, DynPaymentRepository},
     },
 };
@@ -30,16 +30,16 @@ pub trait PaymentHandler {
 pub struct PaymentHandlerImpl {
     pub payment_repository: Arc<DynPaymentRepository>,
     pub debt_repository: Arc<DynDebtRepository>,
-    pub account_repository: Arc<DynAccountRepository>,
+    pub financial_instrument_repository: Arc<DynFinancialInstrumentRepository>,
     pub pubsub: Arc<DynPubSubHandler>,
 }
 
 #[async_trait]
 impl PaymentHandler for PaymentHandlerImpl {
     async fn create_payment(&self, request: CreatePaymentRequest) -> HttpResult<Payment> {
-        let (debt, account, payment_data, reconcile) =
+        let (debt, instrument, payment_data, reconcile) =
             self.extract_payment_data_from_request(request).await?;
-        let payment = Payment::new(&debt, account.id(), &payment_data);
+        let payment = Payment::new(&debt, instrument.id(), &payment_data);
 
         let payment = self.payment_repository.insert(payment).await?;
 
@@ -64,17 +64,17 @@ impl PaymentHandlerImpl {
     async fn extract_payment_data_from_request(
         &self,
         request: CreatePaymentRequest,
-    ) -> HttpResult<(Debt, BankAccount, PaymentBasicData, bool)> {
-        let (debt, account, payment_data, reconcile) = match request {
+    ) -> HttpResult<(Debt, FinancialInstrument, PaymentBasicData, bool)> {
+        let (debt, instrument, payment_data, reconcile) = match request {
             CreatePaymentRequest::PaymentRequestFromIdentification(data) => (
                 self.debt_repository
                     .get_by_identification(&data.debt_identification)
                     .await?
                     .or_not_found("debt", &data.debt_identification)?,
-                self.account_repository
-                    .get_by_identification(&data.account_identification)
+                self.financial_instrument_repository
+                    .get_by_identification(&data.financial_instrument_identification)
                     .await?
-                    .or_not_found("account", &data.account_identification)?,
+                    .or_not_found("financial_instrument", &data.financial_instrument_identification)?,
                 data.payment_basic_data,
                 data.reconcile,
             ),
@@ -83,16 +83,16 @@ impl PaymentHandlerImpl {
                     .get_by_id(&data.debt_id)
                     .await?
                     .or_not_found("debt", data.debt_id.to_string())?,
-                self.account_repository
-                    .get_by_id(data.account_id)
+                self.financial_instrument_repository
+                    .get_by_id(data.financial_instrument_id)
                     .await?
-                    .or_not_found("account", data.account_id.to_string())?,
+                    .or_not_found("financial_instrument", data.financial_instrument_id.to_string())?,
                 data.payment_basic_data,
                 data.reconcile,
             ),
         };
 
-        Ok((debt, account, payment_data, reconcile))
+        Ok((debt, instrument, payment_data, reconcile))
     }
 }
 
@@ -115,7 +115,7 @@ pub mod use_cases {
     #[serde(rename_all = "camelCase")]
     pub struct PaymentRequestFromIdentification {
         pub debt_identification: String,
-        pub account_identification: String,
+        pub financial_instrument_identification: String,
         #[serde(default)]
         pub reconcile: bool,
         #[serde(flatten)]
@@ -126,7 +126,7 @@ pub mod use_cases {
     #[serde(rename_all = "camelCase")]
     pub struct PaymentRequestFromUuid {
         pub debt_id: Uuid,
-        pub account_id: Uuid,
+        pub financial_instrument_id: Uuid,
         #[serde(default)]
         pub reconcile: bool,
         #[serde(flatten)]

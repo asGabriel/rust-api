@@ -8,7 +8,7 @@ use crate::modules::finance_manager::{
     domain::income::Income,
     handler::income::use_cases::CreateIncomeRequest,
     repository::{
-        account::DynAccountRepository,
+        financial_instrument::DynFinancialInstrumentRepository,
         income::{use_cases::IncomeListFilters, DynIncomeRepository},
     },
 };
@@ -24,7 +24,7 @@ pub type DynIncomeHandler = dyn IncomeHandler + Send + Sync;
 #[derive(Clone)]
 pub struct IncomeHandlerImpl {
     pub income_repository: Arc<DynIncomeRepository>,
-    pub account_repository: Arc<DynAccountRepository>,
+    pub financial_instrument_repository: Arc<DynFinancialInstrumentRepository>,
 }
 
 #[async_trait]
@@ -35,13 +35,13 @@ impl IncomeHandler for IncomeHandlerImpl {
     }
 
     async fn create_income(&self, client_id: Uuid, request: CreateIncomeRequest) -> HttpResult<Income> {
-        let account = self
-            .account_repository
-            .get_by_identification(&request.account_identification)
+        let instrument = self
+            .financial_instrument_repository
+            .get_by_identification(&request.financial_instrument_identification)
             .await?
-            .or_not_found("account", &request.account_identification)?;
+            .or_not_found("financial_instrument", &request.financial_instrument_identification)?;
 
-        let income = Income::from_request(request, client_id, *account.id());
+        let income = Income::from_request(request, client_id, *instrument.id());
         let income = self.income_repository.insert(income).await?;
 
         Ok(income)
@@ -56,7 +56,7 @@ pub mod use_cases {
     #[derive(Debug, Clone, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct CreateIncomeRequest {
-        pub account_identification: String,
+        pub financial_instrument_identification: String,
         pub description: String,
         pub amount: Decimal,
         pub date_reference: NaiveDate,

@@ -21,8 +21,10 @@ use crate::modules::{
     finance_manager::{
         domain::debt::DebtStatus,
         handler::{
-            account::{use_cases::AccountListFilters, DynAccountHandler},
             debt::{use_cases::CreateDebtRequest, DynDebtHandler},
+            financial_instrument::{
+                use_cases::FinancialInstrumentListFilters, DynFinancialInstrumentHandler,
+            },
             income::{use_cases::CreateIncomeRequest, DynIncomeHandler},
             payment::{
                 use_cases::{
@@ -45,7 +47,7 @@ pub trait ChatBotHandler {
 pub struct ChatBotHandlerImpl {
     pub telegram_gateway: Arc<DynTelegramApiGateway>,
     pub debt_handler: Arc<DynDebtHandler>,
-    pub account_handler: Arc<DynAccountHandler>,
+    pub financial_instrument_handler: Arc<DynFinancialInstrumentHandler>,
     pub payment_handler: Arc<DynPaymentHandler>,
     pub income_handler: Arc<DynIncomeHandler>,
     pub client_id: Uuid,
@@ -88,25 +90,25 @@ impl ChatBotHandlerImpl {
     }
 
     async fn handle_new_debt(&self, request: NewDebtData, chat_id: i64) -> HttpResult<()> {
-        let account_id = if let Some(account_identification) = &request.account_identification {
-            let account = self
-                .account_handler
-                .list_accounts(
+        let instrument_id = if let Some(instrument_identification) = &request.account_identification {
+            let instrument = self
+                .financial_instrument_handler
+                .list_financial_instruments(
                     self.client_id,
-                    AccountListFilters::new()
-                        .with_identifications(vec![account_identification.clone()]),
+                    FinancialInstrumentListFilters::new()
+                        .with_identifications(vec![instrument_identification.clone()]),
                 )
                 .await?
                 .into_iter()
                 .next()
                 .ok_or_else(|| {
                     Box::new(http_error::HttpError::not_found(
-                        "account",
-                        account_identification.clone(),
+                        "financial_instrument",
+                        instrument_identification.clone(),
                     ))
                 })?;
 
-            Some(*account.id())
+            Some(*instrument.id())
         } else {
             None
         };
@@ -123,7 +125,7 @@ impl ChatBotHandlerImpl {
                 due_date: request.due_date,
                 status: Some(DebtStatus::Unpaid),
                 is_paid: request.is_paid(),
-                account_id,
+                financial_instrument_id: instrument_id,
                 installment_count: request.installment_number,
             })
             .await;
@@ -142,15 +144,15 @@ impl ChatBotHandlerImpl {
         Ok(())
     }
 
-    async fn handle_list_accounts(&self, chat_id: i64) -> HttpResult<()> {
+    async fn handle_list_financial_instruments(&self, chat_id: i64) -> HttpResult<()> {
         let result = self
-            .account_handler
-            .list_accounts(self.client_id, AccountListFilters::default())
+            .financial_instrument_handler
+            .list_financial_instruments(self.client_id, FinancialInstrumentListFilters::default())
             .await;
 
         let message = match result {
-            Ok(accounts) => ChatFormatter::format_list_for_chat(&accounts),
-            Err(e) => format!("❌ Erro ao listar contas: {}", e.message),
+            Ok(instruments) => ChatFormatter::format_list_for_chat(&instruments),
+            Err(e) => format!("❌ Erro ao listar instrumentos financeiros: {}", e.message),
         };
 
         self.send_message(chat_id, message).await?;
@@ -169,7 +171,7 @@ impl ChatBotHandlerImpl {
             .create_payment(CreatePaymentRequest::PaymentRequestFromIdentification(
                 PaymentRequestFromIdentification {
                     debt_identification: payment.debt_identification,
-                    account_identification: payment.account_identification,
+                    financial_instrument_identification: payment.account_identification,
                     reconcile: payment.settled,
                     payment_basic_data: PaymentBasicData {
                         amount: payment.amount,
@@ -207,7 +209,7 @@ impl ChatBotHandlerImpl {
         let result = self
             .income_handler
             .create_income(self.client_id, CreateIncomeRequest {
-                account_identification: income.account_identification,
+                financial_instrument_identification: income.account_identification,
                 description: income.description,
                 amount: income.amount,
                 date_reference: income.date_reference,
@@ -248,7 +250,7 @@ impl ChatBotHandler for ChatBotHandlerImpl {
                 Ok(())
             }
             ChatCommandType::ListAccounts => {
-                self.handle_list_accounts(chat_id).await?;
+                self.handle_list_financial_instruments(chat_id).await?;
                 Ok(())
             }
             ChatCommandType::NewDebt(payload) => {

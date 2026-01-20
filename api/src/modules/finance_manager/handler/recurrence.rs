@@ -6,7 +6,7 @@ use http_error::{ext::OptionHttpExt, HttpResult};
 use crate::modules::finance_manager::{
     domain::debt::recurrence::{Recurrence, RecurrenceFilters},
     handler::recurrence::use_cases::CreateRecurrenceRequest,
-    repository::{account::DynAccountRepository, recurrence::DynRecurrenceRepository},
+    repository::{financial_instrument::DynFinancialInstrumentRepository, recurrence::DynRecurrenceRepository},
 };
 
 pub type DynRecurrenceHandler = dyn RecurrenceHandler + Send + Sync;
@@ -14,17 +14,17 @@ pub type DynRecurrenceHandler = dyn RecurrenceHandler + Send + Sync;
 #[derive(Clone)]
 pub struct RecurrenceHandlerImpl {
     pub recurrence_repository: Arc<DynRecurrenceRepository>,
-    pub account_repository: Arc<DynAccountRepository>,
+    pub financial_instrument_repository: Arc<DynFinancialInstrumentRepository>,
 }
 
 impl RecurrenceHandlerImpl {
     pub fn new(
         recurrence_repository: Arc<DynRecurrenceRepository>,
-        account_repository: Arc<DynAccountRepository>,
+        financial_instrument_repository: Arc<DynFinancialInstrumentRepository>,
     ) -> Self {
         Self {
             recurrence_repository,
-            account_repository,
+            financial_instrument_repository,
         }
     }
 }
@@ -44,13 +44,13 @@ impl RecurrenceHandler for RecurrenceHandlerImpl {
     }
 
     async fn create_recurrence(&self, request: CreateRecurrenceRequest) -> HttpResult<Recurrence> {
-        let account = self
-            .account_repository
-            .get_by_identification(&request.account_identification)
+        let instrument = self
+            .financial_instrument_repository
+            .get_by_identification(&request.financial_instrument_identification)
             .await?
-            .or_not_found("account", &request.account_identification)?;
+            .or_not_found("financial_instrument", &request.financial_instrument_identification)?;
 
-        let recurrence = Recurrence::from_request(request, *account.id());
+        let recurrence = Recurrence::from_request(request, *instrument.id());
         let recurrence_created = self.recurrence_repository.insert(recurrence).await?;
 
         Ok(recurrence_created)
@@ -65,7 +65,7 @@ pub mod use_cases {
     #[derive(Debug, Clone, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct CreateRecurrenceRequest {
-        pub account_identification: String,
+        pub financial_instrument_identification: String,
         pub description: String,
         pub amount: Decimal,
         pub start_date: NaiveDate,
