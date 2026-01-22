@@ -366,6 +366,33 @@ getters!(
     }
 );
 
+impl Debt {
+    pub fn set_category(&mut self, category: DebtCategory) {
+        self.category = category;
+        self.updated_at = Some(Utc::now());
+    }
+
+    pub fn set_expense_type(&mut self, expense_type: ExpenseType) {
+        self.expense_type = expense_type;
+        self.updated_at = Some(Utc::now());
+    }
+
+    pub fn set_tags(&mut self, tags: Vec<String>) {
+        self.tags = tags;
+        self.updated_at = Some(Utc::now());
+    }
+
+    pub fn set_description(&mut self, description: String) {
+        self.description = description;
+        self.updated_at = Some(Utc::now());
+    }
+
+    pub fn set_due_date(&mut self, due_date: NaiveDate) {
+        self.due_date = due_date;
+        self.updated_at = Some(Utc::now());
+    }
+}
+
 from_row_constructor! {
     Debt {
         id: Uuid,

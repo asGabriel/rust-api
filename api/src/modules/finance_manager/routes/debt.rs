@@ -1,10 +1,17 @@
-use axum::{extract::State, http::HeaderMap, response::IntoResponse, routing::post, Json, Router};
+use axum::{
+    extract::{Path, State},
+    http::HeaderMap,
+    response::IntoResponse,
+    routing::{patch, post},
+    Json, Router,
+};
 use http_error::HttpResult;
+use uuid::Uuid;
 
 use crate::modules::{
     finance_manager::{
         domain::debt::{installment::InstallmentFilters, DebtFilters},
-        handler::debt::use_cases::CreateDebtRequest,
+        handler::debt::use_cases::{CreateDebtRequest, UpdateDebtRequest},
     },
     routes::AppState,
 };
@@ -19,12 +26,31 @@ pub fn configure_routes() -> Router<AppState> {
         Router::new().route("/list", post(list_debt_installments)),
     );
 
+    let debt_id_routes =
+        Router::new().nest("/:debt_id", Router::new().route("/", patch(update_debt)));
+
     Router::new().nest(
         "/debt",
         Router::new()
             .merge(main_debt_routes)
-            .merge(installment_routes),
+            .merge(installment_routes)
+            .merge(debt_id_routes),
     )
+}
+
+async fn update_debt(
+    state: State<AppState>,
+    headers: HeaderMap,
+    Path(debt_id): Path<Uuid>,
+    Json(request): Json<UpdateDebtRequest>,
+) -> HttpResult<impl IntoResponse> {
+    let user = state.auth_state.auth_handler.authenticate(&headers).await?;
+    let debt = state
+        .finance_manager_state
+        .debt_handler
+        .update_debt(*user.client_id(), debt_id, request)
+        .await?;
+    Ok(Json(debt))
 }
 
 async fn list_debt_installments(
