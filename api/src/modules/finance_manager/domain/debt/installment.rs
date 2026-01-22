@@ -21,6 +21,7 @@ pub struct Installment {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct InstallmentFilters {
     pub debt_ids: Option<Vec<Uuid>>,
     pub is_paid: Option<bool>,
