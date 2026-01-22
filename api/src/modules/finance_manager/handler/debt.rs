@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use http_error::HttpResult;
+use http_error::{ext::OptionHttpExt, HttpResult};
 use uuid::Uuid;
 
 use crate::modules::finance_manager::{
@@ -7,13 +7,8 @@ use crate::modules::finance_manager::{
         installment::{Installment, InstallmentFilters},
         Debt, DebtFilters,
     },
-    handler::{debt::use_cases::CreateDebtRequest, pubsub::DynPubSubHandler},
-    repository::{
-        debt::{installment::DynInstallmentRepository, DynDebtRepository},
-        financial_instrument::DynFinancialInstrumentRepository,
-        payment::DynPaymentRepository,
-        recurrence::DynRecurrenceRepository,
-    },
+    handler::debt::use_cases::{CreateDebtRequest, UpdateDebtRequest},
+    repository::debt::{installment::DynInstallmentRepository, DynDebtRepository},
 };
 use std::sync::Arc;
 
@@ -21,6 +16,12 @@ pub type DynDebtHandler = dyn DebtHandler + Send + Sync;
 
 #[async_trait]
 pub trait DebtHandler {
+    async fn update_debt(
+        &self,
+        client_id: Uuid,
+        debt_id: Uuid,
+        request: UpdateDebtRequest,
+    ) -> HttpResult<Debt>;
     async fn list_debts(&self, client_id: Uuid, filters: &DebtFilters) -> HttpResult<Vec<Debt>>;
     async fn register_new_debt(
         &self,
@@ -38,10 +39,6 @@ pub trait DebtHandler {
 pub struct DebtHandlerImpl {
     pub debt_repository: Arc<DynDebtRepository>,
     pub installment_repository: Arc<DynInstallmentRepository>,
-    pub financial_instrument_repository: Arc<DynFinancialInstrumentRepository>,
-    pub payment_repository: Arc<DynPaymentRepository>,
-    pub recurrence_repository: Arc<DynRecurrenceRepository>,
-    pub pubsub: Arc<DynPubSubHandler>,
 }
 
 impl DebtHandlerImpl {
@@ -75,6 +72,43 @@ impl DebtHandlerImpl {
 
 #[async_trait]
 impl DebtHandler for DebtHandlerImpl {
+    async fn update_debt(
+        &self,
+        client_id: Uuid,
+        debt_id: Uuid,
+        request: UpdateDebtRequest,
+    ) -> HttpResult<Debt> {
+        let mut debt = self
+            .debt_repository
+            .get_by_id(&debt_id)
+            .await?
+            .or_not_found("debt", debt_id.to_string())?;
+
+        if debt.client_id() != &client_id {
+            return Err(Box::new(http_error::HttpError::forbidden(
+                "You don't have permission to update this debt",
+            )));
+        }
+
+        if let Some(category) = request.category {
+            debt.set_category(category);
+        }
+        if let Some(expense_type) = request.expense_type {
+            debt.set_expense_type(expense_type);
+        }
+        if let Some(tags) = request.tags {
+            debt.set_tags(tags);
+        }
+        if let Some(description) = request.description {
+            debt.set_description(description);
+        }
+        if let Some(due_date) = request.due_date {
+            debt.set_due_date(due_date);
+        }
+
+        self.debt_repository.update(debt).await
+    }
+
     async fn list_debt_installments(
         &self,
         filters: &InstallmentFilters,
@@ -190,5 +224,15 @@ pub mod use_cases {
     #[serde(rename_all = "camelCase")]
     pub struct CreateCategoryRequest {
         pub name: String,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct UpdateDebtRequest {
+        pub category: Option<DebtCategory>,
+        pub expense_type: Option<ExpenseType>,
+        pub tags: Option<Vec<String>>,
+        pub description: Option<String>,
+        pub due_date: Option<NaiveDate>,
     }
 }

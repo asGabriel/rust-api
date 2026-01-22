@@ -34,7 +34,7 @@ async fn main() {
 
     // Build handlers
     let payment_handler = build_payment_handler(pool, &pubsub);
-    let debt_handler = build_debt_handler(pool, &pubsub);
+    let debt_handler = build_debt_handler(pool);
     let financial_instrument_handler = build_financial_instrument_handler(pool);
     let recurrence_handler = build_recurrence_handler(pool);
     let income_handler = build_income_handler(pool);
@@ -104,14 +104,10 @@ fn build_payment_handler(pool: &Pool<Postgres>, pubsub: &PubSubHandlerImpl) -> P
     }
 }
 
-fn build_debt_handler(pool: &Pool<Postgres>, pubsub: &PubSubHandlerImpl) -> DebtHandlerImpl {
+fn build_debt_handler(pool: &Pool<Postgres>) -> DebtHandlerImpl {
     DebtHandlerImpl {
         debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
-        financial_instrument_repository: Arc::new(FinancialInstrumentRepositoryImpl::new(pool)),
-        payment_repository: Arc::new(PaymentRepositoryImpl::new(pool)),
         installment_repository: Arc::new(InstallmentRepositoryImpl::new(pool)),
-        recurrence_repository: Arc::new(RecurrenceRepositoryImpl::new(pool)),
-        pubsub: Arc::new(pubsub.clone()),
     }
 }
 
