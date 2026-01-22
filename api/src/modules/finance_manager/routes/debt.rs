@@ -27,7 +27,7 @@ pub fn configure_routes() -> Router<AppState> {
     );
 
     let debt_id_routes =
-        Router::new().nest("/:debt_id", Router::new().route("/", patch(update_debt)));
+        Router::new().nest("/{debt_id}", Router::new().route("/", patch(update_debt)));
 
     Router::new().nest(
         "/debt",
