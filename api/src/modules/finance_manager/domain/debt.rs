@@ -33,6 +33,8 @@ pub struct Debt {
     due_date: NaiveDate,
     #[serde(default)]
     status: DebtStatus,
+    #[serde(default)]
+    payment_progress: PaymentProgress,
     installment_count: Option<i32>,
     created_at: DateTime<Utc>,
     updated_at: Option<DateTime<Utc>>,
@@ -266,23 +268,39 @@ impl ExpenseType {
     }
 }
 
+/// Represents the temporal status of a debt
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DebtStatus {
-    /// The debt is unpaid; a.k.a. "Nova dívida"
+    /// No overdue payments. A.k.a. "Em dia"
+    #[default]
+    Current,
+    /// Has overdue amount. A.k.a. "Vencida"
+    Overdue,
+    /// Fully paid. A.k.a. "Quitada"
+    Settled
+}
+
+/// Represents the progress of a payment
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum PaymentProgress {
+    /// Nothing paid yet
     #[default]
     Unpaid,
-    /// The debt is partially paid; a.k.a. "Dívida parcialmente paga"
+    /// Partially paid (with remaining balance)
     PartiallyPaid,
-    /// The debt is settled; a.k.a. "Dívida paga"
-    Settled,
+    /// Fully paid
+    Paid,
 }
+
+
 
 impl From<String> for DebtStatus {
     fn from(s: String) -> Self {
         match s.as_str() {
-            "UNPAID" => DebtStatus::Unpaid,
-            "PARTIALLY_PAID" => DebtStatus::PartiallyPaid,
+            "CURRENT" => DebtStatus::Current,
+            "OVERDUE" => DebtStatus::Overdue,
             "SETTLED" => DebtStatus::Settled,
             _ => DebtStatus::default(),
         }
@@ -294,12 +312,12 @@ impl From<&str> for DebtStatus {
         let s_upper = s.to_uppercase();
         match s_upper.as_str() {
             // Valores em inglês (banco de dados)
-            "UNPAID" => DebtStatus::Unpaid,
-            "PARTIALLY_PAID" => DebtStatus::PartiallyPaid,
+            "CURRENT" => DebtStatus::Current,
+            "OVERDUE" => DebtStatus::Overdue,
             "SETTLED" => DebtStatus::Settled,
             // Valores em português (interface do usuário)
-            "PENDENTE" => DebtStatus::Unpaid,
-            "PARCIAL" => DebtStatus::PartiallyPaid,
+            "PENDENTE" => DebtStatus::Current,
+            "VENCIDA" => DebtStatus::Overdue,
             "PAGO" => DebtStatus::Settled,
             _ => DebtStatus::default(),
         }
@@ -309,8 +327,8 @@ impl From<&str> for DebtStatus {
 impl From<DebtStatus> for String {
     fn from(status: DebtStatus) -> Self {
         match status {
-            DebtStatus::Unpaid => "UNPAID".to_string(),
-            DebtStatus::PartiallyPaid => "PARTIALLY_PAID".to_string(),
+            DebtStatus::Current => "CURRENT".to_string(),
+            DebtStatus::Overdue => "OVERDUE".to_string(),
             DebtStatus::Settled => "SETTLED".to_string(),
         }
     }
@@ -319,8 +337,8 @@ impl From<DebtStatus> for String {
 impl std::fmt::Display for DebtStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
-            DebtStatus::Unpaid => "UNPAID",
-            DebtStatus::PartiallyPaid => "PARTIALLY_PAID",
+            DebtStatus::Current => "CURRENT",
+            DebtStatus::Overdue => "OVERDUE",
             DebtStatus::Settled => "SETTLED",
         };
         write!(f, "{}", s)
@@ -330,16 +348,17 @@ impl std::fmt::Display for DebtStatus {
 impl DebtStatus {
     pub fn emoji(&self) -> &'static str {
         match self {
-            DebtStatus::Unpaid => "🔴",
-            DebtStatus::PartiallyPaid => "🟡",
+            DebtStatus::Current => "🟢",
+            DebtStatus::Overdue => "🔴",
             DebtStatus::Settled => "🟢",
         }
     }
 
     pub fn to_pt_br(&self) -> &'static str {
         match self {
-            DebtStatus::Unpaid => "Em aberto",
-            DebtStatus::PartiallyPaid => "Parcialmente pago",
+            DebtStatus::Current => "Em dia",
+            DebtStatus::Overdue => "Vencida",
+            DebtStatus::Settled => "Quitada",
             DebtStatus::Settled => "Pago",
         }
     }
