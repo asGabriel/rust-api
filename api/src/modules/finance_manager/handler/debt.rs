@@ -4,11 +4,10 @@ use uuid::Uuid;
 
 use crate::modules::finance_manager::{
     domain::debt::{
-        installment::{Installment, InstallmentFilters},
-        Debt, DebtFilters,
+        Debt, DebtFilters, installment::{Installment, InstallmentFilters}, recurrence::{Recurrence, RecurrenceFilters}
     },
-    handler::debt::use_cases::{CreateDebtRequest, UpdateDebtRequest},
-    repository::debt::{installment::DynInstallmentRepository, DynDebtRepository},
+    handler::{debt::use_cases::{CreateDebtRequest, UpdateDebtRequest}, recurrence::use_cases::CreateRecurrenceRequest},
+    repository::{debt::{DynDebtRepository, installment::DynInstallmentRepository}, financial_instrument::DynFinancialInstrumentRepository, recurrence::DynRecurrenceRepository},
 };
 use std::sync::Arc;
 
@@ -22,7 +21,9 @@ pub trait DebtHandler {
         debt_id: Uuid,
         request: UpdateDebtRequest,
     ) -> HttpResult<Debt>;
+
     async fn list_debts(&self, client_id: Uuid, filters: &DebtFilters) -> HttpResult<Vec<Debt>>;
+
     async fn register_new_debt(
         &self,
         client_id: Uuid,
@@ -33,12 +34,26 @@ pub trait DebtHandler {
         &self,
         filters: &InstallmentFilters,
     ) -> HttpResult<Vec<Installment>>;
+
+    async fn create_recurrence(
+        &self,
+        client_id: Uuid,
+        request: CreateRecurrenceRequest,
+    ) -> HttpResult<Recurrence>;
+
+    async fn list_recurrences(
+        &self,
+        client_id: Uuid,
+        filters: &RecurrenceFilters,
+    ) -> HttpResult<Vec<Recurrence>>;
 }
 
 #[derive(Clone)]
 pub struct DebtHandlerImpl {
     pub debt_repository: Arc<DynDebtRepository>,
+    pub financial_instrument_repository: Arc<DynFinancialInstrumentRepository>,
     pub installment_repository: Arc<DynInstallmentRepository>,
+    pub recurrence_repository: Arc<DynRecurrenceRepository>,
 }
 
 impl DebtHandlerImpl {
@@ -72,6 +87,27 @@ impl DebtHandlerImpl {
 
 #[async_trait]
 impl DebtHandler for DebtHandlerImpl {
+    // TODO: Add client_id to the database
+    async fn list_recurrences(&self, _client_id: Uuid, filters: &RecurrenceFilters) -> HttpResult<Vec<Recurrence>> {
+        self.recurrence_repository
+            .list(filters)
+            .await
+    }
+
+    // TODO: Add client_id to the database
+    async fn create_recurrence(&self, _client_id: Uuid, request: CreateRecurrenceRequest) -> HttpResult<Recurrence> {
+        let instrument = self
+            .financial_instrument_repository
+            .get_by_identification(&request.financial_instrument_identification)
+            .await?
+            .or_not_found("financial_instrument", &request.financial_instrument_identification)?;
+
+        let recurrence = Recurrence::from_request(request, *instrument.id());
+        let recurrence_created = self.recurrence_repository.insert(recurrence).await?;
+
+        Ok(recurrence_created)
+    }
+    
     async fn update_debt(
         &self,
         client_id: Uuid,

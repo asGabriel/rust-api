@@ -108,6 +108,8 @@ fn build_debt_handler(pool: &Pool<Postgres>) -> DebtHandlerImpl {
     DebtHandlerImpl {
         debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
         installment_repository: Arc::new(InstallmentRepositoryImpl::new(pool)),
+        recurrence_repository: Arc::new(RecurrenceRepositoryImpl::new(pool)),
+        financial_instrument_repository: Arc::new(FinancialInstrumentRepositoryImpl::new(pool)),
     }
 }
 
