@@ -152,6 +152,12 @@ impl DebtRepository for DebtRepositoryImpl {
     async fn list(&self, filters: &DebtFilters) -> HttpResult<Vec<Debt>> {
         let mut builder = QueryBuilder::new("SELECT * FROM finance_manager.debt WHERE 1=1");
 
+        if let Some(ids) = filters.ids() {
+            builder.push(" AND id = ANY(");
+            builder.push_bind(ids);
+            builder.push(")");
+        }
+
         if let Some(client_id) = filters.client_id() {
             builder.push(" AND client_id = ");
             builder.push_bind(client_id);
