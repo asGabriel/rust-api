@@ -53,17 +53,11 @@ impl Debt {
             - paid_amount.unwrap_or(Decimal::ZERO)
             - discount_amount.unwrap_or(Decimal::ZERO);
 
-        let expense_type = if installment_count.map(|n| n > 0).unwrap_or(false) {
-            ExpenseType::Fixed
-        } else {
-            expense_type.unwrap_or_default()
-        };
-
         Self {
             id: uuid,
             client_id,
             category: category.unwrap_or_default(),
-            expense_type,
+            expense_type: expense_type.unwrap_or_default(),
             tags: tags.unwrap_or_default(),
             identification: String::new(),
             description,
