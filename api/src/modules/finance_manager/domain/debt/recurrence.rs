@@ -5,7 +5,7 @@ use util::{date::date_with_day_or_last, from_row_constructor, getters};
 use uuid::Uuid;
 
 use crate::modules::finance_manager::{
-    domain::debt::{Debt, ExpenseType},
+    domain::debt::{Debt, DebtCategory, ExpenseType},
     handler::debt::use_cases::CreateRecurrenceRequest,
 };
 
@@ -17,6 +17,7 @@ pub struct Recurrence {
     client_id: Uuid,
     description: String,
     amount: Decimal,
+    category: DebtCategory,
     active: bool,
     start_date: NaiveDate,
     end_date: Option<NaiveDate>,
@@ -73,6 +74,7 @@ impl Recurrence {
             client_id,
             description: request.description,
             amount: request.amount,
+            category: request.category.unwrap_or_default(),
             active: true,
             start_date: request.start_date,
             end_date: request.end_date,
@@ -129,7 +131,7 @@ impl Recurrence {
             None,
             None,
             due_date,
-            None,
+            Some(self.category.clone()),
             Some(ExpenseType::Fixed),
             None,
             None,
@@ -163,6 +165,7 @@ getters! {
         client_id: Uuid,
         description: String,
         amount: Decimal,
+        category: DebtCategory,
         active: bool,
         start_date: NaiveDate,
         end_date: Option<NaiveDate>,
@@ -179,6 +182,7 @@ from_row_constructor! {
         client_id: Uuid,
         description: String,
         amount: Decimal,
+        category: DebtCategory,
         active: bool,
         start_date: NaiveDate,
         end_date: Option<NaiveDate>,

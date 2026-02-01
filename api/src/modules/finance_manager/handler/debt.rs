@@ -437,6 +437,7 @@ pub mod use_cases {
     pub struct CreateRecurrenceRequest {
         pub description: String,
         pub amount: Decimal,
+        pub category: Option<DebtCategory>,
         pub start_date: NaiveDate,
         pub end_date: Option<NaiveDate>,
         pub day_of_month: i32,

@@ -60,6 +60,7 @@ impl RecurrenceRepository for RecurrenceRepositoryImpl {
                 client_id: r.get("client_id"),
                 description: r.get("description"),
                 amount: r.get("amount"),
+                category: r.get::<String, _>("category").into(),
                 active: r.get("active"),
                 start_date: r.get("start_date"),
                 end_date: r.get("end_date"),
@@ -85,6 +86,7 @@ impl RecurrenceRepository for RecurrenceRepositoryImpl {
                 client_id: r.get("client_id"),
                 description: r.get("description"),
                 amount: r.get("amount"),
+                category: r.get::<String, _>("category").into(),
                 active: r.get("active"),
                 start_date: r.get("start_date"),
                 end_date: r.get("end_date"),
@@ -101,15 +103,16 @@ impl RecurrenceRepository for RecurrenceRepositoryImpl {
 
         let row = sqlx::query(
             r#"
-            INSERT INTO finance_manager.recurrence (id, client_id, description, amount, active, start_date, end_date, day_of_month, execution_logs, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-            RETURNING id, client_id, description, amount, active, start_date, end_date, day_of_month, execution_logs, created_at, updated_at
+            INSERT INTO finance_manager.recurrence (id, client_id, description, amount, category, active, start_date, end_date, day_of_month, execution_logs, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            RETURNING id, client_id, description, amount, category, active, start_date, end_date, day_of_month, execution_logs, created_at, updated_at
         "#
         )
         .bind(payload.id)
         .bind(payload.client_id)
         .bind(payload.description)
         .bind(payload.amount)
+        .bind(String::from(payload.category.clone()))
         .bind(payload.active)
         .bind(payload.start_date)
         .bind(payload.end_date)
@@ -125,6 +128,7 @@ impl RecurrenceRepository for RecurrenceRepositoryImpl {
             client_id: row.get("client_id"),
             description: row.get("description"),
             amount: row.get("amount"),
+            category: row.get::<String, _>("category").into(),
             active: row.get("active"),
             start_date: row.get("start_date"),
             end_date: row.get("end_date"),
@@ -143,17 +147,18 @@ impl RecurrenceRepository for RecurrenceRepositoryImpl {
         let row = sqlx::query(
             r#"
             UPDATE finance_manager.recurrence 
-            SET description = $2, amount = $3, active = $4, 
-                start_date = $5, end_date = $6, day_of_month = $7, 
-                execution_logs = $8, updated_at = $9
+            SET description = $2, amount = $3, category = $4, active = $5, 
+                start_date = $6, end_date = $7, day_of_month = $8, 
+                execution_logs = $9, updated_at = $10
             WHERE id = $1
-            RETURNING id, client_id, description, amount, active, start_date, end_date, 
+            RETURNING id, client_id, description, amount, category, active, start_date, end_date, 
                       day_of_month, execution_logs, created_at, updated_at
             "#,
         )
         .bind(payload.id)
         .bind(payload.description)
         .bind(payload.amount)
+        .bind(String::from(payload.category.clone()))
         .bind(payload.active)
         .bind(payload.start_date)
         .bind(payload.end_date)
@@ -168,6 +173,7 @@ impl RecurrenceRepository for RecurrenceRepositoryImpl {
             client_id: row.get("client_id"),
             description: row.get("description"),
             amount: row.get("amount"),
+            category: row.get::<String, _>("category").into(),
             active: row.get("active"),
             start_date: row.get("start_date"),
             end_date: row.get("end_date"),
@@ -188,8 +194,9 @@ mod entity {
     use sqlx::types::Json;
     use uuid::Uuid;
 
-    use crate::modules::finance_manager::domain::debt::recurrence::{
-        Recurrence, RecurrenceExecutionLog,
+    use crate::modules::finance_manager::domain::debt::{
+        recurrence::{Recurrence, RecurrenceExecutionLog},
+        DebtCategory,
     };
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -199,6 +206,7 @@ mod entity {
         pub client_id: Uuid,
         pub description: String,
         pub amount: Decimal,
+        pub category: DebtCategory,
         pub active: bool,
         pub start_date: NaiveDate,
         pub end_date: Option<NaiveDate>,
@@ -215,6 +223,7 @@ mod entity {
                 client_id: *recurrence.client_id(),
                 description: recurrence.description().to_string(),
                 amount: *recurrence.amount(),
+                category: recurrence.category().clone(),
                 active: *recurrence.active(),
                 start_date: *recurrence.start_date(),
                 end_date: *recurrence.end_date(),
@@ -233,6 +242,7 @@ mod entity {
                 entity.client_id,
                 entity.description,
                 entity.amount,
+                entity.category,
                 entity.active,
                 entity.start_date,
                 entity.end_date,
