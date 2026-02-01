@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use chrono::{Datelike, Utc};
+use chrono::{Datelike, NaiveDate, Utc};
 use http_error::{ext::OptionHttpExt, HttpResult};
 use uuid::Uuid;
 
@@ -144,6 +144,42 @@ impl DebtHandlerImpl {
         let installments = debt.generate_installments(due_day)?;
         Ok(Some(installments))
     }
+
+    /// Fetches debts that have installments with due_date in the given period and appends them
+    /// to the list, excluding ids that are already in `debts`.
+    async fn append_debts_with_installments_in_period(
+        &self,
+        debts: &mut Vec<Debt>,
+        client_id: Uuid,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+    ) -> HttpResult<()> {
+        let installment_filters = InstallmentFilters::new()
+            .with_start_date(start_date)
+            .with_end_date(end_date);
+        let installments = self.installment_repository.list(&installment_filters).await?;
+
+        let existing_debt_ids: std::collections::HashSet<_> =
+            debts.iter().map(|d| *d.id()).collect();
+
+        let debt_ids: Vec<Uuid> = installments
+            .iter()
+            .map(|i| *i.debt_id())
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .filter(|id| !existing_debt_ids.contains(id))
+            .collect();
+
+        if !debt_ids.is_empty() {
+            let debt_installments = self
+                .debt_repository
+                .list(&DebtFilters::new(client_id).with_ids(debt_ids))
+                .await?;
+            debts.extend(debt_installments);
+        }
+
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -283,22 +319,26 @@ impl DebtHandler for DebtHandlerImpl {
     }
 
     async fn list_debts(&self, client_id: Uuid, filters: &DebtFilters) -> HttpResult<Vec<Debt>> {
-        let mut new_filters = DebtFilters::new(client_id);
+        let filters = DebtFilters::new(client_id)
+            .with_optional_statuses(filters.statuses().clone())
+            .with_optional_ids(filters.ids().clone())
+            .with_optional_start_date(filters.start_date().clone())
+            .with_optional_end_date(filters.end_date().clone())
+            .with_optional_category_names(filters.category_names().clone());
 
-        if let Some(statuses) = filters.statuses() {
-            new_filters = new_filters.with_statuses(statuses.clone());
-        }
-        if let Some(start_date) = filters.start_date() {
-            new_filters = new_filters.with_start_date(*start_date);
-        }
-        if let Some(end_date) = filters.end_date() {
-            new_filters = new_filters.with_end_date(*end_date);
-        }
-        if let Some(category_names) = filters.category_names() {
-            new_filters = new_filters.with_category_names(category_names.clone());
+        let mut debts = self.debt_repository.list(&filters).await?;
+
+        if let (Some(start_date), Some(end_date)) = (filters.start_date(), filters.end_date()) {
+            self.append_debts_with_installments_in_period(
+                &mut debts,
+                client_id,
+                *start_date,
+                *end_date,
+            )
+            .await?;
         }
 
-        self.debt_repository.list(&new_filters).await
+        Ok(debts)
     }
 }
 

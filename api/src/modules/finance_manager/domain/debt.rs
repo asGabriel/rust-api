@@ -53,11 +53,17 @@ impl Debt {
             - paid_amount.unwrap_or(Decimal::ZERO)
             - discount_amount.unwrap_or(Decimal::ZERO);
 
+        let expense_type = if installment_count.map(|n| n > 0).unwrap_or(false) {
+            ExpenseType::Fixed
+        } else {
+            expense_type.unwrap_or_default()
+        };
+
         Self {
             id: uuid,
             client_id,
             category: category.unwrap_or_default(),
-            expense_type: expense_type.unwrap_or_default(),
+            expense_type,
             tags: tags.unwrap_or_default(),
             identification: String::new(),
             description,
@@ -461,6 +467,46 @@ impl DebtFilters {
                 .map(|name| name.to_uppercase())
                 .collect(),
         );
+        self
+    }
+
+    pub fn with_optional_statuses(mut self, statuses: Option<Vec<DebtStatus>>) -> Self {
+        if let Some(s) = statuses {
+            self.statuses = Some(s);
+        }
+        self
+    }
+
+    pub fn with_optional_ids(mut self, ids: Option<Vec<Uuid>>) -> Self {
+        if let Some(i) = ids {
+            self.ids = Some(i);
+        }
+        self
+    }
+
+    pub fn with_optional_start_date(mut self, start_date: Option<NaiveDate>) -> Self {
+        if let Some(d) = start_date {
+            self.start_date = Some(d);
+        }
+        self
+    }
+
+    pub fn with_optional_end_date(mut self, end_date: Option<NaiveDate>) -> Self {
+        if let Some(d) = end_date {
+            self.end_date = Some(d);
+        }
+        self
+    }
+
+    pub fn with_optional_category_names(mut self, category_names: Option<Vec<String>>) -> Self {
+        if let Some(names) = category_names {
+            self.category_names = Some(
+                names
+                    .into_iter()
+                    .map(|name| name.to_uppercase())
+                    .collect(),
+            );
+        }
         self
     }
 }
