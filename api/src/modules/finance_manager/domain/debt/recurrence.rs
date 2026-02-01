@@ -5,10 +5,7 @@ use util::{date::date_with_day_or_last, from_row_constructor, getters};
 use uuid::Uuid;
 
 use crate::modules::finance_manager::{
-    domain::{
-        debt::{Debt, ExpenseType},
-        financial_instrument::FinancialInstrument,
-    },
+    domain::debt::{Debt, ExpenseType},
     handler::debt::use_cases::CreateRecurrenceRequest,
 };
 
@@ -16,15 +13,14 @@ use crate::modules::finance_manager::{
 #[serde(rename_all = "camelCase")]
 pub struct Recurrence {
     id: Uuid,
+    #[serde(skip_serializing)]
     client_id: Uuid,
-    account_id: Option<Uuid>,
     description: String,
     amount: Decimal,
     active: bool,
     start_date: NaiveDate,
     end_date: Option<NaiveDate>,
     day_of_month: i32,
-    next_run_date: NaiveDate,
     #[serde(default)]
     execution_logs: Vec<RecurrenceExecutionLog>,
     created_at: DateTime<Utc>,
@@ -42,7 +38,6 @@ pub struct RecurrenceExecutionLog {
 #[serde(rename_all = "camelCase")]
 pub struct RecurrenceFilters {
     client_id: Option<Uuid>,
-    next_run_date: Option<NaiveDate>,
     active: Option<bool>,
 }
 
@@ -58,11 +53,6 @@ impl RecurrenceFilters {
         self
     }
 
-    pub fn with_next_run_date(mut self, next_run_date: NaiveDate) -> Self {
-        self.next_run_date = Some(next_run_date);
-        self
-    }
-
     pub fn with_active(mut self, active: bool) -> Self {
         self.active = Some(active);
         self
@@ -72,32 +62,48 @@ impl RecurrenceFilters {
 getters!(
     RecurrenceFilters {
         client_id: Option<Uuid>,
-        next_run_date: Option<NaiveDate>,
         active: Option<bool>,
     }
 );
 
 impl Recurrence {
-    pub fn from_request(
-        client_id: Uuid,
-        request: CreateRecurrenceRequest,
-        financial_instrument: Option<FinancialInstrument>,
-    ) -> Self {
+    pub fn from_request(client_id: Uuid, request: CreateRecurrenceRequest) -> Self {
         Self {
             id: Uuid::new_v4(),
             client_id,
-            account_id: financial_instrument.map(|instrument| *instrument.id()),
             description: request.description,
             amount: request.amount,
             active: true,
             start_date: request.start_date,
             end_date: request.end_date,
             day_of_month: request.day_of_month,
-            next_run_date: request.start_date,
             execution_logs: Vec::new(),
             created_at: Utc::now(),
             updated_at: None,
         }
+    }
+
+    /// Applies partial updates to the recurrence
+    pub fn update(
+        &mut self,
+        description: Option<String>,
+        day_of_month: Option<i32>,
+        end_date: Option<NaiveDate>,
+        active: Option<bool>,
+    ) {
+        if let Some(description) = description {
+            self.description = description;
+        }
+        if let Some(day_of_month) = day_of_month {
+            self.day_of_month = day_of_month;
+        }
+        if let Some(end_date) = end_date {
+            self.end_date = Some(end_date);
+        }
+        if let Some(active) = active {
+            self.active = active;
+        }
+        self.updated_at = Some(Utc::now());
     }
 
     /// Checks if this recurrence was already executed for the given year/month
@@ -107,30 +113,14 @@ impl Recurrence {
             .any(|log| log.run_date.year() == year && log.run_date.month() == month)
     }
 
-    /// Calculates the due date for a given year/month.
-    /// If a financial instrument is provided and has a configured due date, use it.
-    /// Otherwise, use the recurrence's day_of_month.
-    pub fn calculate_due_date(
-        &self,
-        financial_instrument: Option<&FinancialInstrument>,
-        year: i32,
-        month: u32,
-    ) -> NaiveDate {
-        let day = financial_instrument
-            .and_then(|fi| fi.configuration().default_due_date)
-            .unwrap_or(self.day_of_month as u32);
-
-        date_with_day_or_last(year, month, day)
+    /// Calculates the due date for a given year/month using the recurrence's day_of_month.
+    pub fn calculate_due_date(&self, year: i32, month: u32) -> NaiveDate {
+        date_with_day_or_last(year, month, self.day_of_month as u32)
     }
 
     /// Generates a debt for the given year/month with the calculated due date
-    pub fn generate_debt_for_month(
-        &self,
-        financial_instrument: Option<&FinancialInstrument>,
-        year: i32,
-        month: u32,
-    ) -> Debt {
-        let due_date = self.calculate_due_date(financial_instrument, year, month);
+    pub fn generate_debt_for_month(&self, year: i32, month: u32) -> Debt {
+        let due_date = self.calculate_due_date(year, month);
 
         Debt::new(
             self.client_id,
@@ -171,14 +161,12 @@ getters! {
     Recurrence {
         id: Uuid,
         client_id: Uuid,
-        account_id: Option<Uuid>,
         description: String,
         amount: Decimal,
         active: bool,
         start_date: NaiveDate,
         end_date: Option<NaiveDate>,
         day_of_month: i32,
-        next_run_date: NaiveDate,
         execution_logs: Vec<RecurrenceExecutionLog>,
         created_at: DateTime<Utc>,
         updated_at: Option<DateTime<Utc>>,
@@ -189,14 +177,12 @@ from_row_constructor! {
     Recurrence {
         id: Uuid,
         client_id: Uuid,
-        account_id: Option<Uuid>,
         description: String,
         amount: Decimal,
         active: bool,
         start_date: NaiveDate,
         end_date: Option<NaiveDate>,
         day_of_month: i32,
-        next_run_date: NaiveDate,
         execution_logs: Vec<RecurrenceExecutionLog>,
         created_at: DateTime<Utc>,
         updated_at: Option<DateTime<Utc>>,
