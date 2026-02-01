@@ -98,7 +98,6 @@ fn build_financial_instrument_handler(pool: &Pool<Postgres>) -> FinancialInstrum
 fn build_income_handler(pool: &Pool<Postgres>) -> IncomeHandlerImpl {
     IncomeHandlerImpl {
         income_repository: Arc::new(IncomeRepositoryImpl::new(pool)),
-        financial_instrument_repository: Arc::new(FinancialInstrumentRepositoryImpl::new(pool)),
     }
 }
 

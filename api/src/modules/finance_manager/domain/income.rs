@@ -11,7 +11,7 @@ use crate::modules::finance_manager::handler::income::use_cases::CreateIncomeReq
 pub struct Income {
     id: Uuid,
     client_id: Uuid,
-    account_id: Uuid,
+    financial_instrument_id: Uuid,
     description: String,
     amount: Decimal,
     reference: NaiveDate,
@@ -20,11 +20,11 @@ pub struct Income {
 }
 
 impl Income {
-    pub fn from_request(request: CreateIncomeRequest, client_id: Uuid, account_id: Uuid) -> Self {
+    pub fn from_request(request: CreateIncomeRequest, client_id: Uuid) -> Self {
         Self {
             id: Uuid::new_v4(),
             client_id,
-            account_id,
+            financial_instrument_id: request.financial_instrument_id,
             description: request.description,
             amount: request.amount,
             reference: request.date_reference,
@@ -38,7 +38,7 @@ getters! {
     Income {
         id: Uuid,
         client_id: Uuid,
-        account_id: Uuid,
+        financial_instrument_id: Uuid,
         description: String,
         amount: Decimal,
         reference: NaiveDate,
@@ -51,7 +51,7 @@ from_row_constructor! {
     Income {
         id: Uuid,
         client_id: Uuid,
-        account_id: Uuid,
+        financial_instrument_id: Uuid,
         description: String,
         amount: Decimal,
         reference: NaiveDate,

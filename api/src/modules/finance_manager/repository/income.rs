@@ -55,7 +55,7 @@ impl IncomeRepository for IncomeRepositoryImpl {
                 Income::from(entity::IncomeEntity {
                     id: row.get("id"),
                     client_id: row.get("client_id"),
-                    account_id: row.get("account_id"),
+                    financial_instrument_id: row.get("financial_instrument_id"),
                     description: row.get("description"),
                     amount: row.get("amount"),
                     reference: row.get("reference"),
@@ -74,7 +74,7 @@ impl IncomeRepository for IncomeRepositoryImpl {
             INSERT INTO finance_manager.income (
                 id,
                 client_id,
-                account_id,
+                financial_instrument_id,
                 description,
                 amount,
                 reference,
@@ -87,7 +87,7 @@ impl IncomeRepository for IncomeRepositoryImpl {
         )
         .bind(income_entity.id)
         .bind(income_entity.client_id)
-        .bind(income_entity.account_id)
+        .bind(income_entity.financial_instrument_id)
         .bind(income_entity.description)
         .bind(income_entity.amount)
         .bind(income_entity.reference)
@@ -99,7 +99,7 @@ impl IncomeRepository for IncomeRepositoryImpl {
         let income_entity = entity::IncomeEntity {
             id: row.get("id"),
             client_id: row.get("client_id"),
-            account_id: row.get("account_id"),
+            financial_instrument_id: row.get("financial_instrument_id"),
             description: row.get("description"),
             amount: row.get("amount"),
             reference: row.get("reference"),
@@ -168,7 +168,7 @@ pub mod entity {
     pub struct IncomeEntity {
         pub id: Uuid,
         pub client_id: Uuid,
-        pub account_id: Uuid,
+        pub financial_instrument_id: Uuid,
         pub description: String,
         pub amount: Decimal,
         pub reference: NaiveDate,
@@ -181,7 +181,7 @@ pub mod entity {
             IncomeEntity {
                 id: *income.id(),
                 client_id: *income.client_id(),
-                account_id: *income.account_id(),
+                financial_instrument_id: *income.financial_instrument_id(),
                 description: income.description().clone(),
                 amount: *income.amount(),
                 reference: *income.reference(),
@@ -196,7 +196,7 @@ pub mod entity {
             Income::from_row(
                 entity.id,
                 entity.client_id,
-                entity.account_id,
+                entity.financial_instrument_id,
                 entity.description,
                 entity.amount,
                 entity.reference,
