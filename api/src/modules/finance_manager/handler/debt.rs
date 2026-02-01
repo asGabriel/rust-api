@@ -1,13 +1,20 @@
 use async_trait::async_trait;
+use chrono::{Datelike, Utc};
 use http_error::{ext::OptionHttpExt, HttpResult};
 use uuid::Uuid;
 
 use crate::modules::finance_manager::{
     domain::debt::{
-        Debt, DebtFilters, installment::{Installment, InstallmentFilters}, recurrence::{Recurrence, RecurrenceFilters}
+        installment::{Installment, InstallmentFilters},
+        recurrence::{Recurrence, RecurrenceFilters},
+        Debt, DebtFilters,
     },
-    handler::{debt::use_cases::{CreateDebtRequest, UpdateDebtRequest}, recurrence::use_cases::CreateRecurrenceRequest},
-    repository::{debt::{DynDebtRepository, installment::DynInstallmentRepository}, financial_instrument::DynFinancialInstrumentRepository, recurrence::DynRecurrenceRepository},
+    handler::debt::use_cases::{CreateDebtRequest, CreateRecurrenceRequest, UpdateDebtRequest},
+    repository::{
+        debt::{installment::DynInstallmentRepository, DynDebtRepository},
+        financial_instrument::DynFinancialInstrumentRepository,
+        recurrence::DynRecurrenceRepository,
+    },
 };
 use std::sync::Arc;
 
@@ -35,13 +42,15 @@ pub trait DebtHandler {
         filters: &InstallmentFilters,
     ) -> HttpResult<Vec<Installment>>;
 
-    async fn create_recurrence(
+    async fn generate_current_recurrences(&self) -> HttpResult<()>;
+
+    async fn create_debt_recurrence(
         &self,
         client_id: Uuid,
         request: CreateRecurrenceRequest,
     ) -> HttpResult<Recurrence>;
 
-    async fn list_recurrences(
+    async fn list_debt_recurrences(
         &self,
         client_id: Uuid,
         filters: &RecurrenceFilters,
@@ -60,7 +69,7 @@ impl DebtHandlerImpl {
     async fn create_debt(&self, client_id: Uuid, request: CreateDebtRequest) -> HttpResult<Debt> {
         request.validate()?;
 
-        let debt = Debt::new(
+        let mut debt = Debt::new(
             client_id,
             request.description,
             request.total_amount,
@@ -72,42 +81,133 @@ impl DebtHandlerImpl {
             request.tags,
             request.installment_count,
         );
+
+        let installments = self
+            .process_installments(&mut debt, request.financial_instrument_id)
+            .await?;
+
         let debt = self.debt_repository.insert(debt).await?;
 
-        if let Some(installments) = debt.generate_installments()? {
-            let _installments = self
-                .installment_repository
+        if let Some(installments) = installments {
+            self.installment_repository
                 .insert_many(installments)
                 .await?;
         }
 
         Ok(debt)
     }
+
+    /// Processes installments for a debt if applicable.
+    /// Returns None if no installments, or the generated installments.
+    /// Also updates the debt's due_date to the last installment date.
+    async fn process_installments(
+        &self,
+        debt: &mut Debt,
+        financial_instrument_id: Option<Uuid>,
+    ) -> HttpResult<Option<Vec<Installment>>> {
+        if !debt.has_installments() {
+            return Ok(None);
+        }
+
+        let instrument_id = financial_instrument_id.ok_or_else(|| {
+            Box::new(http_error::HttpError::bad_request(
+                "Financial instrument is required for installment debts",
+            ))
+        })?;
+
+        let instrument = self
+            .financial_instrument_repository
+            .get_by_id(instrument_id)
+            .await?
+            .ok_or_else(|| {
+                Box::new(http_error::HttpError::not_found(
+                    "financial_instrument",
+                    instrument_id,
+                ))
+            })?;
+
+        let due_day = instrument.configuration().default_due_date.ok_or_else(|| {
+            Box::new(http_error::HttpError::bad_request(
+                "Financial instrument must have a configured due date for installment debts",
+            ))
+        })?;
+
+        let installments = debt.generate_installments(due_day)?;
+        Ok(Some(installments))
+    }
 }
 
 #[async_trait]
 impl DebtHandler for DebtHandlerImpl {
-    // TODO: Add client_id to the database
-    async fn list_recurrences(&self, _client_id: Uuid, filters: &RecurrenceFilters) -> HttpResult<Vec<Recurrence>> {
-        self.recurrence_repository
-            .list(filters)
-            .await
+    async fn generate_current_recurrences(&self) -> HttpResult<()> {
+        let today = Utc::now().date_naive();
+        let current_year = today.year();
+        let current_month = today.month();
+
+        let recurrences = self
+            .recurrence_repository
+            .list(&RecurrenceFilters::new().with_active(true))
+            .await?;
+
+        for mut recurrence in recurrences {
+            // Skip if already executed this month
+            if recurrence.was_executed_in_month(current_year, current_month) {
+                continue;
+            }
+
+            // Skip if outside the valid date range
+            if !recurrence.is_within_date_range(today) {
+                continue;
+            }
+
+            let financial_instrument = match recurrence.account_id() {
+                Some(account_id) => {
+                    self.financial_instrument_repository
+                        .get_by_id(*account_id)
+                        .await?
+                }
+                None => None,
+            };
+
+            let debt = recurrence.generate_debt_for_month(
+                financial_instrument.as_ref(),
+                current_year,
+                current_month,
+            );
+            let saved_debt = self.debt_repository.insert(debt).await?;
+
+            recurrence.add_execution_log(today, *saved_debt.id());
+            self.recurrence_repository.update(recurrence).await?;
+        }
+
+        Ok(())
     }
 
     // TODO: Add client_id to the database
-    async fn create_recurrence(&self, _client_id: Uuid, request: CreateRecurrenceRequest) -> HttpResult<Recurrence> {
-        let instrument = self
-            .financial_instrument_repository
-            .get_by_identification(&request.financial_instrument_identification)
-            .await?
-            .or_not_found("financial_instrument", &request.financial_instrument_identification)?;
+    async fn list_debt_recurrences(
+        &self,
+        _client_id: Uuid,
+        filters: &RecurrenceFilters,
+    ) -> HttpResult<Vec<Recurrence>> {
+        self.recurrence_repository.list(filters).await
+    }
 
-        let recurrence = Recurrence::from_request(request, *instrument.id());
+    async fn create_debt_recurrence(
+        &self,
+        client_id: Uuid,
+        request: CreateRecurrenceRequest,
+    ) -> HttpResult<Recurrence> {
+        let financial_instrument = match request.financial_instrument_id {
+            Some(id) => self.financial_instrument_repository.get_by_id(id).await?,
+            None => None,
+        };
+
+        let recurrence = Recurrence::from_request(client_id, request, financial_instrument);
         let recurrence_created = self.recurrence_repository.insert(recurrence).await?;
 
         Ok(recurrence_created)
     }
-    
+
     async fn update_debt(
         &self,
         client_id: Uuid,
@@ -225,7 +325,7 @@ pub mod use_cases {
                 paid_amount: None,
                 discount_amount: None,
                 due_date,
-                status: Some(DebtStatus::Unpaid),
+                status: Some(DebtStatus::Open),
                 financial_instrument_id: None,
                 installment_count,
             }
@@ -270,5 +370,16 @@ pub mod use_cases {
         pub tags: Option<Vec<String>>,
         pub description: Option<String>,
         pub due_date: Option<NaiveDate>,
+    }
+
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct CreateRecurrenceRequest {
+        pub financial_instrument_id: Option<Uuid>,
+        pub description: String,
+        pub amount: Decimal,
+        pub start_date: NaiveDate,
+        pub end_date: Option<NaiveDate>,
+        pub day_of_month: i32,
     }
 }

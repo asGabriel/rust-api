@@ -1,3 +1,5 @@
+pub mod date;
+
 // Macro to generate getters for a struct
 #[macro_export]
 macro_rules! getters {

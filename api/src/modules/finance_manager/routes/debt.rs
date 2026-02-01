@@ -10,11 +10,10 @@ use uuid::Uuid;
 
 use crate::modules::{
     finance_manager::{
-        domain::debt::{DebtFilters, installment::InstallmentFilters, recurrence::RecurrenceFilters},
-        handler::{
-            debt::use_cases::{CreateDebtRequest, UpdateDebtRequest},
-            recurrence::use_cases::CreateRecurrenceRequest,
+        domain::debt::{
+            installment::InstallmentFilters, recurrence::RecurrenceFilters, DebtFilters,
         },
+        handler::debt::use_cases::{CreateDebtRequest, CreateRecurrenceRequest, UpdateDebtRequest},
     },
     routes::AppState,
 };
@@ -59,7 +58,7 @@ async fn list_recurrences(
     let recurrences = state
         .finance_manager_state
         .debt_handler
-        .list_recurrences(*user.client_id(), &filters)
+        .list_debt_recurrences(*user.client_id(), &filters)
         .await?;
 
     Ok(Json(recurrences))
@@ -75,7 +74,7 @@ async fn create_recurrence(
     let recurrence = state
         .finance_manager_state
         .debt_handler
-        .create_recurrence(*user.client_id(), request)
+        .create_debt_recurrence(*user.client_id(), request)
         .await?;
 
     Ok(Json(recurrence))

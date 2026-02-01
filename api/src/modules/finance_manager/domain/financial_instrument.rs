@@ -1,13 +1,11 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use util::{from_row_constructor, getters};
 use uuid::Uuid;
 
 pub mod configuration;
 
 use crate::modules::{
-    chat_bot::domain::formatter::ChatFormatter,
     finance_manager::{
         domain::financial_instrument::configuration::InstrumentConfiguration,
         handler::financial_instrument::use_cases::UpdateFinancialInstrumentRequest,
@@ -135,45 +133,5 @@ from_row_constructor! {
         configuration: InstrumentConfiguration,
         created_at: DateTime<Utc>,
         updated_at: Option<DateTime<Utc>>,
-    }
-}
-
-impl ChatFormatter for FinancialInstrument {
-    fn format_for_chat(&self) -> String {
-        format!(
-            "🏦 Instrumento: {}\n🆔 ID: {}\n👤 Dono: {}",
-            self.name(),
-            self.identification(),
-            self.owner()
-        )
-    }
-
-    fn format_list_for_chat(items: &[Self]) -> String {
-        if items.is_empty() {
-            return "📋 Nenhum instrumento financeiro cadastrado".to_string();
-        }
-
-        let mut instruments_by_owner: BTreeMap<String, Vec<&Self>> = BTreeMap::new();
-        for instrument in items.iter() {
-            instruments_by_owner
-                .entry(instrument.owner().clone())
-                .or_default()
-                .push(instrument);
-        }
-
-        let mut output = format!("📋 Instrumentos financeiros cadastrados ({})", items.len());
-
-        for (owner, instruments) in instruments_by_owner.iter() {
-            output.push_str(&format!("\n\n👤 {} ({})", owner, instruments.len()));
-            for instrument in instruments.iter() {
-                output.push_str(&format!(
-                    "\n {} - {}",
-                    instrument.identification(),
-                    instrument.name()
-                ));
-            }
-        }
-
-        output
     }
 }

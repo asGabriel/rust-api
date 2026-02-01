@@ -2,12 +2,10 @@ use std::sync::Arc;
 
 use api::modules::{
     auth::{handler::AuthHandlerImpl, repository::user::UserRepositoryImpl, AuthState},
-    chat_bot::{gateway::TelegramGateway, handler::ChatBotHandlerImpl, ChatBotState},
     finance_manager::{
         handler::{
             debt::DebtHandlerImpl, financial_instrument::FinancialInstrumentHandlerImpl,
             income::IncomeHandlerImpl, payment::PaymentHandlerImpl, pubsub::PubSubHandlerImpl,
-            recurrence::RecurrenceHandlerImpl,
         },
         repository::{
             debt::{installment::InstallmentRepositoryImpl, DebtRepositoryImpl},
@@ -23,7 +21,6 @@ use api::modules::{
 use axum::Router;
 use database::DbPool;
 use sqlx::{Pool, Postgres};
-use uuid::Uuid;
 
 #[tokio::main]
 async fn main() {
@@ -36,7 +33,6 @@ async fn main() {
     let payment_handler = build_payment_handler(pool, &pubsub);
     let debt_handler = build_debt_handler(pool);
     let financial_instrument_handler = build_financial_instrument_handler(pool);
-    let recurrence_handler = build_recurrence_handler(pool);
     let income_handler = build_income_handler(pool);
 
     // Build states
@@ -44,26 +40,7 @@ async fn main() {
         payment_handler: Arc::new(payment_handler.clone()),
         debt_handler: Arc::new(debt_handler.clone()),
         financial_instrument_handler: Arc::new(financial_instrument_handler.clone()),
-        recurrence_handler: Arc::new(recurrence_handler.clone()),
         income_handler: Arc::new(income_handler.clone()),
-    };
-
-    let telegram_client_id = std::env::var("TELEGRAM_CLIENT_ID")
-        .ok()
-        .and_then(|s| Uuid::parse_str(&s).ok())
-        .unwrap_or(Uuid::nil());
-
-    let chat_bot_state = ChatBotState {
-        chat_bot_handler: Arc::new(ChatBotHandlerImpl {
-            income_handler: Arc::new(income_handler.clone()),
-            payment_handler: Arc::new(payment_handler.clone()),
-            debt_handler: Arc::new(debt_handler.clone()),
-            financial_instrument_handler: Arc::new(financial_instrument_handler.clone()),
-            telegram_gateway: TelegramGateway::new(),
-            client_id: telegram_client_id,
-        }),
-        payment_handler: Arc::new(payment_handler.clone()),
-        telegram_gateway: TelegramGateway::new(),
     };
 
     let auth_handler = build_auth_handler(pool);
@@ -73,7 +50,6 @@ async fn main() {
 
     let app_state = AppState {
         finance_manager_state: Arc::new(finance_manager_state),
-        chat_bot_state: Arc::new(chat_bot_state),
         auth_state: Arc::new(auth_state),
     };
 
@@ -115,13 +91,6 @@ fn build_debt_handler(pool: &Pool<Postgres>) -> DebtHandlerImpl {
 
 fn build_financial_instrument_handler(pool: &Pool<Postgres>) -> FinancialInstrumentHandlerImpl {
     FinancialInstrumentHandlerImpl {
-        financial_instrument_repository: Arc::new(FinancialInstrumentRepositoryImpl::new(pool)),
-    }
-}
-
-fn build_recurrence_handler(pool: &Pool<Postgres>) -> RecurrenceHandlerImpl {
-    RecurrenceHandlerImpl {
-        recurrence_repository: Arc::new(RecurrenceRepositoryImpl::new(pool)),
         financial_instrument_repository: Arc::new(FinancialInstrumentRepositoryImpl::new(pool)),
     }
 }
