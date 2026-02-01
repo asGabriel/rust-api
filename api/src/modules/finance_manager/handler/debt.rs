@@ -9,7 +9,9 @@ use crate::modules::finance_manager::{
         recurrence::{Recurrence, RecurrenceFilters},
         Debt, DebtFilters,
     },
-    handler::debt::use_cases::{CreateDebtRequest, CreateRecurrenceRequest, UpdateDebtRequest},
+    handler::debt::use_cases::{
+        CreateDebtRequest, CreateRecurrenceRequest, UpdateDebtRequest, UpdateRecurrenceRequest,
+    },
     repository::{
         debt::{installment::DynInstallmentRepository, DynDebtRepository},
         financial_instrument::DynFinancialInstrumentRepository,
@@ -55,6 +57,13 @@ pub trait DebtHandler {
         client_id: Uuid,
         filters: &RecurrenceFilters,
     ) -> HttpResult<Vec<Recurrence>>;
+
+    async fn update_debt_recurrence(
+        &self,
+        client_id: Uuid,
+        recurrence_id: Uuid,
+        request: UpdateRecurrenceRequest,
+    ) -> HttpResult<Recurrence>;
 }
 
 #[derive(Clone)]
@@ -160,20 +169,7 @@ impl DebtHandler for DebtHandlerImpl {
                 continue;
             }
 
-            let financial_instrument = match recurrence.account_id() {
-                Some(account_id) => {
-                    self.financial_instrument_repository
-                        .get_by_id(*account_id)
-                        .await?
-                }
-                None => None,
-            };
-
-            let debt = recurrence.generate_debt_for_month(
-                financial_instrument.as_ref(),
-                current_year,
-                current_month,
-            );
+            let debt = recurrence.generate_debt_for_month(current_year, current_month);
             let saved_debt = self.debt_repository.insert(debt).await?;
 
             recurrence.add_execution_log(today, *saved_debt.id());
@@ -183,13 +179,44 @@ impl DebtHandler for DebtHandlerImpl {
         Ok(())
     }
 
-    // TODO: Add client_id to the database
     async fn list_debt_recurrences(
         &self,
-        _client_id: Uuid,
+        client_id: Uuid,
         filters: &RecurrenceFilters,
     ) -> HttpResult<Vec<Recurrence>> {
-        self.recurrence_repository.list(filters).await
+        let filters = filters.clone().with_client_id(client_id);
+        self.recurrence_repository.list(&filters).await
+    }
+
+    async fn update_debt_recurrence(
+        &self,
+        client_id: Uuid,
+        recurrence_id: Uuid,
+        request: UpdateRecurrenceRequest,
+    ) -> HttpResult<Recurrence> {
+        let mut recurrence = self
+            .recurrence_repository
+            .get_by_id(recurrence_id)
+            .await?
+            .ok_or_else(|| {
+                Box::new(http_error::HttpError::not_found("recurrence", recurrence_id))
+            })?;
+
+        if recurrence.client_id() != &client_id {
+            return Err(Box::new(http_error::HttpError::not_found(
+                "recurrence",
+                recurrence_id,
+            )));
+        }
+
+        recurrence.update(
+            request.description,
+            request.day_of_month,
+            request.end_date,
+            request.active,
+        );
+
+        self.recurrence_repository.update(recurrence).await
     }
 
     async fn create_debt_recurrence(
@@ -197,15 +224,8 @@ impl DebtHandler for DebtHandlerImpl {
         client_id: Uuid,
         request: CreateRecurrenceRequest,
     ) -> HttpResult<Recurrence> {
-        let financial_instrument = match request.financial_instrument_id {
-            Some(id) => self.financial_instrument_repository.get_by_id(id).await?,
-            None => None,
-        };
-
-        let recurrence = Recurrence::from_request(client_id, request, financial_instrument);
-        let recurrence_created = self.recurrence_repository.insert(recurrence).await?;
-
-        Ok(recurrence_created)
+        let recurrence = Recurrence::from_request(client_id, request);
+        self.recurrence_repository.insert(recurrence).await
     }
 
     async fn update_debt(
@@ -375,11 +395,19 @@ pub mod use_cases {
     #[derive(Debug, Clone, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct CreateRecurrenceRequest {
-        pub financial_instrument_id: Option<Uuid>,
         pub description: String,
         pub amount: Decimal,
         pub start_date: NaiveDate,
         pub end_date: Option<NaiveDate>,
         pub day_of_month: i32,
+    }
+
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct UpdateRecurrenceRequest {
+        pub description: Option<String>,
+        pub day_of_month: Option<i32>,
+        pub end_date: Option<NaiveDate>,
+        pub active: Option<bool>,
     }
 }

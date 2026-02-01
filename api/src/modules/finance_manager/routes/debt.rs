@@ -13,7 +13,9 @@ use crate::modules::{
         domain::debt::{
             installment::InstallmentFilters, recurrence::RecurrenceFilters, DebtFilters,
         },
-        handler::debt::use_cases::{CreateDebtRequest, CreateRecurrenceRequest, UpdateDebtRequest},
+        handler::debt::use_cases::{
+            CreateDebtRequest, CreateRecurrenceRequest, UpdateDebtRequest, UpdateRecurrenceRequest,
+        },
     },
     routes::AppState,
 };
@@ -32,7 +34,9 @@ pub fn configure_routes() -> Router<AppState> {
         "/recurrence",
         Router::new()
             .route("/", post(create_recurrence))
-            .route("/list", post(list_recurrences)),
+            .route("/list", post(list_recurrences))
+            .route("/generate", post(generate_recurrences))
+            .route("/{recurrence_id}", patch(update_recurrence)),
     );
 
     let debt_id_routes =
@@ -46,6 +50,16 @@ pub fn configure_routes() -> Router<AppState> {
             .merge(recurrence_routes)
             .merge(debt_id_routes),
     )
+}
+
+async fn generate_recurrences(
+    state: State<AppState>,
+) -> HttpResult<impl IntoResponse> {
+    state
+        .finance_manager_state
+        .debt_handler
+        .generate_current_recurrences()
+        .await
 }
 
 async fn list_recurrences(
@@ -75,6 +89,23 @@ async fn create_recurrence(
         .finance_manager_state
         .debt_handler
         .create_debt_recurrence(*user.client_id(), request)
+        .await?;
+
+    Ok(Json(recurrence))
+}
+
+async fn update_recurrence(
+    state: State<AppState>,
+    headers: HeaderMap,
+    Path(recurrence_id): Path<Uuid>,
+    Json(request): Json<UpdateRecurrenceRequest>,
+) -> HttpResult<impl IntoResponse> {
+    let user = state.auth_state.auth_handler.authenticate(&headers).await?;
+
+    let recurrence = state
+        .finance_manager_state
+        .debt_handler
+        .update_debt_recurrence(*user.client_id(), recurrence_id, request)
         .await?;
 
     Ok(Json(recurrence))
