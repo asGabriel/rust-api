@@ -135,29 +135,35 @@ impl FinancialInstrumentRepository for FinancialInstrumentRepositoryImpl {
         }
 
         if let Some(ids) = filters.ids {
-            builder.push(" AND id = ANY(");
-            builder.push_bind(ids);
-            builder.push(")");
+            if !ids.is_empty() {
+                builder.push(" AND id = ANY(");
+                builder.push_bind(ids);
+                builder.push(")");
+            }
         }
 
         if let Some(identifications) = filters.identifications {
-            let identifications: Vec<i32> = identifications
-                .iter()
-                .map(|i| i.parse::<i32>().unwrap())
-                .collect();
-            builder.push(" AND identification = ANY(");
-            builder.push_bind(identifications);
-            builder.push(")");
+            if !identifications.is_empty() {
+                let identifications: Vec<i32> = identifications
+                    .iter()
+                    .map(|i| i.parse::<i32>().unwrap())
+                    .collect();
+                builder.push(" AND identification = ANY(");
+                builder.push_bind(identifications);
+                builder.push(")");
+            }
         }
 
         if let Some(instrument_types) = filters.instrument_types {
-            let types_as_str: Vec<String> = instrument_types
-                .iter()
-                .map(|t| t.as_str().to_string())
-                .collect();
-            builder.push(" AND instrument_type = ANY(");
-            builder.push_bind(types_as_str);
-            builder.push(")");
+            if !instrument_types.is_empty() {
+                let types_as_str: Vec<String> = instrument_types
+                    .iter()
+                    .map(|t| t.as_str().to_string())
+                    .collect();
+                builder.push(" AND instrument_type = ANY(");
+                builder.push_bind(types_as_str);
+                builder.push(")");
+            }
         }
 
         let query = builder.build();
