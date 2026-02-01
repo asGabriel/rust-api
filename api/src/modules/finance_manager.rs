@@ -5,7 +5,7 @@ use axum::Router;
 use crate::modules::{
     finance_manager::handler::{
         debt::DynDebtHandler, financial_instrument::DynFinancialInstrumentHandler,
-        income::DynIncomeHandler, payment::DynPaymentHandler, recurrence::DynRecurrenceHandler,
+        income::DynIncomeHandler, payment::DynPaymentHandler,
     },
     routes::AppState,
 };
@@ -20,7 +20,6 @@ pub struct FinanceManagerState {
     pub payment_handler: Arc<DynPaymentHandler>,
     pub debt_handler: Arc<DynDebtHandler>,
     pub financial_instrument_handler: Arc<DynFinancialInstrumentHandler>,
-    pub recurrence_handler: Arc<DynRecurrenceHandler>,
 }
 
 pub fn configure_service_routes() -> Router<AppState> {
@@ -30,7 +29,6 @@ pub fn configure_service_routes() -> Router<AppState> {
             .merge(routes::payment::configure_routes())
             .merge(routes::debt::configure_routes())
             .merge(routes::financial_instrument::configure_routes())
-            .merge(routes::recurrence::configure_routes())
             .merge(routes::income::configure_routes()),
     )
 }

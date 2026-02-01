@@ -10,8 +10,10 @@ use uuid::Uuid;
 
 use crate::modules::{
     finance_manager::{
-        domain::debt::{installment::InstallmentFilters, DebtFilters},
-        handler::debt::use_cases::{CreateDebtRequest, UpdateDebtRequest},
+        domain::debt::{
+            installment::InstallmentFilters, recurrence::RecurrenceFilters, DebtFilters,
+        },
+        handler::debt::use_cases::{CreateDebtRequest, CreateRecurrenceRequest, UpdateDebtRequest},
     },
     routes::AppState,
 };
@@ -26,6 +28,13 @@ pub fn configure_routes() -> Router<AppState> {
         Router::new().route("/list", post(list_debt_installments)),
     );
 
+    let recurrence_routes = Router::new().nest(
+        "/recurrence",
+        Router::new()
+            .route("/", post(create_recurrence))
+            .route("/list", post(list_recurrences)),
+    );
+
     let debt_id_routes =
         Router::new().nest("/{debt_id}", Router::new().route("/", patch(update_debt)));
 
@@ -34,8 +43,41 @@ pub fn configure_routes() -> Router<AppState> {
         Router::new()
             .merge(main_debt_routes)
             .merge(installment_routes)
+            .merge(recurrence_routes)
             .merge(debt_id_routes),
     )
+}
+
+async fn list_recurrences(
+    state: State<AppState>,
+    headers: HeaderMap,
+    Json(filters): Json<RecurrenceFilters>,
+) -> HttpResult<impl IntoResponse> {
+    let user = state.auth_state.auth_handler.authenticate(&headers).await?;
+
+    let recurrences = state
+        .finance_manager_state
+        .debt_handler
+        .list_debt_recurrences(*user.client_id(), &filters)
+        .await?;
+
+    Ok(Json(recurrences))
+}
+
+async fn create_recurrence(
+    state: State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateRecurrenceRequest>,
+) -> HttpResult<impl IntoResponse> {
+    let user = state.auth_state.auth_handler.authenticate(&headers).await?;
+
+    let recurrence = state
+        .finance_manager_state
+        .debt_handler
+        .create_debt_recurrence(*user.client_id(), request)
+        .await?;
+
+    Ok(Json(recurrence))
 }
 
 async fn update_debt(

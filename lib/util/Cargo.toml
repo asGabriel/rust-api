@@ -5,3 +5,4 @@ edition = "2024"
 authors = ["Gabriel da Silva Andrade <andrade.gabriel2295@gmail.com>"]
 
 [dependencies]
+chrono = "0.4"

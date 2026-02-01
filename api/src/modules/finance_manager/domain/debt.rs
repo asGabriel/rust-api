@@ -1,20 +1,17 @@
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use http_error::{HttpError, HttpResult};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use std::fmt::Write;
-use util::{from_row_constructor, getters};
+use util::{date::date_with_day_or_last, from_row_constructor, getters};
 use uuid::Uuid;
 
-use crate::modules::{
-    chat_bot::domain::formatter::{ChatFormatter, ChatFormatterUtils},
-    finance_manager::domain::{debt::installment::Installment, payment::Payment},
+use crate::modules::finance_manager::domain::{
+    debt::installment::Installment, payment::Payment,
 };
 
 pub mod category;
 pub mod installment;
 pub mod recurrence;
-pub mod recurrence_run;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -99,27 +96,23 @@ impl Debt {
         Ok(())
     }
 
-    /// Generates the installments of the debt
-    /// It will return the installments if the debt is parceled, otherwise it will return None
-    pub fn generate_installments(&self) -> HttpResult<Option<Vec<Installment>>> {
-        let installment_count = match self.installment_count {
-            Some(count) if count > 0 => count,
-            _ => return Ok(None),
-        };
-
+    /// Generates installments based on the configured due day from the financial instrument.
+    /// Updates the debt's due_date to the last installment date.
+    /// Should only be called when has_installments() is true.
+    pub fn generate_installments(&mut self, due_day: u32) -> HttpResult<Vec<Installment>> {
+        let installment_count = self.installment_count.unwrap_or(0);
         let (base_amount, remainder) = self.calculate_installment_amount(installment_count);
 
         let mut installments = Vec::new();
 
         for i in 1..=installment_count {
-            // the first installment receives the remainder to avoid rounding errors
             let amount = if i == 1 {
                 base_amount + remainder
             } else {
                 base_amount
             };
 
-            let due_date = self
+            let target_date = self
                 .due_date
                 .checked_add_months(chrono::Months::new((i - 1) as u32))
                 .ok_or_else(|| {
@@ -129,10 +122,16 @@ impl Debt {
                     )))
                 })?;
 
+            let due_date = date_with_day_or_last(target_date.year(), target_date.month(), due_day);
             installments.push(Installment::new(*self.id(), i, due_date, amount));
         }
 
-        Ok(Some(installments))
+        // Update debt's due_date to the last installment's due date
+        if let Some(last_installment) = installments.last() {
+            self.due_date = *last_installment.due_date();
+        }
+
+        Ok(installments)
     }
 
     pub fn has_installments(&self) -> bool {
@@ -175,13 +174,21 @@ impl Debt {
     }
 
     fn recalculate_status(&mut self) {
-        if self.paid_amount >= self.total_amount {
+        if self.is_settled() {
             self.status = DebtStatus::Settled;
-        } else if self.remaining_amount > Decimal::ZERO {
-            self.status = DebtStatus::PartiallyPaid;
+        } else if self.is_installment() {
+            self.status = DebtStatus::Installment;
         } else {
-            self.status = DebtStatus::Unpaid;
+            self.status = DebtStatus::Open;
         }
+    }
+
+    fn is_settled(&self) -> bool {
+        self.paid_amount >= self.total_amount
+    }
+
+    fn is_installment(&self) -> bool {
+        self.installment_count.is_some() && self.installment_count.unwrap() > 0
     }
 
     /// Calculates the amount of the installment and the remainder
@@ -266,23 +273,24 @@ impl ExpenseType {
     }
 }
 
+/// Represents the temporal status of a debt
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DebtStatus {
-    /// The debt is unpaid; a.k.a. "Nova dívida"
+    /// Debt is open, not yet paid. A.k.a. "Em aberto"
     #[default]
-    Unpaid,
-    /// The debt is partially paid; a.k.a. "Dívida parcialmente paga"
-    PartiallyPaid,
-    /// The debt is settled; a.k.a. "Dívida paga"
+    Open,
+    /// Has installments being paid. A.k.a. "Parcelada"
+    Installment,
+    /// Fully paid. A.k.a. "Quitada"
     Settled,
 }
 
 impl From<String> for DebtStatus {
     fn from(s: String) -> Self {
         match s.as_str() {
-            "UNPAID" => DebtStatus::Unpaid,
-            "PARTIALLY_PAID" => DebtStatus::PartiallyPaid,
+            "OPEN" => DebtStatus::Open,
+            "INSTALLMENT" => DebtStatus::Installment,
             "SETTLED" => DebtStatus::Settled,
             _ => DebtStatus::default(),
         }
@@ -294,12 +302,12 @@ impl From<&str> for DebtStatus {
         let s_upper = s.to_uppercase();
         match s_upper.as_str() {
             // Valores em inglês (banco de dados)
-            "UNPAID" => DebtStatus::Unpaid,
-            "PARTIALLY_PAID" => DebtStatus::PartiallyPaid,
+            "OPEN" => DebtStatus::Open,
+            "INSTALLMENT" => DebtStatus::Installment,
             "SETTLED" => DebtStatus::Settled,
             // Valores em português (interface do usuário)
-            "PENDENTE" => DebtStatus::Unpaid,
-            "PARCIAL" => DebtStatus::PartiallyPaid,
+            "PENDENTE" => DebtStatus::Open,
+            "VENCIDA" => DebtStatus::Installment,
             "PAGO" => DebtStatus::Settled,
             _ => DebtStatus::default(),
         }
@@ -309,8 +317,8 @@ impl From<&str> for DebtStatus {
 impl From<DebtStatus> for String {
     fn from(status: DebtStatus) -> Self {
         match status {
-            DebtStatus::Unpaid => "UNPAID".to_string(),
-            DebtStatus::PartiallyPaid => "PARTIALLY_PAID".to_string(),
+            DebtStatus::Open => "OPEN".to_string(),
+            DebtStatus::Installment => "INSTALLMENT".to_string(),
             DebtStatus::Settled => "SETTLED".to_string(),
         }
     }
@@ -319,29 +327,11 @@ impl From<DebtStatus> for String {
 impl std::fmt::Display for DebtStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
-            DebtStatus::Unpaid => "UNPAID",
-            DebtStatus::PartiallyPaid => "PARTIALLY_PAID",
+            DebtStatus::Open => "OPEN",
+            DebtStatus::Installment => "INSTALLMENT",
             DebtStatus::Settled => "SETTLED",
         };
         write!(f, "{}", s)
-    }
-}
-
-impl DebtStatus {
-    pub fn emoji(&self) -> &'static str {
-        match self {
-            DebtStatus::Unpaid => "🔴",
-            DebtStatus::PartiallyPaid => "🟡",
-            DebtStatus::Settled => "🟢",
-        }
-    }
-
-    pub fn to_pt_br(&self) -> &'static str {
-        match self {
-            DebtStatus::Unpaid => "Em aberto",
-            DebtStatus::PartiallyPaid => "Parcialmente pago",
-            DebtStatus::Settled => "Pago",
-        }
     }
 }
 
@@ -472,128 +462,5 @@ impl DebtFilters {
                 .collect(),
         );
         self
-    }
-}
-
-impl ChatFormatter for Debt {
-    /// Formats a single debt for chat display
-    fn format_for_chat(&self) -> String {
-        let mut output = String::new();
-
-        writeln!(output, "💰 Débitos de {}", self.description()).unwrap();
-        writeln!(output, "🆔 ID: {}", self.identification()).unwrap();
-        writeln!(
-            output,
-            "📅 Due Date: {}",
-            ChatFormatterUtils::format_date(self.due_date())
-        )
-        .unwrap();
-        writeln!(
-            output,
-            "💵 Total Amount: {}",
-            ChatFormatterUtils::format_currency(self.total_amount())
-        )
-        .unwrap();
-        writeln!(
-            output,
-            "✅ Paid Amount: {}",
-            ChatFormatterUtils::format_currency(self.paid_amount())
-        )
-        .unwrap();
-        writeln!(
-            output,
-            "🎯 Remaining Amount: {}",
-            ChatFormatterUtils::format_currency(self.remaining_amount())
-        )
-        .unwrap();
-        writeln!(
-            output,
-            "📊 Status: {}",
-            ChatFormatterUtils::format_debt_status(self.status())
-        )
-        .unwrap();
-
-        if let Some(updated_at) = self.updated_at() {
-            writeln!(
-                output,
-                "🔄 Last Updated: {}",
-                ChatFormatterUtils::format_datetime(updated_at)
-            )
-            .unwrap();
-        }
-
-        output
-    }
-
-    /// Formats debt list for chat display
-    fn format_list_for_chat(items: &[Self]) -> String {
-        if items.is_empty() {
-            return "📝 Nenhuma despesa encontrada".to_string();
-        }
-
-        let mut output = String::new();
-        // Summary
-        let total_remaining: Decimal = items.iter().map(|d| *d.remaining_amount()).sum();
-        let total_paid: Decimal = items.iter().map(|d| *d.paid_amount()).sum();
-
-        writeln!(
-            output,
-            "\n✅{} Total pago\n🔴{} Total em aberto\n\n ######\n",
-            ChatFormatterUtils::format_currency(&total_paid),
-            ChatFormatterUtils::format_currency(&total_remaining)
-        )
-        .unwrap();
-
-        let mut sorted_items: Vec<&Debt> = items.iter().collect();
-        sorted_items.sort_by(|a, b| {
-            let a_is_paid = a.status() == &DebtStatus::Settled;
-            let b_is_paid = b.status() == &DebtStatus::Settled;
-
-            match (a_is_paid, b_is_paid) {
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                _ => a.due_date().cmp(b.due_date()),
-            }
-        });
-
-        for debt in sorted_items.iter() {
-            let (value, due_date) = if *debt.remaining_amount() > Decimal::ZERO {
-                (debt.remaining_amount(), *debt.due_date())
-            } else {
-                (
-                    debt.paid_amount(),
-                    debt.updated_at().unwrap_or(Utc::now()).naive_utc().date(),
-                )
-            };
-
-            let date_str = due_date.format("%d/%m").to_string();
-
-            // Formata valor considerando parcelas (valor da parcela é o principal)
-            let value_display = match debt.installment_count() {
-                Some(count) if *count > 1 => {
-                    let installment_value = value / Decimal::from(*count);
-                    format!(
-                        "💵{:.0} ({count}x total 💵{:.0})",
-                        installment_value,
-                        value,
-                        count = count
-                    )
-                }
-                _ => format!("💵{:.0}", value),
-            };
-
-            writeln!(
-                output,
-                "{}{}: {} {} - {}",
-                debt.status().emoji(),
-                debt.identification(),
-                date_str,
-                value_display,
-                debt.description(),
-            )
-            .unwrap();
-        }
-
-        output
     }
 }
