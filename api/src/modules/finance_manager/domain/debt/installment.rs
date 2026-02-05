@@ -27,6 +27,7 @@ pub struct InstallmentFilters {
     pub is_paid: Option<bool>,
     pub start_date: Option<NaiveDate>,
     pub end_date: Option<NaiveDate>,
+    pub payment_id: Option<Uuid>,
 }
 
 impl Installment {
@@ -72,6 +73,20 @@ impl Installment {
         self.updated_at = Some(Utc::now());
     }
 
+    pub fn reverse_payment(&mut self) -> HttpResult<()> {
+        if !self.is_paid {
+            return Err(Box::new(HttpError::bad_request(
+                "Cannot reverse: installment is not paid",
+            )));
+        }
+
+        self.is_paid = false;
+        self.payment_id = None;
+        self.updated_at = Some(Utc::now());
+
+        Ok(())
+    }
+
     pub fn get_latest_unpaid(installments: &[Self]) -> Option<&Self> {
         installments
             .iter()
@@ -104,6 +119,11 @@ impl InstallmentFilters {
 
     pub fn with_end_date(mut self, end_date: NaiveDate) -> Self {
         self.end_date = Some(end_date);
+        self
+    }
+
+    pub fn with_payment_id(mut self, payment_id: Uuid) -> Self {
+        self.payment_id = Some(payment_id);
         self
     }
 }

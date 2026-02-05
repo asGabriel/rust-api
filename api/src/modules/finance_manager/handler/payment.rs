@@ -28,6 +28,7 @@ pub trait PaymentHandler {
         client_id: Uuid,
         filters: PaymentFilters,
     ) -> HttpResult<Vec<Payment>>;
+    async fn refund_payment(&self, client_id: Uuid, payment_id: Uuid) -> HttpResult<()>;
 }
 
 #[derive(Clone)]
@@ -70,6 +71,32 @@ impl PaymentHandler for PaymentHandlerImpl {
     ) -> HttpResult<Vec<Payment>> {
         let filters = filters.with_client_id(client_id);
         self.payment_repository.list(&filters).await
+    }
+
+    async fn refund_payment(&self, client_id: Uuid, payment_id: Uuid) -> HttpResult<()> {
+        let payment = self
+            .payment_repository
+            .get_by_id(&payment_id)
+            .await?
+            .or_not_found("payment", payment_id.to_string())?;
+
+        if payment.client_id() != &client_id {
+            return Err(Box::new(http_error::HttpError::forbidden(
+                "You don't have permission to refund this payment",
+            )));
+        }
+
+        let debt = self
+            .debt_repository
+            .get_by_id(payment.debt_id())
+            .await?
+            .or_not_found("debt", payment.debt_id().to_string())?;
+
+        self.pubsub.reverse_payment(debt, &payment).await?;
+
+        self.payment_repository.delete(&payment_id).await?;
+
+        Ok(())
     }
 }
 

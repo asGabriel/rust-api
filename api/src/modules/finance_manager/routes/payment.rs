@@ -1,11 +1,12 @@
 use axum::{
-    extract::State,
+    extract::{Path, State},
     http::HeaderMap,
     response::IntoResponse,
-    routing::post,
+    routing::{delete, post},
     Json, Router,
 };
 use http_error::HttpResult;
+use uuid::Uuid;
 
 use crate::modules::{
     finance_manager::{
@@ -20,7 +21,8 @@ pub fn configure_routes() -> Router<AppState> {
         "/payment",
         Router::new()
             .route("/", post(create_payment))
-            .route("/list", post(list_payments)),
+            .route("/list", post(list_payments))
+            .route("/{id}/refund", delete(refund_payment)),
     )
 }
 
@@ -50,4 +52,19 @@ async fn list_payments(
         .await?;
 
     Ok(Json(payments))
+}
+
+async fn refund_payment(
+    state: State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> HttpResult<impl IntoResponse> {
+    let user = state.auth_state.auth_handler.authenticate(&headers).await?;
+    state
+        .finance_manager_state
+        .payment_handler
+        .refund_payment(*user.client_id(), id)
+        .await?;
+
+    Ok(Json(serde_json::json!({ "message": "Payment refunded successfully" })))
 }

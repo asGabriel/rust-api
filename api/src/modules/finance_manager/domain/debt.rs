@@ -96,6 +96,23 @@ impl Debt {
         Ok(())
     }
 
+    pub fn reverse_payment(&mut self, payment: &Payment) -> HttpResult<()> {
+        if *payment.amount() > self.paid_amount {
+            return Err(Box::new(HttpError::bad_request(format!(
+                "Cannot reverse payment: amount ({:.2}) exceeds paid amount ({:.2})",
+                payment.amount(),
+                self.paid_amount
+            ))));
+        }
+
+        self.paid_amount -= payment.amount();
+        self.recalculate_remaining_amount();
+        self.recalculate_status();
+        self.updated_at = Some(Utc::now());
+
+        Ok(())
+    }
+
     /// Generates installments based on the configured due day from the financial instrument.
     /// Updates the debt's due_date to the last installment date.
     /// Should only be called when has_installments() is true.

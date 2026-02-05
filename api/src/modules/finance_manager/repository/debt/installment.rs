@@ -123,6 +123,11 @@ impl InstallmentRepository for InstallmentRepositoryImpl {
             builder.push_bind(end_date);
         }
 
+        if let Some(payment_id) = filters.payment_id {
+            builder.push(" AND payment_id = ");
+            builder.push_bind(payment_id);
+        }
+
         let query = builder.build();
         let rows = query.fetch_all(&self.pool).await?;
 
