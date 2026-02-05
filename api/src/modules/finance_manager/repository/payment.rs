@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use http_error::HttpResult;
 use sqlx::{Pool, Postgres, QueryBuilder, Row};
+use uuid::Uuid;
 
 use crate::modules::finance_manager::{
     domain::payment::Payment,
@@ -13,6 +14,8 @@ pub type DynPaymentRepository = dyn PaymentRepository + Send + Sync;
 pub trait PaymentRepository {
     async fn insert(&self, payment: Payment) -> HttpResult<Payment>;
     async fn list(&self, filters: &PaymentFilters) -> HttpResult<Vec<Payment>>;
+    async fn get_by_id(&self, id: &Uuid) -> HttpResult<Option<Payment>>;
+    async fn delete(&self, id: &Uuid) -> HttpResult<()>;
 }
 
 #[derive(Clone)]
@@ -128,6 +131,35 @@ impl PaymentRepository for PaymentRepositoryImpl {
             .collect();
 
         Ok(payments)
+    }
+
+    async fn get_by_id(&self, id: &Uuid) -> HttpResult<Option<Payment>> {
+        let row = sqlx::query(r#"SELECT * FROM finance_manager.payment WHERE id = $1"#)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        Ok(row.map(|r| {
+            Payment::from(PaymentDto {
+                id: r.get("id"),
+                client_id: r.get("client_id"),
+                debt_id: r.get("debt_id"),
+                account_id: r.get("account_id"),
+                amount: r.get("amount"),
+                payment_date: r.get("payment_date"),
+                created_at: r.get("created_at"),
+                updated_at: r.get("updated_at"),
+            })
+        }))
+    }
+
+    async fn delete(&self, id: &Uuid) -> HttpResult<()> {
+        sqlx::query(r#"DELETE FROM finance_manager.payment WHERE id = $1"#)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
     }
 }
 

@@ -32,6 +32,9 @@ pub trait PubSubHandler {
         debt: Debt,
         payment: &Payment,
     ) -> HttpResult<Debt>;
+
+    /// Reverses a payment, updating the debt and installment (if applicable).
+    async fn reverse_payment(&self, debt: Debt, payment: &Payment) -> HttpResult<Debt>;
 }
 
 #[derive(Clone)]
@@ -100,6 +103,26 @@ impl PubSubHandler for PubSubHandlerImpl {
         debt.process_payment(payment)?;
 
         self.debt_repository.update(debt.clone()).await?;
+        Ok(debt)
+    }
+
+    async fn reverse_payment(&self, mut debt: Debt, payment: &Payment) -> HttpResult<Debt> {
+        if debt.has_installments() {
+            let installments = self
+                .installment_repository
+                .list(&InstallmentFilters::new().with_payment_id(*payment.id()))
+                .await?;
+
+            if let Some(installment) = installments.first() {
+                let mut installment = installment.clone();
+                installment.reverse_payment()?;
+                self.installment_repository.update(installment).await?;
+            }
+        }
+
+        debt.reverse_payment(payment)?;
+        self.debt_repository.update(debt.clone()).await?;
+
         Ok(debt)
     }
 }
