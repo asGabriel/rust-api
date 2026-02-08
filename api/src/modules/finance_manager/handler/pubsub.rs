@@ -66,6 +66,7 @@ impl PubSubHandlerImpl {
 
 #[async_trait]
 impl PubSubHandler for PubSubHandlerImpl {
+    // TODO: verify the necessity of this method
     async fn validate_payment(&self, debt: &Debt, payment: &Payment) -> HttpResult<()> {
         if debt.has_installments() {
             let installments = self
