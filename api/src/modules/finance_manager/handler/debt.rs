@@ -144,42 +144,6 @@ impl DebtHandlerImpl {
         let installments = debt.generate_installments(due_day)?;
         Ok(Some(installments))
     }
-
-    /// Fetches debts that have installments with due_date in the given period and appends them
-    /// to the list, excluding ids that are already in `debts`.
-    async fn append_debts_with_installments_in_period(
-        &self,
-        debts: &mut Vec<Debt>,
-        client_id: Uuid,
-        start_date: NaiveDate,
-        end_date: NaiveDate,
-    ) -> HttpResult<()> {
-        let installment_filters = InstallmentFilters::new()
-            .with_start_date(start_date)
-            .with_end_date(end_date);
-        let installments = self.installment_repository.list(&installment_filters).await?;
-
-        let existing_debt_ids: std::collections::HashSet<_> =
-            debts.iter().map(|d| *d.id()).collect();
-
-        let debt_ids: Vec<Uuid> = installments
-            .iter()
-            .map(|i| *i.debt_id())
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .filter(|id| !existing_debt_ids.contains(id))
-            .collect();
-
-        if !debt_ids.is_empty() {
-            let debt_installments = self
-                .debt_repository
-                .list(&DebtFilters::new(client_id).with_ids(debt_ids))
-                .await?;
-            debts.extend(debt_installments);
-        }
-
-        Ok(())
-    }
 }
 
 #[async_trait]
@@ -235,7 +199,10 @@ impl DebtHandler for DebtHandlerImpl {
             .get_by_id(recurrence_id)
             .await?
             .ok_or_else(|| {
-                Box::new(http_error::HttpError::not_found("recurrence", recurrence_id))
+                Box::new(http_error::HttpError::not_found(
+                    "recurrence",
+                    recurrence_id,
+                ))
             })?;
 
         if recurrence.client_id() != &client_id {
@@ -326,17 +293,7 @@ impl DebtHandler for DebtHandlerImpl {
             .with_optional_end_date(filters.end_date().clone())
             .with_optional_category_names(filters.category_names().clone());
 
-        let mut debts = self.debt_repository.list(&filters).await?;
-
-        if let (Some(start_date), Some(end_date)) = (filters.start_date(), filters.end_date()) {
-            self.append_debts_with_installments_in_period(
-                &mut debts,
-                client_id,
-                *start_date,
-                *end_date,
-            )
-            .await?;
-        }
+        let debts = self.debt_repository.list(&filters).await?;
 
         Ok(debts)
     }
