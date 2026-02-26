@@ -2,6 +2,11 @@
 ALTER TABLE finance_manager.debt
 ADD COLUMN financial_instrument_id UUID NULL REFERENCES finance_manager.financial_instrument(id);
 
+-- Backfill existing installment debts so the CHECK constraint can be applied
+UPDATE finance_manager.debt
+SET financial_instrument_id = '185005a4-831e-4b46-a9cc-d19ad9dfb574'
+WHERE installment_count IS NOT NULL AND installment_count > 0;
+
 ALTER TABLE finance_manager.debt
 ADD CONSTRAINT chk_debt_installment_requires_instrument
 CHECK (
