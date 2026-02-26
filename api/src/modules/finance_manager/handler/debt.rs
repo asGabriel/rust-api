@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use chrono::{Datelike, NaiveDate, Utc};
+use chrono::{Datelike, Utc};
 use http_error::{ext::OptionHttpExt, HttpResult};
 use uuid::Uuid;
 
@@ -75,37 +75,6 @@ pub struct DebtHandlerImpl {
 }
 
 impl DebtHandlerImpl {
-    async fn create_debt(&self, client_id: Uuid, request: CreateDebtRequest) -> HttpResult<Debt> {
-        request.validate()?;
-
-        let mut debt = Debt::new(
-            client_id,
-            request.description,
-            request.total_amount,
-            request.paid_amount,
-            request.discount_amount,
-            request.due_date,
-            request.category,
-            request.expense_type,
-            request.tags,
-            request.installment_count,
-        );
-
-        let installments = self
-            .process_installments(&mut debt, request.financial_instrument_id)
-            .await?;
-
-        let debt = self.debt_repository.insert(debt).await?;
-
-        if let Some(installments) = installments {
-            self.installment_repository
-                .insert_many(installments)
-                .await?;
-        }
-
-        Ok(debt)
-    }
-
     /// Processes installments for a debt if applicable.
     /// Returns None if no installments, or the generated installments.
     /// Also updates the debt's due_date to the last installment date.
@@ -280,20 +249,50 @@ impl DebtHandler for DebtHandlerImpl {
         client_id: Uuid,
         request: CreateDebtRequest,
     ) -> HttpResult<Debt> {
-        let debt = self.create_debt(client_id, request.clone()).await?;
+        request.validate()?;
+
+        let mut debt = Debt::new(
+            client_id,
+            request.description,
+            request.total_amount,
+            request.paid_amount,
+            request.discount_amount,
+            request.due_date,
+            request.category,
+            request.expense_type,
+            request.tags,
+            request.financial_instrument_id,
+            request.installment_count,
+        );
+
+        let installments = self
+            .process_installments(&mut debt, request.financial_instrument_id)
+            .await?;
+
+        let debt = self.debt_repository.insert(debt).await?;
+
+        if let Some(installments) = installments {
+            self.installment_repository
+                .insert_many(installments)
+                .await?;
+        }
 
         Ok(debt)
     }
 
     async fn list_debts(&self, client_id: Uuid, filters: &DebtFilters) -> HttpResult<Vec<Debt>> {
-        let filters = DebtFilters::new(client_id)
+        let mut built = DebtFilters::new(client_id)
             .with_optional_statuses(filters.statuses().clone())
             .with_optional_ids(filters.ids().clone())
             .with_optional_start_date(filters.start_date().clone())
             .with_optional_end_date(filters.end_date().clone())
             .with_optional_category_names(filters.category_names().clone());
 
-        let debts = self.debt_repository.list(&filters).await?;
+        if let Some(ids) = filters.financial_instrument_ids() {
+            built = built.with_financial_instrument_ids(ids.clone());
+        }
+
+        let debts = self.debt_repository.list(&built).await?;
 
         Ok(debts)
     }

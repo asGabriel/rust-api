@@ -31,6 +31,7 @@ pub struct Debt {
     #[serde(default)]
     status: DebtStatus,
     installment_count: Option<i32>,
+    financial_instrument_id: Option<Uuid>,
     created_at: DateTime<Utc>,
     updated_at: Option<DateTime<Utc>>,
 }
@@ -46,6 +47,7 @@ impl Debt {
         category: Option<DebtCategory>,
         expense_type: Option<ExpenseType>,
         tags: Option<Vec<String>>,
+        financial_instrument_id: Option<Uuid>,
         installment_count: Option<i32>,
     ) -> Self {
         let uuid = Uuid::new_v4();
@@ -68,6 +70,7 @@ impl Debt {
             due_date,
             status: DebtStatus::default(),
             installment_count,
+            financial_instrument_id,
             created_at: Utc::now(),
             updated_at: None,
         }
@@ -368,6 +371,7 @@ getters!(
         due_date: NaiveDate,
         status: DebtStatus,
         installment_count: Option<i32>,
+        financial_instrument_id: Option<Uuid>,
         created_at: DateTime<Utc>,
         updated_at: Option<DateTime<Utc>>,
     }
@@ -416,6 +420,7 @@ from_row_constructor! {
         due_date: NaiveDate,
         status: DebtStatus,
         installment_count: Option<i32>,
+        financial_instrument_id: Option<Uuid>,
         created_at: DateTime<Utc>,
         updated_at: Option<DateTime<Utc>>,
     }
@@ -430,6 +435,7 @@ pub struct DebtFilters {
     start_date: Option<NaiveDate>,
     end_date: Option<NaiveDate>,
     category_names: Option<Vec<String>>,
+    financial_instrument_ids: Option<Vec<Uuid>>,
 }
 
 getters!(
@@ -440,6 +446,7 @@ getters!(
         start_date: Option<NaiveDate>,
         end_date: Option<NaiveDate>,
         category_names: Option<Vec<String>>,
+        financial_instrument_ids: Option<Vec<Uuid>>,
     }
 );
 
@@ -518,6 +525,11 @@ impl DebtFilters {
                     .collect(),
             );
         }
+        self
+    }
+
+    pub fn with_financial_instrument_ids(mut self, ids: Vec<Uuid>) -> Self {
+        self.financial_instrument_ids = Some(ids);
         self
     }
 }
