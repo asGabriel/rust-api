@@ -29,10 +29,9 @@ impl IncomeRepositoryImpl {
 #[async_trait]
 impl IncomeRepository for IncomeRepositoryImpl {
     async fn list(&self, filters: &IncomeListFilters) -> HttpResult<Vec<Income>> {
-        let mut builder = QueryBuilder::new(format!(
-            "SELECT * FROM finance_manager.income WHERE client_id = {}",
-            filters.client_id()
-        ));
+        let mut builder =
+            QueryBuilder::new("SELECT * FROM finance_manager.income WHERE client_id = ");
+        builder.push_bind(filters.client_id());
 
         if let Some(start_date) = filters.start_date() {
             builder.push(" AND reference >= ");
