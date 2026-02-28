@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::modules::finance_manager::{
     domain::income::Income,
-    handler::income::use_cases::CreateIncomeRequest,
+    handler::income::use_cases::{CreateIncomeRequest, ListIncomesRequest},
     repository::income::{use_cases::IncomeListFilters, DynIncomeRepository},
 };
 
@@ -15,7 +15,7 @@ pub trait IncomeHandler {
     async fn list_incomes(
         &self,
         client_id: Uuid,
-        filters: IncomeListFilters,
+        filters: ListIncomesRequest,
     ) -> HttpResult<Vec<Income>>;
     async fn create_income(
         &self,
@@ -36,9 +36,13 @@ impl IncomeHandler for IncomeHandlerImpl {
     async fn list_incomes(
         &self,
         client_id: Uuid,
-        filters: IncomeListFilters,
+        filters: ListIncomesRequest,
     ) -> HttpResult<Vec<Income>> {
-        let filters = filters.with_client_id(client_id);
+        let filters = IncomeListFilters::new(client_id)
+            .with_financial_instrument_ids(filters.financial_instrument_ids)
+            .with_start_date(filters.start_date)
+            .with_end_date(filters.end_date);
+
         self.income_repository.list(&filters).await
     }
 
@@ -67,5 +71,13 @@ pub mod use_cases {
         pub description: String,
         pub amount: Decimal,
         pub date_reference: NaiveDate,
+    }
+
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ListIncomesRequest {
+        pub financial_instrument_ids: Option<Vec<Uuid>>,
+        pub start_date: Option<NaiveDate>,
+        pub end_date: Option<NaiveDate>,
     }
 }

@@ -2,10 +2,7 @@ use axum::{extract::State, http::HeaderMap, response::IntoResponse, routing::pos
 use http_error::HttpResult;
 
 use crate::modules::{
-    finance_manager::{
-        handler::income::use_cases::CreateIncomeRequest,
-        repository::income::use_cases::IncomeListFilters,
-    },
+    finance_manager::handler::income::use_cases::{CreateIncomeRequest, ListIncomesRequest},
     routes::AppState,
 };
 
@@ -36,7 +33,7 @@ async fn create_income(
 async fn list_incomes(
     state: State<AppState>,
     headers: HeaderMap,
-    Json(filters): Json<IncomeListFilters>,
+    Json(filters): Json<ListIncomesRequest>,
 ) -> HttpResult<impl IntoResponse> {
     let user = state.auth_state.auth_handler.authenticate(&headers).await?;
     let incomes = state

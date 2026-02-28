@@ -29,12 +29,10 @@ impl IncomeRepositoryImpl {
 #[async_trait]
 impl IncomeRepository for IncomeRepositoryImpl {
     async fn list(&self, filters: &IncomeListFilters) -> HttpResult<Vec<Income>> {
-        let mut builder = QueryBuilder::new("SELECT * FROM finance_manager.income WHERE 1=1");
-
-        if let Some(client_id) = filters.client_id() {
-            builder.push(" AND client_id = ");
-            builder.push_bind(client_id);
-        }
+        let mut builder = QueryBuilder::new(format!(
+            "SELECT * FROM finance_manager.income WHERE client_id = {}",
+            filters.client_id()
+        ));
 
         if let Some(start_date) = filters.start_date() {
             builder.push(" AND reference >= ");
@@ -44,6 +42,12 @@ impl IncomeRepository for IncomeRepositoryImpl {
         if let Some(end_date) = filters.end_date() {
             builder.push(" AND reference <= ");
             builder.push_bind(end_date);
+        }
+
+        if let Some(financial_instrument_ids) = filters.financial_instrument_ids() {
+            builder.push(" AND financial_instrument_id = ANY(");
+            builder.push_bind(financial_instrument_ids);
+            builder.push(")");
         }
 
         let query = builder.build();
@@ -120,37 +124,45 @@ pub mod use_cases {
     #[derive(Debug, Clone, Default, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct IncomeListFilters {
-        client_id: Option<Uuid>,
+        client_id: Uuid,
         start_date: Option<NaiveDate>,
         end_date: Option<NaiveDate>,
+        financial_instrument_ids: Option<Vec<Uuid>>,
     }
 
     impl IncomeListFilters {
-        pub fn new() -> Self {
-            Self::default()
+        pub fn new(client_id: Uuid) -> Self {
+            Self {
+                client_id,
+                ..Default::default()
+            }
         }
 
-        pub fn with_client_id(mut self, client_id: Uuid) -> Self {
-            self.client_id = Some(client_id);
+        pub fn with_start_date(mut self, start_date: Option<NaiveDate>) -> Self {
+            self.start_date = start_date;
             self
         }
 
-        pub fn with_start_date(mut self, start_date: NaiveDate) -> Self {
-            self.start_date = Some(start_date);
+        pub fn with_end_date(mut self, end_date: Option<NaiveDate>) -> Self {
+            self.end_date = end_date;
             self
         }
 
-        pub fn with_end_date(mut self, end_date: NaiveDate) -> Self {
-            self.end_date = Some(end_date);
+        pub fn with_financial_instrument_ids(
+            mut self,
+            financial_instrument_ids: Option<Vec<Uuid>>,
+        ) -> Self {
+            self.financial_instrument_ids = financial_instrument_ids;
             self
         }
     }
 
     getters!(
         IncomeListFilters {
-            client_id: Option<Uuid>,
+            client_id: Uuid,
             start_date: Option<NaiveDate>,
             end_date: Option<NaiveDate>,
+            financial_instrument_ids: Option<Vec<Uuid>>,
         }
     );
 }
