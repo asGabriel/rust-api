@@ -5,9 +5,7 @@ use serde::{Deserialize, Serialize};
 use util::{date::date_with_day_or_last, from_row_constructor, getters};
 use uuid::Uuid;
 
-use crate::modules::finance_manager::domain::{
-    debt::installment::Installment, payment::Payment,
-};
+use crate::modules::finance_manager::domain::{debt::installment::Installment, payment::Payment};
 
 pub mod category;
 pub mod installment;
@@ -518,12 +516,7 @@ impl DebtFilters {
 
     pub fn with_optional_category_names(mut self, category_names: Option<Vec<String>>) -> Self {
         if let Some(names) = category_names {
-            self.category_names = Some(
-                names
-                    .into_iter()
-                    .map(|name| name.to_uppercase())
-                    .collect(),
-            );
+            self.category_names = Some(names.into_iter().map(|name| name.to_uppercase()).collect());
         }
         self
     }

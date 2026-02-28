@@ -5,11 +5,9 @@ use uuid::Uuid;
 
 pub mod configuration;
 
-use crate::modules::{
-    finance_manager::{
-        domain::financial_instrument::configuration::InstrumentConfiguration,
-        handler::financial_instrument::use_cases::UpdateFinancialInstrumentRequest,
-    },
+use crate::modules::finance_manager::{
+    domain::financial_instrument::configuration::InstrumentConfiguration,
+    handler::financial_instrument::use_cases::UpdateFinancialInstrumentRequest,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

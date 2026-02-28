@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use chrono::{Datelike, Utc};
+use chrono::Datelike;
 use http_error::{ext::OptionHttpExt, HttpResult};
 use uuid::Uuid;
 
@@ -10,7 +10,8 @@ use crate::modules::finance_manager::{
         Debt, DebtFilters,
     },
     handler::debt::use_cases::{
-        CreateDebtRequest, CreateRecurrenceRequest, UpdateDebtRequest, UpdateRecurrenceRequest,
+        CreateDebtRequest, CreateRecurrenceRequest, DebtGeneratorRequest, UpdateDebtRequest,
+        UpdateRecurrenceRequest,
     },
     repository::{
         debt::{installment::DynInstallmentRepository, DynDebtRepository},
@@ -44,7 +45,7 @@ pub trait DebtHandler {
         filters: &InstallmentFilters,
     ) -> HttpResult<Vec<Installment>>;
 
-    async fn generate_current_recurrences(&self) -> HttpResult<()>;
+    async fn generate_current_recurrences(&self, request: DebtGeneratorRequest) -> HttpResult<()>;
 
     async fn create_debt_recurrence(
         &self,
@@ -117,10 +118,10 @@ impl DebtHandlerImpl {
 
 #[async_trait]
 impl DebtHandler for DebtHandlerImpl {
-    async fn generate_current_recurrences(&self) -> HttpResult<()> {
-        let today = Utc::now().date_naive();
-        let current_year = today.year();
-        let current_month = today.month();
+    async fn generate_current_recurrences(&self, request: DebtGeneratorRequest) -> HttpResult<()> {
+        let current_date = request.get_date();
+        let current_year = current_date.year();
+        let current_month = current_date.month();
 
         let recurrences = self
             .recurrence_repository
@@ -134,14 +135,14 @@ impl DebtHandler for DebtHandlerImpl {
             }
 
             // Skip if outside the valid date range
-            if !recurrence.is_within_date_range(today) {
+            if !recurrence.is_within_date_range(current_date) {
                 continue;
             }
 
             let debt = recurrence.generate_debt_for_month(current_year, current_month);
             let saved_debt = self.debt_repository.insert(debt).await?;
 
-            recurrence.add_execution_log(today, *saved_debt.id());
+            recurrence.add_execution_log(current_date, *saved_debt.id());
             self.recurrence_repository.update(recurrence).await?;
         }
 
@@ -299,13 +300,26 @@ impl DebtHandler for DebtHandlerImpl {
 }
 
 pub mod use_cases {
-    use chrono::NaiveDate;
+    use chrono::{NaiveDate, Utc};
     use http_error::{HttpError, HttpResult};
     use rust_decimal::Decimal;
     use serde::{Deserialize, Serialize};
     use uuid::Uuid;
 
     use crate::modules::finance_manager::domain::debt::{DebtCategory, DebtStatus, ExpenseType};
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct DebtGeneratorRequest {
+        pub reference_date: Option<NaiveDate>,
+    }
+
+    impl DebtGeneratorRequest {
+        pub fn get_date(&self) -> NaiveDate {
+            self.reference_date
+                .unwrap_or_else(|| Utc::now().date_naive())
+        }
+    }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "camelCase")]
