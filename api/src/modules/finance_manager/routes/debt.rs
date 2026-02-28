@@ -14,7 +14,8 @@ use crate::modules::{
             installment::InstallmentFilters, recurrence::RecurrenceFilters, DebtFilters,
         },
         handler::debt::use_cases::{
-            CreateDebtRequest, CreateRecurrenceRequest, UpdateDebtRequest, UpdateRecurrenceRequest,
+            CreateDebtRequest, CreateRecurrenceRequest, DebtGeneratorRequest, UpdateDebtRequest,
+            UpdateRecurrenceRequest,
         },
     },
     routes::AppState,
@@ -54,11 +55,15 @@ pub fn configure_routes() -> Router<AppState> {
 
 async fn generate_recurrences(
     state: State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<DebtGeneratorRequest>,
 ) -> HttpResult<impl IntoResponse> {
+    let _user = state.auth_state.auth_handler.authenticate(&headers).await?;
+
     state
         .finance_manager_state
         .debt_handler
-        .generate_current_recurrences()
+        .generate_current_recurrences(request)
         .await
 }
 

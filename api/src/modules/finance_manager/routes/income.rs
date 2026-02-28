@@ -1,10 +1,4 @@
-use axum::{
-    extract::State,
-    http::HeaderMap,
-    response::IntoResponse,
-    routing::post,
-    Json, Router,
-};
+use axum::{extract::State, http::HeaderMap, response::IntoResponse, routing::post, Json, Router};
 use http_error::HttpResult;
 
 use crate::modules::{

@@ -66,5 +66,7 @@ async fn refund_payment(
         .refund_payment(*user.client_id(), id)
         .await?;
 
-    Ok(Json(serde_json::json!({ "message": "Payment refunded successfully" })))
+    Ok(Json(
+        serde_json::json!({ "message": "Payment refunded successfully" }),
+    ))
 }
