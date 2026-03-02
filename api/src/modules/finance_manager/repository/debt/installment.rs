@@ -3,8 +3,8 @@ use http_error::HttpResult;
 use sqlx::{Pool, Postgres, QueryBuilder};
 
 use crate::modules::finance_manager::{
-    domain::debt::installment::{Installment, InstallmentFilters},
-    repository::debt::installment::entity::InstallmentEntity,
+    domain::debt::installment::Installment,
+    repository::debt::installment::{entity::InstallmentEntity, use_cases::InstallmentFilters},
 };
 
 #[async_trait]
@@ -99,32 +99,39 @@ impl InstallmentRepository for InstallmentRepositoryImpl {
     }
 
     async fn list(&self, filters: &InstallmentFilters) -> HttpResult<Vec<Installment>> {
-        let mut builder =
-            QueryBuilder::new("SELECT * FROM finance_manager.debt_installment WHERE 1=1");
+        let mut builder = QueryBuilder::new(
+            "SELECT di.* FROM finance_manager.debt_installment di \
+             INNER JOIN finance_manager.debt d ON d.id = di.debt_id WHERE 1=1",
+        );
 
-        if let Some(debt_ids) = &filters.debt_ids {
-            builder.push(" AND debt_id = ANY(");
+        if let Some(client_id) = filters.client_id() {
+            builder.push(" AND d.client_id = ");
+            builder.push_bind(client_id);
+        }
+
+        if let Some(debt_ids) = filters.debt_ids() {
+            builder.push(" AND di.debt_id = ANY(");
             builder.push_bind(debt_ids);
             builder.push(")");
         }
 
-        if let Some(is_paid) = filters.is_paid {
-            builder.push(" AND is_paid = ");
+        if let Some(is_paid) = filters.is_paid() {
+            builder.push(" AND di.is_paid = ");
             builder.push_bind(is_paid);
         }
 
-        if let Some(start_date) = filters.start_date {
-            builder.push(" AND due_date >= ");
+        if let Some(start_date) = filters.start_date() {
+            builder.push(" AND di.due_date >= ");
             builder.push_bind(start_date);
         }
 
-        if let Some(end_date) = filters.end_date {
-            builder.push(" AND due_date <= ");
+        if let Some(end_date) = filters.end_date() {
+            builder.push(" AND di.due_date <= ");
             builder.push_bind(end_date);
         }
 
-        if let Some(payment_id) = filters.payment_id {
-            builder.push(" AND payment_id = ");
+        if let Some(payment_id) = filters.payment_id() {
+            builder.push(" AND di.payment_id = ");
             builder.push_bind(payment_id);
         }
 
@@ -136,6 +143,81 @@ impl InstallmentRepository for InstallmentRepositoryImpl {
             .map(|row| Installment::from(InstallmentEntity::from(&row)))
             .collect())
     }
+}
+
+pub mod use_cases {
+    use chrono::NaiveDate;
+    use serde::{Deserialize, Serialize};
+    use util::getters;
+    use uuid::Uuid;
+
+    #[derive(Debug, Clone, Default, Deserialize, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct InstallmentFilters {
+        client_id: Option<Uuid>,
+        debt_ids: Option<Vec<Uuid>>,
+        is_paid: Option<bool>,
+        start_date: Option<NaiveDate>,
+        end_date: Option<NaiveDate>,
+        payment_id: Option<Uuid>,
+    }
+
+    impl InstallmentFilters {
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        pub fn with_client_id(mut self, client_id: Uuid) -> Self {
+            self.client_id = Some(client_id);
+            self
+        }
+
+        pub fn with_debt_ids(mut self, debt_ids: Option<Vec<Uuid>>) -> Self {
+            if let Some(ids) = debt_ids {
+                self.debt_ids = Some(ids);
+            }
+            self
+        }
+
+        pub fn with_is_paid(mut self, is_paid: Option<bool>) -> Self {
+            if let Some(v) = is_paid {
+                self.is_paid = Some(v);
+            }
+            self
+        }
+
+        pub fn with_start_date(mut self, start_date: Option<NaiveDate>) -> Self {
+            if let Some(d) = start_date {
+                self.start_date = Some(d);
+            }
+            self
+        }
+
+        pub fn with_end_date(mut self, end_date: Option<NaiveDate>) -> Self {
+            if let Some(d) = end_date {
+                self.end_date = Some(d);
+            }
+            self
+        }
+
+        pub fn with_payment_id(mut self, payment_id: Option<Uuid>) -> Self {
+            if let Some(id) = payment_id {
+                self.payment_id = Some(id);
+            }
+            self
+        }
+    }
+
+    getters!(
+        InstallmentFilters {
+            client_id: Option<Uuid>,
+            debt_ids: Option<Vec<Uuid>>,
+            is_paid: Option<bool>,
+            start_date: Option<NaiveDate>,
+            end_date: Option<NaiveDate>,
+            payment_id: Option<Uuid>,
+        }
+    );
 }
 
 pub mod entity {

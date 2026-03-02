@@ -10,12 +10,10 @@ use uuid::Uuid;
 
 use crate::modules::{
     finance_manager::{
-        domain::debt::{
-            installment::InstallmentFilters, recurrence::RecurrenceFilters, DebtFilters,
-        },
+        domain::debt::{recurrence::RecurrenceFilters, DebtFilters},
         handler::debt::use_cases::{
-            CreateDebtRequest, CreateRecurrenceRequest, DebtGeneratorRequest, UpdateDebtRequest,
-            UpdateRecurrenceRequest,
+            CreateDebtRequest, CreateRecurrenceRequest, DebtGeneratorRequest,
+            ListDebtInstallmentsRequest, UpdateDebtRequest, UpdateRecurrenceRequest,
         },
     },
     routes::AppState,
@@ -132,13 +130,16 @@ async fn update_debt(
 }
 
 async fn list_debt_installments(
+    headers: HeaderMap,
     state: State<AppState>,
-    Json(filters): Json<InstallmentFilters>,
+    Json(request): Json<ListDebtInstallmentsRequest>,
 ) -> HttpResult<impl IntoResponse> {
+    let user = state.auth_state.auth_handler.authenticate(&headers).await?;
+
     let installments = state
         .finance_manager_state
         .debt_handler
-        .list_debt_installments(&filters)
+        .list_debt_installments(*user.client_id(), &request)
         .await?;
 
     Ok(Json(installments))

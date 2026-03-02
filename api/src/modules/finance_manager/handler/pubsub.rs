@@ -5,13 +5,13 @@ use http_error::{ext::OptionHttpExt, HttpResult};
 
 use crate::modules::finance_manager::{
     domain::{
-        debt::{
-            installment::{Installment, InstallmentFilters},
-            Debt,
-        },
+        debt::{installment::Installment, Debt},
         payment::Payment,
     },
-    repository::debt::{installment::DynInstallmentRepository, DynDebtRepository},
+    repository::debt::{
+        installment::{use_cases::InstallmentFilters, DynInstallmentRepository},
+        DynDebtRepository,
+    },
 };
 
 pub type DynPubSubHandler = dyn PubSubHandler + Send + Sync;
@@ -47,7 +47,7 @@ impl PubSubHandlerImpl {
     async fn process_latest_installment_for_debt(&self, payment: &Payment) -> HttpResult<()> {
         let installments = self
             .installment_repository
-            .list(&InstallmentFilters::new().with_debt_ids(&[*payment.debt_id()]))
+            .list(&InstallmentFilters::new().with_debt_ids(Some(vec![*payment.debt_id()])))
             .await?;
 
         let mut latest_installment = Installment::get_latest_unpaid(&installments)
@@ -71,7 +71,7 @@ impl PubSubHandler for PubSubHandlerImpl {
         if debt.has_installments() {
             let installments = self
                 .installment_repository
-                .list(&InstallmentFilters::new().with_debt_ids(&[*debt.id()]))
+                .list(&InstallmentFilters::new().with_debt_ids(Some(vec![*debt.id()])))
                 .await?;
 
             let latest_installment = Installment::get_latest_unpaid(&installments)
@@ -111,7 +111,7 @@ impl PubSubHandler for PubSubHandlerImpl {
         if debt.has_installments() {
             let installments = self
                 .installment_repository
-                .list(&InstallmentFilters::new().with_payment_id(*payment.id()))
+                .list(&InstallmentFilters::new().with_payment_id(Some(*payment.id())))
                 .await?;
 
             if let Some(installment) = installments.first() {
