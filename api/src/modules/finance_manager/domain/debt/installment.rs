@@ -20,16 +20,6 @@ pub struct Installment {
     updated_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct InstallmentFilters {
-    pub debt_ids: Option<Vec<Uuid>>,
-    pub is_paid: Option<bool>,
-    pub start_date: Option<NaiveDate>,
-    pub end_date: Option<NaiveDate>,
-    pub payment_id: Option<Uuid>,
-}
-
 impl Installment {
     pub fn new(debt_id: Uuid, installment_id: i32, due_date: NaiveDate, amount: Decimal) -> Self {
         Self {
@@ -92,39 +82,6 @@ impl Installment {
             .iter()
             .filter(|i| !i.is_paid())
             .min_by_key(|i| i.installment_id())
-    }
-}
-
-impl InstallmentFilters {
-    pub fn new() -> Self {
-        Self {
-            ..Default::default()
-        }
-    }
-
-    pub fn with_debt_ids(mut self, debt_ids: &[Uuid]) -> Self {
-        self.debt_ids = Some(debt_ids.to_vec());
-        self
-    }
-
-    pub fn with_is_paid(mut self, is_paid: bool) -> Self {
-        self.is_paid = Some(is_paid);
-        self
-    }
-
-    pub fn with_start_date(mut self, start_date: NaiveDate) -> Self {
-        self.start_date = Some(start_date);
-        self
-    }
-
-    pub fn with_end_date(mut self, end_date: NaiveDate) -> Self {
-        self.end_date = Some(end_date);
-        self
-    }
-
-    pub fn with_payment_id(mut self, payment_id: Uuid) -> Self {
-        self.payment_id = Some(payment_id);
-        self
     }
 }
 

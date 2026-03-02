@@ -5,14 +5,15 @@ use uuid::Uuid;
 
 use crate::modules::finance_manager::{
     domain::debt::{
-        installment::{Installment, InstallmentFilters},
+        installment::Installment,
         recurrence::{Recurrence, RecurrenceFilters},
         Debt, DebtFilters,
     },
     handler::debt::use_cases::{
-        CreateDebtRequest, CreateRecurrenceRequest, DebtGeneratorRequest, UpdateDebtRequest,
-        UpdateRecurrenceRequest,
+        CreateDebtRequest, CreateRecurrenceRequest, DebtGeneratorRequest,
+        ListDebtInstallmentsRequest, UpdateDebtRequest, UpdateRecurrenceRequest,
     },
+    repository::debt::installment::use_cases::InstallmentFilters,
     repository::{
         debt::{installment::DynInstallmentRepository, DynDebtRepository},
         financial_instrument::DynFinancialInstrumentRepository,
@@ -42,7 +43,8 @@ pub trait DebtHandler {
 
     async fn list_debt_installments(
         &self,
-        filters: &InstallmentFilters,
+        client_id: Uuid,
+        request: &ListDebtInstallmentsRequest,
     ) -> HttpResult<Vec<Installment>>;
 
     async fn generate_current_recurrences(&self, request: DebtGeneratorRequest) -> HttpResult<()>;
@@ -240,9 +242,18 @@ impl DebtHandler for DebtHandlerImpl {
 
     async fn list_debt_installments(
         &self,
-        filters: &InstallmentFilters,
+        client_id: Uuid,
+        request: &ListDebtInstallmentsRequest,
     ) -> HttpResult<Vec<Installment>> {
-        self.installment_repository.list(filters).await
+        let filters = InstallmentFilters::new()
+            .with_client_id(client_id)
+            .with_debt_ids(request.debt_ids.clone())
+            .with_is_paid(request.is_paid)
+            .with_start_date(request.start_date)
+            .with_end_date(request.end_date)
+            .with_payment_id(request.payment_id);
+
+        self.installment_repository.list(&filters).await
     }
 
     async fn register_new_debt(
@@ -420,5 +431,15 @@ pub mod use_cases {
         pub day_of_month: Option<i32>,
         pub end_date: Option<NaiveDate>,
         pub active: Option<bool>,
+    }
+
+    #[derive(Debug, Clone, Default, Deserialize, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ListDebtInstallmentsRequest {
+        pub debt_ids: Option<Vec<Uuid>>,
+        pub is_paid: Option<bool>,
+        pub start_date: Option<NaiveDate>,
+        pub end_date: Option<NaiveDate>,
+        pub payment_id: Option<Uuid>,
     }
 }
