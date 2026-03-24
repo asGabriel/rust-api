@@ -101,7 +101,8 @@ impl InstallmentRepository for InstallmentRepositoryImpl {
     async fn list(&self, filters: &InstallmentFilters) -> HttpResult<Vec<Installment>> {
         let mut builder = QueryBuilder::new(
             "SELECT di.* FROM finance_manager.debt_installment di \
-             INNER JOIN finance_manager.debt d ON d.id = di.debt_id WHERE 1=1",
+             INNER JOIN finance_manager.debt d ON d.id = di.debt_id \
+             WHERE d.deleted_by IS NULL AND di.deleted_by IS NULL",
         );
 
         if let Some(client_id) = filters.client_id() {
@@ -228,6 +229,10 @@ pub mod entity {
     use sqlx::Row;
     use uuid::Uuid;
 
+    use sqlx::types::Json;
+
+    use util::DeletedBy;
+
     use crate::modules::finance_manager::domain::debt::installment::Installment;
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -240,6 +245,7 @@ pub mod entity {
         pub payment_id: Option<Uuid>,
         pub created_at: NaiveDateTime,
         pub updated_at: Option<NaiveDateTime>,
+        pub deleted_by: Option<DeletedBy>,
     }
 
     impl From<&PgRow> for InstallmentEntity {
@@ -253,6 +259,9 @@ pub mod entity {
                 payment_id: row.get("payment_id"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
+                deleted_by: row
+                    .get::<Option<Json<DeletedBy>>, _>("deleted_by")
+                    .map(|j| j.0),
             }
         }
     }
@@ -268,6 +277,7 @@ pub mod entity {
                 payment_id: *installment.payment_id(),
                 created_at: installment.created_at().naive_utc(),
                 updated_at: installment.updated_at().map(|dt| dt.naive_utc()),
+                deleted_by: installment.deleted_by().clone(),
             }
         }
     }
@@ -283,6 +293,7 @@ pub mod entity {
                 entity.payment_id,
                 entity.created_at.and_utc(),
                 entity.updated_at.map(|dt| dt.and_utc()),
+                entity.deleted_by,
             )
         }
     }

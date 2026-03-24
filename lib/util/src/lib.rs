@@ -1,4 +1,7 @@
 pub mod date;
+pub mod deleted_by;
+
+pub use deleted_by::DeletedBy;
 
 // Macro to generate getters for a struct
 #[macro_export]

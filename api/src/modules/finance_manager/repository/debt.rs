@@ -1,7 +1,11 @@
 use async_trait::async_trait;
-use http_error::{ext::OptionHttpExt, HttpResult};
+use chrono::Utc;
+use http_error::{ext::OptionHttpExt, HttpError, HttpResult};
+use sqlx::types::Json;
 use sqlx::{Pool, Postgres, QueryBuilder};
 use uuid::Uuid;
+
+use util::DeletedBy;
 
 use crate::modules::finance_manager::domain::debt::{Debt, DebtFilters};
 
@@ -18,6 +22,13 @@ pub trait DebtRepository {
     async fn get_by_id(&self, id: &Uuid) -> HttpResult<Option<Debt>>;
 
     async fn update(&self, debt: Debt) -> HttpResult<Debt>;
+
+    async fn soft_delete_cascade(
+        &self,
+        client_id: Uuid,
+        debt_id: Uuid,
+        deleted_by: DeletedBy,
+    ) -> HttpResult<()>;
 }
 
 pub type DynDebtRepository = dyn DebtRepository + Send + Sync;
@@ -79,11 +90,74 @@ impl DebtRepository for DebtRepositoryImpl {
         Ok(Debt::from(entity::DebtEntity::from(&row)))
     }
 
+    async fn soft_delete_cascade(
+        &self,
+        client_id: Uuid,
+        debt_id: Uuid,
+        deleted_by: DeletedBy,
+    ) -> HttpResult<()> {
+        let mut tx = self.pool.begin().await?;
+        let now = Utc::now().naive_utc();
+        let meta = Json(deleted_by.clone());
+
+        let debt_res = sqlx::query(
+            r#"
+            UPDATE finance_manager.debt
+            SET deleted_by = $1, updated_at = $2
+            WHERE id = $3 AND client_id = $4 AND deleted_by IS NULL
+            "#,
+        )
+        .bind(&meta)
+        .bind(now)
+        .bind(debt_id)
+        .bind(client_id)
+        .execute(&mut *tx)
+        .await?;
+
+        if debt_res.rows_affected() == 0 {
+            tx.rollback().await?;
+            return Err(Box::new(HttpError::not_found("debt", debt_id)));
+        }
+
+        let meta = Json(deleted_by.clone());
+        sqlx::query(
+            r#"
+            UPDATE finance_manager.payment
+            SET deleted_by = $1, updated_at = $2
+            WHERE debt_id = $3 AND deleted_by IS NULL
+            "#,
+        )
+        .bind(&meta)
+        .bind(now)
+        .bind(debt_id)
+        .execute(&mut *tx)
+        .await?;
+
+        let meta = Json(deleted_by);
+        sqlx::query(
+            r#"
+            UPDATE finance_manager.debt_installment
+            SET deleted_by = $1, updated_at = $2
+            WHERE debt_id = $3 AND deleted_by IS NULL
+            "#,
+        )
+        .bind(&meta)
+        .bind(now)
+        .bind(debt_id)
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(())
+    }
+
     async fn get_by_id(&self, id: &Uuid) -> HttpResult<Option<Debt>> {
-        let row = sqlx::query(r#"SELECT * FROM finance_manager.debt WHERE id = $1"#)
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await?;
+        let row = sqlx::query(
+            r#"SELECT * FROM finance_manager.debt WHERE id = $1 AND deleted_by IS NULL"#,
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
 
         Ok(row.map(|r| Debt::from(entity::DebtEntity::from(&r))))
     }
@@ -96,7 +170,9 @@ impl DebtRepository for DebtRepositoryImpl {
             ))
         })?;
 
-        let row = sqlx::query(r#"SELECT * FROM finance_manager.debt WHERE identification = $1"#)
+        let row = sqlx::query(
+            r#"SELECT * FROM finance_manager.debt WHERE identification = $1 AND deleted_by IS NULL"#,
+        )
             .bind(identification_num)
             .fetch_optional(&self.pool)
             .await?;
@@ -154,7 +230,8 @@ impl DebtRepository for DebtRepositoryImpl {
     }
 
     async fn list(&self, filters: &DebtFilters) -> HttpResult<Vec<Debt>> {
-        let mut builder = QueryBuilder::new("SELECT * FROM finance_manager.debt WHERE 1=1");
+        let mut builder =
+            QueryBuilder::new("SELECT * FROM finance_manager.debt WHERE deleted_by IS NULL");
 
         if let Some(ids) = filters.ids() {
             builder.push(" AND id = ANY(");
@@ -221,6 +298,10 @@ pub mod entity {
     use sqlx::Row;
     use uuid::Uuid;
 
+    use sqlx::types::Json;
+
+    use util::DeletedBy;
+
     use crate::modules::finance_manager::domain::debt::{Debt, DebtCategory, ExpenseType};
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -242,6 +323,7 @@ pub mod entity {
         pub financial_instrument_id: Option<Uuid>,
         pub created_at: NaiveDateTime,
         pub updated_at: Option<NaiveDateTime>,
+        pub deleted_by: Option<DeletedBy>,
     }
 
     impl From<&PgRow> for DebtEntity {
@@ -264,6 +346,9 @@ pub mod entity {
                 financial_instrument_id: row.get("financial_instrument_id"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
+                deleted_by: row
+                    .get::<Option<Json<DeletedBy>>, _>("deleted_by")
+                    .map(|j| j.0),
             }
         }
     }
@@ -288,6 +373,7 @@ pub mod entity {
                 financial_instrument_id: *debt.financial_instrument_id(),
                 created_at: debt.created_at().naive_utc(),
                 updated_at: debt.updated_at().map(|dt| dt.naive_utc()),
+                deleted_by: debt.deleted_by().clone(),
             }
         }
     }
@@ -312,6 +398,7 @@ pub mod entity {
                 dto.financial_instrument_id,
                 dto.created_at.and_utc(),
                 dto.updated_at.map(|dt| dt.and_utc()),
+                dto.deleted_by,
             )
         }
     }

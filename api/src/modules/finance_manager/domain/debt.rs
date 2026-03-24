@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use util::{date::date_with_day_or_last, from_row_constructor, getters};
 use uuid::Uuid;
 
+use util::DeletedBy;
+
 use crate::modules::finance_manager::domain::{debt::installment::Installment, payment::Payment};
 
 pub mod category;
@@ -32,6 +34,8 @@ pub struct Debt {
     financial_instrument_id: Option<Uuid>,
     created_at: DateTime<Utc>,
     updated_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    deleted_by: Option<DeletedBy>,
 }
 
 impl Debt {
@@ -71,6 +75,7 @@ impl Debt {
             financial_instrument_id,
             created_at: Utc::now(),
             updated_at: None,
+            deleted_by: None,
         }
     }
 
@@ -372,6 +377,7 @@ getters!(
         financial_instrument_id: Option<Uuid>,
         created_at: DateTime<Utc>,
         updated_at: Option<DateTime<Utc>>,
+        deleted_by: Option<DeletedBy>,
     }
 );
 
@@ -421,6 +427,7 @@ from_row_constructor! {
         financial_instrument_id: Option<Uuid>,
         created_at: DateTime<Utc>,
         updated_at: Option<DateTime<Utc>>,
+        deleted_by: Option<DeletedBy>,
     }
 }
 
