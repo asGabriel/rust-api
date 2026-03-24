@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use http_error::HttpResult;
-use sqlx::{Pool, Postgres, QueryBuilder, Row};
+use sqlx::{Pool, Postgres, QueryBuilder};
 use uuid::Uuid;
 
 use crate::modules::finance_manager::{
@@ -61,24 +61,13 @@ impl PaymentRepository for PaymentRepositoryImpl {
         .fetch_one(&self.pool)
         .await?;
 
-        let result = PaymentDto {
-            id: row.get("id"),
-            client_id: row.get("client_id"),
-            debt_id: row.get("debt_id"),
-            account_id: row.get("account_id"),
-            amount: row.get("amount"),
-            payment_date: row.get("payment_date"),
-            created_at: row.get("created_at"),
-            updated_at: row.get("updated_at"),
-        };
-
-        Ok(Payment::from(result))
+        Ok(Payment::from(PaymentDto::from_row(&row)))
     }
 
     async fn list(&self, filters: &PaymentFilters) -> HttpResult<Vec<Payment>> {
         let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
             r#"
-                SELECT * FROM finance_manager.payment WHERE 1=1
+                SELECT * FROM finance_manager.payment WHERE deleted_by IS NULL
             "#,
         );
 
@@ -116,41 +105,21 @@ impl PaymentRepository for PaymentRepositoryImpl {
 
         let payments: Vec<Payment> = rows
             .iter()
-            .map(|row| {
-                Payment::from(PaymentDto {
-                    id: row.get("id"),
-                    client_id: row.get("client_id"),
-                    debt_id: row.get("debt_id"),
-                    account_id: row.get("account_id"),
-                    amount: row.get("amount"),
-                    payment_date: row.get("payment_date"),
-                    created_at: row.get("created_at"),
-                    updated_at: row.get("updated_at"),
-                })
-            })
+            .map(|row| Payment::from(PaymentDto::from_row(row)))
             .collect();
 
         Ok(payments)
     }
 
     async fn get_by_id(&self, id: &Uuid) -> HttpResult<Option<Payment>> {
-        let row = sqlx::query(r#"SELECT * FROM finance_manager.payment WHERE id = $1"#)
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await?;
+        let row = sqlx::query(
+            r#"SELECT * FROM finance_manager.payment WHERE id = $1 AND deleted_by IS NULL"#,
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
 
-        Ok(row.map(|r| {
-            Payment::from(PaymentDto {
-                id: r.get("id"),
-                client_id: r.get("client_id"),
-                debt_id: r.get("debt_id"),
-                account_id: r.get("account_id"),
-                amount: r.get("amount"),
-                payment_date: r.get("payment_date"),
-                created_at: r.get("created_at"),
-                updated_at: r.get("updated_at"),
-            })
-        }))
+        Ok(row.map(|r| Payment::from(PaymentDto::from_row(&r))))
     }
 
     async fn delete(&self, id: &Uuid) -> HttpResult<()> {
@@ -167,7 +136,12 @@ pub mod dto {
     use chrono::{NaiveDate, NaiveDateTime};
     use rust_decimal::Decimal;
     use serde::{Deserialize, Serialize};
+    use sqlx::postgres::PgRow;
+    use sqlx::types::Json;
+    use sqlx::Row;
     use uuid::Uuid;
+
+    use util::DeletedBy;
 
     use crate::modules::finance_manager::domain::payment::Payment;
 
@@ -181,6 +155,25 @@ pub mod dto {
         pub payment_date: NaiveDate,
         pub created_at: NaiveDateTime,
         pub updated_at: Option<NaiveDateTime>,
+        pub deleted_by: Option<DeletedBy>,
+    }
+
+    impl PaymentDto {
+        pub fn from_row(row: &PgRow) -> Self {
+            Self {
+                id: row.get("id"),
+                client_id: row.get("client_id"),
+                debt_id: row.get("debt_id"),
+                account_id: row.get("account_id"),
+                amount: row.get("amount"),
+                payment_date: row.get("payment_date"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+                deleted_by: row
+                    .get::<Option<Json<DeletedBy>>, _>("deleted_by")
+                    .map(|j| j.0),
+            }
+        }
     }
 
     impl From<Payment> for PaymentDto {
@@ -194,6 +187,7 @@ pub mod dto {
                 payment_date: *payment.payment_date(),
                 created_at: payment.created_at().naive_utc(),
                 updated_at: payment.updated_at().map(|dt| dt.naive_utc()),
+                deleted_by: payment.deleted_by().clone(),
             }
         }
     }
@@ -209,6 +203,7 @@ pub mod dto {
                 dto.payment_date,
                 dto.created_at.and_utc(),
                 dto.updated_at.map(|dt| dt.and_utc()),
+                dto.deleted_by,
             )
         }
     }

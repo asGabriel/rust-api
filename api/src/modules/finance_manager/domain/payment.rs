@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use util::{from_row_constructor, getters};
 use uuid::Uuid;
 
+use util::DeletedBy;
+
 use crate::modules::finance_manager::{
     domain::debt::Debt, handler::payment::use_cases::PaymentBasicData,
 };
@@ -19,6 +21,8 @@ pub struct Payment {
     payment_date: NaiveDate,
     created_at: DateTime<Utc>,
     updated_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    deleted_by: Option<DeletedBy>,
 }
 
 impl Payment {
@@ -32,6 +36,7 @@ impl Payment {
             payment_date: payment_data.payment_date,
             created_at: Utc::now(),
             updated_at: None,
+            deleted_by: None,
         }
     }
 }
@@ -46,6 +51,7 @@ getters! {
         payment_date: NaiveDate,
         created_at: DateTime<Utc>,
         updated_at: Option<DateTime<Utc>>,
+        deleted_by: Option<DeletedBy>,
     }
 }
 
@@ -59,5 +65,6 @@ from_row_constructor! {
         payment_date: NaiveDate,
         created_at: DateTime<Utc>,
         updated_at: Option<DateTime<Utc>>,
+        deleted_by: Option<DeletedBy>,
     }
 }

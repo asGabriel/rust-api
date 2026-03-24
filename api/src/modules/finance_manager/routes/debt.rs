@@ -1,6 +1,6 @@
 use axum::{
     extract::{Path, State},
-    http::HeaderMap,
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{patch, post},
     Json, Router,
@@ -38,8 +38,10 @@ pub fn configure_routes() -> Router<AppState> {
             .route("/{recurrence_id}", patch(update_recurrence)),
     );
 
-    let debt_id_routes =
-        Router::new().nest("/{debt_id}", Router::new().route("/", patch(update_debt)));
+    let debt_id_routes = Router::new().nest(
+        "/{debt_id}",
+        Router::new().route("/", patch(update_debt).delete(soft_delete_debt)),
+    );
 
     Router::new().nest(
         "/debt",
@@ -127,6 +129,21 @@ async fn update_debt(
         .update_debt(*user.client_id(), debt_id, request)
         .await?;
     Ok(Json(debt))
+}
+
+async fn soft_delete_debt(
+    state: State<AppState>,
+    headers: HeaderMap,
+    Path(debt_id): Path<Uuid>,
+) -> HttpResult<impl IntoResponse> {
+    let user = state.auth_state.auth_handler.authenticate(&headers).await?;
+    state
+        .finance_manager_state
+        .debt_handler
+        .soft_delete_debt(*user.client_id(), *user.id(), debt_id)
+        .await?;
+
+    Ok(StatusCode::OK)
 }
 
 async fn list_debt_installments(

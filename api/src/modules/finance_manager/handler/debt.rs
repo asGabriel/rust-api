@@ -3,6 +3,8 @@ use chrono::Datelike;
 use http_error::{ext::OptionHttpExt, HttpResult};
 use uuid::Uuid;
 
+use util::DeletedBy;
+
 use crate::modules::finance_manager::{
     domain::debt::{
         installment::Installment,
@@ -67,6 +69,13 @@ pub trait DebtHandler {
         recurrence_id: Uuid,
         request: UpdateRecurrenceRequest,
     ) -> HttpResult<Recurrence>;
+
+    async fn soft_delete_debt(
+        &self,
+        client_id: Uuid,
+        user_id: Uuid,
+        debt_id: Uuid,
+    ) -> HttpResult<()>;
 }
 
 #[derive(Clone)]
@@ -307,6 +316,29 @@ impl DebtHandler for DebtHandlerImpl {
         let debts = self.debt_repository.list(&built).await?;
 
         Ok(debts)
+    }
+
+    async fn soft_delete_debt(
+        &self,
+        client_id: Uuid,
+        user_id: Uuid,
+        debt_id: Uuid,
+    ) -> HttpResult<()> {
+        let debt = self
+            .debt_repository
+            .get_by_id(&debt_id)
+            .await?
+            .or_not_found("debt", debt_id.to_string())?;
+
+        if debt.client_id() != &client_id {
+            return Err(Box::new(http_error::HttpError::forbidden(
+                "You don't have permission to delete this debt",
+            )));
+        }
+
+        self.debt_repository
+            .soft_delete_cascade(client_id, debt_id, DeletedBy::new(user_id))
+            .await
     }
 }
 
