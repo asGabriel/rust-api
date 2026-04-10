@@ -10,6 +10,7 @@ use util::DeletedBy;
 use crate::modules::finance_manager::domain::debt::{Debt, DebtFilters};
 
 pub mod installment;
+pub mod invoice;
 
 #[async_trait]
 pub trait DebtRepository {

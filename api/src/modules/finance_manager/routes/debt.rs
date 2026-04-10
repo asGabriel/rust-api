@@ -19,6 +19,8 @@ use crate::modules::{
     routes::AppState,
 };
 
+pub mod invoice;
+
 pub fn configure_routes() -> Router<AppState> {
     let main_debt_routes = Router::new()
         .route("/list", post(list_debts))
@@ -49,7 +51,8 @@ pub fn configure_routes() -> Router<AppState> {
             .merge(main_debt_routes)
             .merge(installment_routes)
             .merge(recurrence_routes)
-            .merge(debt_id_routes),
+            .merge(debt_id_routes)
+            .merge(invoice::configure_routes()),
     )
 }
 

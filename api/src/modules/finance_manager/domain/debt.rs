@@ -11,6 +11,7 @@ use crate::modules::finance_manager::domain::{debt::installment::Installment, pa
 
 pub mod category;
 pub mod installment;
+pub mod invoice;
 pub mod recurrence;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
