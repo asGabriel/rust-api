@@ -9,7 +9,9 @@ use http_error::HttpResult;
 use uuid::Uuid;
 
 use crate::modules::{
-    finance_manager::domain::debt::invoice::use_cases::{CreateInvoiceRequest, ManageInvoiceDebts},
+    finance_manager::domain::debt::invoice::use_cases::{
+        CreateInvoiceRequest, ListInvoicesFilters, ManageInvoiceDebts,
+    },
     routes::AppState,
 };
 
@@ -18,6 +20,7 @@ pub fn configure_routes() -> Router<AppState> {
         "/invoice",
         Router::new()
             .route("/", post(create_invoice))
+            .route("/list", post(list_invoices))
             .route("/{invoice_id}", patch(manage_invoice)),
     )
 }
@@ -36,6 +39,22 @@ async fn create_invoice(
         .await?;
 
     Ok(Json(invoice))
+}
+
+async fn list_invoices(
+    state: State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<ListInvoicesFilters>,
+) -> HttpResult<impl IntoResponse> {
+    let user = state.auth_state.auth_handler.authenticate(&headers).await?;
+
+    let invoices = state
+        .finance_manager_state
+        .invoice_handler
+        .list_invoices(*user.client_id(), request)
+        .await?;
+
+    Ok(Json(invoices))
 }
 
 async fn manage_invoice(

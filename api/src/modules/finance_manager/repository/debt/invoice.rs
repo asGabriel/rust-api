@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use http_error::HttpResult;
-use sqlx::{types::Json, Pool, Postgres};
+use sqlx::{types::Json, Pool, Postgres, QueryBuilder};
 use uuid::Uuid;
 
 use crate::modules::{
@@ -23,28 +23,17 @@ impl InvoiceRepositoryImpl {
 #[async_trait]
 impl Repository<Invoice, InvoiceFilters, Uuid> for InvoiceRepositoryImpl {
     async fn list(&self, filters: &InvoiceFilters) -> HttpResult<Vec<Invoice>> {
-        let rows = if let Some(debt_ids) = &filters.related_debt_ids {
-            sqlx::query(
-                r#"
-                SELECT * FROM finance_manager.invoice
-                WHERE client_id = $1 AND related_debt_ids && $2::uuid[]
-                "#,
-            )
-            .bind(filters.client_id)
-            .bind(debt_ids)
-            .fetch_all(&self.pool)
-            .await?
-        } else {
-            sqlx::query(
-                r#"
-                SELECT * FROM finance_manager.invoice
-                WHERE client_id = $1
-                "#,
-            )
-            .bind(filters.client_id)
-            .fetch_all(&self.pool)
-            .await?
-        };
+        let mut builder =
+            QueryBuilder::new("SELECT * FROM finance_manager.invoice WHERE client_id = ");
+        builder.push_bind(filters.client_id);
+
+        if let Some(debt_ids) = &filters.related_debt_ids {
+            builder.push(" AND related_debt_ids && ");
+            builder.push_bind(debt_ids);
+        }
+
+        let query = builder.build();
+        let rows = query.fetch_all(&self.pool).await?;
 
         Ok(rows.iter().map(Invoice::from).collect())
     }

@@ -8,7 +8,7 @@ use crate::modules::finance_manager::{
     domain::debt::{
         invoice::{
             filters::InvoiceFilters,
-            use_cases::{CreateInvoiceRequest, ManageInvoiceDebts},
+            use_cases::{CreateInvoiceRequest, ListInvoicesFilters, ManageInvoiceDebts},
             Invoice,
         },
         DebtFilters,
@@ -27,7 +27,7 @@ pub trait InvoiceHandler {
     async fn list_invoices(
         &self,
         client_id: Uuid,
-        filters: InvoiceFilters,
+        request: ListInvoicesFilters,
     ) -> HttpResult<Vec<Invoice>>;
 
     async fn manage_invoice(
@@ -62,10 +62,10 @@ impl InvoiceHandler for InvoiceHandlerImpl {
     async fn list_invoices(
         &self,
         client_id: Uuid,
-        filters: InvoiceFilters,
+        request: ListInvoicesFilters,
     ) -> HttpResult<Vec<Invoice>> {
         let filters =
-            InvoiceFilters::new(client_id).with_related_debt_ids(filters.related_debt_ids);
+            InvoiceFilters::new(client_id).with_related_debt_ids(request.related_debt_ids);
 
         self.invoice_repository.list(&filters).await
     }

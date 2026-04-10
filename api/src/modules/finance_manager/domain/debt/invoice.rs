@@ -220,6 +220,13 @@ pub mod use_cases {
         pub name: String,
     }
 
+    #[derive(Debug, Clone, Deserialize, Serialize, Default)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ListInvoicesFilters {
+        #[serde(default)]
+        pub related_debt_ids: Option<Vec<Uuid>>,
+    }
+
     #[derive(Debug, Clone, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct ManageInvoiceDebts {
