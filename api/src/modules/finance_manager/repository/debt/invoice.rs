@@ -3,10 +3,8 @@ use http_error::HttpResult;
 use sqlx::{types::Json, Pool, Postgres, QueryBuilder};
 use uuid::Uuid;
 
-use crate::modules::{
-    finance_manager::domain::debt::invoice::{filters::InvoiceFilters, Invoice},
-    shared::repository::Repository,
-};
+use crate::modules::finance_manager::domain::debt::invoice::{filters::InvoiceFilters, Invoice};
+use crate::modules::shared::repository::Repository;
 
 pub type DynInvoiceRepository = dyn Repository<Invoice, InvoiceFilters, Uuid> + Send + Sync;
 
@@ -30,6 +28,11 @@ impl Repository<Invoice, InvoiceFilters, Uuid> for InvoiceRepositoryImpl {
         if let Some(debt_ids) = &filters.related_debt_ids {
             builder.push(" AND related_debt_ids && ");
             builder.push_bind(debt_ids);
+        }
+
+        if let Some(d) = filters.reference_date {
+            builder.push(" AND reference_date = ");
+            builder.push_bind(d);
         }
 
         let query = builder.build();
@@ -56,18 +59,20 @@ impl Repository<Invoice, InvoiceFilters, Uuid> for InvoiceRepositoryImpl {
                 id,
                 client_id,
                 name,
+                reference_date,
                 related_debt_ids,
                 created_at,
                 updated_at,
                 deleted_by
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING *
             "#,
         )
         .bind(*item.id())
         .bind(*item.client_id())
         .bind(item.name())
+        .bind(*item.reference_date())
         .bind(Vec::from_iter(item.related_debt_ids().iter().copied()))
         .bind(*item.created_at())
         .bind(*item.updated_at())
@@ -91,18 +96,20 @@ impl Repository<Invoice, InvoiceFilters, Uuid> for InvoiceRepositoryImpl {
                     id,
                     client_id,
                     name,
+                    reference_date,
                     related_debt_ids,
                     created_at,
                     updated_at,
                     deleted_by
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 RETURNING *
                 "#,
             )
             .bind(*item.id())
             .bind(*item.client_id())
             .bind(item.name())
+            .bind(*item.reference_date())
             .bind(Vec::from_iter(item.related_debt_ids().iter().copied()))
             .bind(*item.created_at())
             .bind(*item.updated_at())
@@ -125,9 +132,10 @@ impl Repository<Invoice, InvoiceFilters, Uuid> for InvoiceRepositoryImpl {
             UPDATE finance_manager.invoice SET
                 client_id = $2,
                 name = $3,
-                related_debt_ids = $4,
-                updated_at = $5,
-                deleted_by = $6
+                reference_date = $4,
+                related_debt_ids = $5,
+                updated_at = $6,
+                deleted_by = $7
             WHERE id = $1
             RETURNING *
             "#,
@@ -135,6 +143,7 @@ impl Repository<Invoice, InvoiceFilters, Uuid> for InvoiceRepositoryImpl {
         .bind(*item.id())
         .bind(*item.client_id())
         .bind(item.name())
+        .bind(*item.reference_date())
         .bind(Vec::from_iter(item.related_debt_ids().iter().copied()))
         .bind(*item.updated_at())
         .bind(deleted_by)

@@ -5,12 +5,11 @@ use http_error::{ext::OptionHttpExt, HttpResult};
 use uuid::Uuid;
 
 use crate::modules::finance_manager::{
-    domain::debt::{
-        invoice::{
-            filters::InvoiceFilters,
-            use_cases::{CreateInvoiceRequest, ListInvoicesFilters, ManageInvoiceDebts},
-            Invoice,
-        },
+    domain::debt::invoice::{
+        filters::InvoiceFilters,
+        reference_month_as_date,
+        use_cases::{CreateInvoiceRequest, ListInvoicesFilters, ManageInvoiceDebts},
+        Invoice,
     },
     repository::debt::invoice::DynInvoiceRepository,
 };
@@ -62,8 +61,9 @@ impl InvoiceHandler for InvoiceHandlerImpl {
         client_id: Uuid,
         request: ListInvoicesFilters,
     ) -> HttpResult<Vec<Invoice>> {
-        let filters =
-            InvoiceFilters::new(client_id).with_related_debt_ids(request.related_debt_ids);
+        let filters = InvoiceFilters::new(client_id)
+            .with_related_debt_ids(request.related_debt_ids)
+            .with_reference_date(request.reference_date.map(reference_month_as_date));
 
         self.invoice_repository.list(&filters).await
     }
