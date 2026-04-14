@@ -24,6 +24,8 @@ use crate::modules::finance_manager::{
 };
 use std::sync::Arc;
 
+pub mod invoice;
+
 pub type DynDebtHandler = dyn DebtHandler + Send + Sync;
 
 #[async_trait]

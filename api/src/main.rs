@@ -4,11 +4,17 @@ use api::modules::{
     auth::{handler::AuthHandlerImpl, repository::user::UserRepositoryImpl, AuthState},
     finance_manager::{
         handler::{
-            debt::DebtHandlerImpl, financial_instrument::FinancialInstrumentHandlerImpl,
-            income::IncomeHandlerImpl, payment::PaymentHandlerImpl, pubsub::PubSubHandlerImpl,
+            debt::{invoice::InvoiceHandlerImpl, DebtHandlerImpl},
+            financial_instrument::FinancialInstrumentHandlerImpl,
+            income::IncomeHandlerImpl,
+            payment::PaymentHandlerImpl,
+            pubsub::PubSubHandlerImpl,
         },
         repository::{
-            debt::{installment::InstallmentRepositoryImpl, DebtRepositoryImpl},
+            debt::{
+                installment::InstallmentRepositoryImpl, invoice::InvoiceRepositoryImpl,
+                DebtRepositoryImpl,
+            },
             financial_instrument::FinancialInstrumentRepositoryImpl,
             income::IncomeRepositoryImpl,
             payment::PaymentRepositoryImpl,
@@ -32,6 +38,7 @@ async fn main() {
     // Build handlers
     let payment_handler = build_payment_handler(pool, &pubsub);
     let debt_handler = build_debt_handler(pool);
+    let invoice_handler = build_invoice_handler(pool);
     let financial_instrument_handler = build_financial_instrument_handler(pool);
     let income_handler = build_income_handler(pool);
 
@@ -39,6 +46,7 @@ async fn main() {
     let finance_manager_state = FinanceManagerState {
         payment_handler: Arc::new(payment_handler.clone()),
         debt_handler: Arc::new(debt_handler.clone()),
+        invoice_handler: Arc::new(invoice_handler),
         financial_instrument_handler: Arc::new(financial_instrument_handler.clone()),
         income_handler: Arc::new(income_handler.clone()),
     };
@@ -86,6 +94,12 @@ fn build_debt_handler(pool: &Pool<Postgres>) -> DebtHandlerImpl {
         installment_repository: Arc::new(InstallmentRepositoryImpl::new(pool)),
         recurrence_repository: Arc::new(RecurrenceRepositoryImpl::new(pool)),
         financial_instrument_repository: Arc::new(FinancialInstrumentRepositoryImpl::new(pool)),
+    }
+}
+
+fn build_invoice_handler(pool: &Pool<Postgres>) -> InvoiceHandlerImpl {
+    InvoiceHandlerImpl {
+        invoice_repository: Arc::new(InvoiceRepositoryImpl::new(pool)),
     }
 }
 

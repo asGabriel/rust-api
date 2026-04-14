@@ -4,8 +4,10 @@ use axum::Router;
 
 use crate::modules::{
     finance_manager::handler::{
-        debt::DynDebtHandler, financial_instrument::DynFinancialInstrumentHandler,
-        income::DynIncomeHandler, payment::DynPaymentHandler,
+        debt::{invoice::DynInvoiceHandler, DynDebtHandler},
+        financial_instrument::DynFinancialInstrumentHandler,
+        income::DynIncomeHandler,
+        payment::DynPaymentHandler,
     },
     routes::AppState,
 };
@@ -19,6 +21,7 @@ pub struct FinanceManagerState {
     pub income_handler: Arc<DynIncomeHandler>,
     pub payment_handler: Arc<DynPaymentHandler>,
     pub debt_handler: Arc<DynDebtHandler>,
+    pub invoice_handler: Arc<DynInvoiceHandler>,
     pub financial_instrument_handler: Arc<DynFinancialInstrumentHandler>,
 }
 
