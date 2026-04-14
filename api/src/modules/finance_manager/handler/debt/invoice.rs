@@ -11,9 +11,8 @@ use crate::modules::finance_manager::{
             use_cases::{CreateInvoiceRequest, ListInvoicesFilters, ManageInvoiceDebts},
             Invoice,
         },
-        DebtFilters,
     },
-    repository::debt::{invoice::DynInvoiceRepository, DynDebtRepository},
+    repository::debt::invoice::DynInvoiceRepository,
 };
 
 #[async_trait]
@@ -42,7 +41,6 @@ pub type DynInvoiceHandler = dyn InvoiceHandler + Send + Sync;
 
 #[derive(Clone)]
 pub struct InvoiceHandlerImpl {
-    pub debt_repository: Arc<DynDebtRepository>,
     pub invoice_repository: Arc<DynInvoiceRepository>,
 }
 
@@ -89,12 +87,7 @@ impl InvoiceHandler for InvoiceHandlerImpl {
         invoice.belongs_to_client(client_id)?;
         invoice.validate_changes(&request)?;
 
-        let unique_debt_ids = request.unique_debt_ids_referenced();
-
-        let filters = DebtFilters::new(client_id).with_ids(unique_debt_ids.clone());
-        let debts = self.debt_repository.list(&filters).await?;
-
-        invoice.apply_changes(&request, &debts);
+        invoice.apply_changes(&request);
 
         self.invoice_repository.update(invoice).await?;
 

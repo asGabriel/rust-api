@@ -48,7 +48,6 @@ impl Repository<Invoice, InvoiceFilters, Uuid> for InvoiceRepositoryImpl {
     }
 
     async fn insert(&self, item: Invoice) -> HttpResult<Invoice> {
-        let summary = Json(item.summary().clone());
         let deleted_by = item.deleted_by().clone().map(Json);
 
         let row = sqlx::query(
@@ -58,12 +57,11 @@ impl Repository<Invoice, InvoiceFilters, Uuid> for InvoiceRepositoryImpl {
                 client_id,
                 name,
                 related_debt_ids,
-                summary,
                 created_at,
                 updated_at,
                 deleted_by
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING *
             "#,
         )
@@ -71,7 +69,6 @@ impl Repository<Invoice, InvoiceFilters, Uuid> for InvoiceRepositoryImpl {
         .bind(*item.client_id())
         .bind(item.name())
         .bind(Vec::from_iter(item.related_debt_ids().iter().copied()))
-        .bind(summary)
         .bind(*item.created_at())
         .bind(*item.updated_at())
         .bind(deleted_by)
@@ -86,7 +83,6 @@ impl Repository<Invoice, InvoiceFilters, Uuid> for InvoiceRepositoryImpl {
         let mut results = Vec::with_capacity(items.len());
 
         for item in items {
-            let summary = Json(item.summary().clone());
             let deleted_by = item.deleted_by().clone().map(Json);
 
             let row = sqlx::query(
@@ -96,12 +92,11 @@ impl Repository<Invoice, InvoiceFilters, Uuid> for InvoiceRepositoryImpl {
                     client_id,
                     name,
                     related_debt_ids,
-                    summary,
                     created_at,
                     updated_at,
                     deleted_by
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
                 RETURNING *
                 "#,
             )
@@ -109,7 +104,6 @@ impl Repository<Invoice, InvoiceFilters, Uuid> for InvoiceRepositoryImpl {
             .bind(*item.client_id())
             .bind(item.name())
             .bind(Vec::from_iter(item.related_debt_ids().iter().copied()))
-            .bind(summary)
             .bind(*item.created_at())
             .bind(*item.updated_at())
             .bind(deleted_by)
@@ -124,7 +118,6 @@ impl Repository<Invoice, InvoiceFilters, Uuid> for InvoiceRepositoryImpl {
     }
 
     async fn update(&self, item: Invoice) -> HttpResult<Invoice> {
-        let summary = Json(item.summary().clone());
         let deleted_by = item.deleted_by().clone().map(Json);
 
         let row = sqlx::query(
@@ -133,9 +126,8 @@ impl Repository<Invoice, InvoiceFilters, Uuid> for InvoiceRepositoryImpl {
                 client_id = $2,
                 name = $3,
                 related_debt_ids = $4,
-                summary = $5,
-                updated_at = $6,
-                deleted_by = $7
+                updated_at = $5,
+                deleted_by = $6
             WHERE id = $1
             RETURNING *
             "#,
@@ -144,7 +136,6 @@ impl Repository<Invoice, InvoiceFilters, Uuid> for InvoiceRepositoryImpl {
         .bind(*item.client_id())
         .bind(item.name())
         .bind(Vec::from_iter(item.related_debt_ids().iter().copied()))
-        .bind(summary)
         .bind(*item.updated_at())
         .bind(deleted_by)
         .fetch_one(&self.pool)

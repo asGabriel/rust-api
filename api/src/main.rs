@@ -99,7 +99,6 @@ fn build_debt_handler(pool: &Pool<Postgres>) -> DebtHandlerImpl {
 
 fn build_invoice_handler(pool: &Pool<Postgres>) -> InvoiceHandlerImpl {
     InvoiceHandlerImpl {
-        debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
         invoice_repository: Arc::new(InvoiceRepositoryImpl::new(pool)),
     }
 }

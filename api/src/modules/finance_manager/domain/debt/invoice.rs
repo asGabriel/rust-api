@@ -2,14 +2,12 @@ use std::collections::HashSet;
 
 use chrono::{DateTime, Utc};
 use http_error::{HttpError, HttpResult};
-use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use util::{getters, DeletedBy};
 use uuid::Uuid;
 
-use crate::modules::finance_manager::domain::debt::{
-    invoice::use_cases::{CreateInvoiceRequest, ManageInvoiceDebts},
-    Debt,
+use crate::modules::finance_manager::domain::debt::invoice::use_cases::{
+    CreateInvoiceRequest, ManageInvoiceDebts,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,43 +22,10 @@ pub struct Invoice {
     #[serde(default)]
     related_debt_ids: HashSet<Uuid>,
 
-    /// The summary of the invoice
-    summary: InvoiceSummary,
-
     created_at: DateTime<Utc>,
     updated_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     deleted_by: Option<DeletedBy>,
-}
-
-/// The summary of the invoice
-/// Calculated from the debts related to the invoice
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct InvoiceSummary {
-    total_amount: Decimal,
-    paid_amount: Decimal,
-    remaining_amount: Decimal,
-}
-
-impl InvoiceSummary {
-    /// Aggregates totals from the given debts (e.g. the invoice's current related debts).
-    pub fn from_debts<'a>(debts: impl IntoIterator<Item = &'a Debt>) -> Self {
-        let mut total_amount = Decimal::ZERO;
-        let mut paid_amount = Decimal::ZERO;
-        let mut remaining_amount = Decimal::ZERO;
-
-        for debt in debts {
-            total_amount += *debt.total_amount();
-            paid_amount += *debt.paid_amount();
-            remaining_amount += *debt.remaining_amount();
-        }
-        Self {
-            total_amount,
-            paid_amount,
-            remaining_amount,
-        }
-    }
 }
 
 getters! {
@@ -69,7 +34,6 @@ getters! {
         client_id: Uuid,
         name: String,
         related_debt_ids: HashSet<Uuid>,
-        summary: InvoiceSummary,
         created_at: DateTime<Utc>,
         updated_at: Option<DateTime<Utc>>,
         deleted_by: Option<DeletedBy>,
@@ -88,7 +52,6 @@ impl From<&sqlx::postgres::PgRow> for Invoice {
                 .get::<Vec<Uuid>, _>("related_debt_ids")
                 .into_iter()
                 .collect(),
-            summary: row.get::<Json<InvoiceSummary>, _>("summary").0,
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
             deleted_by: row
@@ -133,7 +96,6 @@ impl Invoice {
             client_id,
             name: request.name,
             related_debt_ids: HashSet::new(),
-            summary: InvoiceSummary::default(),
             created_at: Utc::now(),
             updated_at: None,
             deleted_by: None,
@@ -182,12 +144,9 @@ impl Invoice {
         Ok(())
     }
 
-    pub fn apply_changes(&mut self, request: &ManageInvoiceDebts, debts: &[Debt]) {
+    pub fn apply_changes(&mut self, request: &ManageInvoiceDebts) {
         self.add_related_debt_ids(&request.add_debt_ids);
         self.remove_related_debt_ids(&request.remove_debt_ids);
-
-        self.refresh_summary_from_debts(debts);
-
         self.updated_at = Some(Utc::now());
     }
 
@@ -201,16 +160,9 @@ impl Invoice {
         }
         self.related_debt_ids.retain(|id| !ids.contains(id));
     }
-
-    fn refresh_summary_from_debts(&mut self, debts: &[Debt]) {
-        let ids = &self.related_debt_ids;
-        self.summary = InvoiceSummary::from_debts(debts.iter().filter(|d| ids.contains(d.id())));
-    }
 }
 
 pub mod use_cases {
-    use std::collections::HashSet;
-
     use serde::{Deserialize, Serialize};
     use uuid::Uuid;
 
@@ -239,17 +191,6 @@ pub mod use_cases {
     impl ManageInvoiceDebts {
         pub fn is_empty(&self) -> bool {
             self.add_debt_ids.is_empty() && self.remove_debt_ids.is_empty()
-        }
-
-        /// Distinct debt ids from add/remove lists, first-seen order.
-        pub fn unique_debt_ids_referenced(&self) -> Vec<Uuid> {
-            let mut seen = HashSet::<Uuid>::new();
-            self.add_debt_ids
-                .iter()
-                .chain(self.remove_debt_ids.iter())
-                .copied()
-                .filter(|id| seen.insert(*id))
-                .collect()
         }
     }
 }
