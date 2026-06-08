@@ -18,7 +18,6 @@ use crate::modules::finance_manager::{
     repository::debt::installment::use_cases::InstallmentFilters,
     repository::{
         debt::{installment::DynInstallmentRepository, DynDebtRepository},
-        financial_instrument::DynFinancialInstrumentRepository,
         recurrence::DynRecurrenceRepository,
     },
 };
@@ -83,7 +82,6 @@ pub trait DebtHandler {
 #[derive(Clone)]
 pub struct DebtHandlerImpl {
     pub debt_repository: Arc<DynDebtRepository>,
-    pub financial_instrument_repository: Arc<DynFinancialInstrumentRepository>,
     pub installment_repository: Arc<DynInstallmentRepository>,
     pub recurrence_repository: Arc<DynRecurrenceRepository>,
 }
@@ -92,38 +90,12 @@ impl DebtHandlerImpl {
     /// Processes installments for a debt if applicable.
     /// Returns None if no installments, or the generated installments.
     /// Also updates the debt's due_date to the last installment date.
-    async fn process_installments(
-        &self,
-        debt: &mut Debt,
-        financial_instrument_id: Option<Uuid>,
-    ) -> HttpResult<Option<Vec<Installment>>> {
+    fn process_installments(&self, debt: &mut Debt) -> HttpResult<Option<Vec<Installment>>> {
         if !debt.has_installments() {
             return Ok(None);
         }
 
-        let instrument_id = financial_instrument_id.ok_or_else(|| {
-            Box::new(http_error::HttpError::bad_request(
-                "Financial instrument is required for installment debts",
-            ))
-        })?;
-
-        let instrument = self
-            .financial_instrument_repository
-            .get_by_id(instrument_id)
-            .await?
-            .ok_or_else(|| {
-                Box::new(http_error::HttpError::not_found(
-                    "financial_instrument",
-                    instrument_id,
-                ))
-            })?;
-
-        let due_day = instrument.configuration().default_due_date.ok_or_else(|| {
-            Box::new(http_error::HttpError::bad_request(
-                "Financial instrument must have a configured due date for installment debts",
-            ))
-        })?;
-
+        let due_day = debt.due_date().day();
         let installments = debt.generate_installments(due_day)?;
         Ok(Some(installments))
     }
@@ -284,13 +256,10 @@ impl DebtHandler for DebtHandlerImpl {
             request.category,
             request.expense_type,
             request.tags,
-            request.financial_instrument_id,
             request.installment_count,
         );
 
-        let installments = self
-            .process_installments(&mut debt, request.financial_instrument_id)
-            .await?;
+        let installments = self.process_installments(&mut debt)?;
 
         let debt = self.debt_repository.insert(debt).await?;
 
@@ -304,16 +273,12 @@ impl DebtHandler for DebtHandlerImpl {
     }
 
     async fn list_debts(&self, client_id: Uuid, filters: &DebtFilters) -> HttpResult<Vec<Debt>> {
-        let mut built = DebtFilters::new(client_id)
+        let built = DebtFilters::new(client_id)
             .with_optional_statuses(filters.statuses().clone())
             .with_optional_ids(filters.ids().clone())
             .with_optional_start_date(filters.start_date().clone())
             .with_optional_end_date(filters.end_date().clone())
             .with_optional_category_names(filters.category_names().clone());
-
-        if let Some(ids) = filters.financial_instrument_ids() {
-            built = built.with_financial_instrument_ids(ids.clone());
-        }
 
         let debts = self.debt_repository.list(&built).await?;
 
@@ -378,7 +343,6 @@ pub mod use_cases {
         pub paid_amount: Option<Decimal>,
         pub discount_amount: Option<Decimal>,
         pub status: Option<DebtStatus>,
-        pub financial_instrument_id: Option<Uuid>,
         pub installment_count: Option<i32>,
     }
 
@@ -401,7 +365,6 @@ pub mod use_cases {
                 discount_amount: None,
                 due_date,
                 status: Some(DebtStatus::Open),
-                financial_instrument_id: None,
                 installment_count,
             }
         }
@@ -413,17 +376,7 @@ pub mod use_cases {
                 )));
             }
 
-            if self.invalid_installment() {
-                return Err(Box::new(HttpError::bad_request(
-                    "Installment count and financial instrument must be provided for installment debts",
-                )));
-            }
-
             Ok(())
-        }
-
-        fn invalid_installment(&self) -> bool {
-            self.installment_count.is_some() && self.financial_instrument_id.is_none()
         }
 
         fn invalid_total_amount(&self) -> bool {

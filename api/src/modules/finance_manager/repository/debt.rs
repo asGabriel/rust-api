@@ -64,8 +64,7 @@ impl DebtRepository for DebtRepositoryImpl {
                 due_date = $10, 
                 status = $11, 
                 installment_count = $12,
-                financial_instrument_id = $13,
-                updated_at = $14
+                updated_at = $13
             WHERE id = $1 
             RETURNING *
             "#,
@@ -82,7 +81,6 @@ impl DebtRepository for DebtRepositoryImpl {
         .bind(debt_dto.due_date)
         .bind(&debt_dto.status)
         .bind(debt_dto.installment_count)
-        .bind(debt_dto.financial_instrument_id)
         .bind(debt_dto.updated_at)
         .fetch_optional(&self.pool)
         .await?
@@ -200,11 +198,10 @@ impl DebtRepository for DebtRepositoryImpl {
                 due_date,
                 status,
                 installment_count,
-                financial_instrument_id,
                 created_at,
                 updated_at
             ) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             RETURNING *
         "#,
         )
@@ -221,7 +218,6 @@ impl DebtRepository for DebtRepositoryImpl {
         .bind(debt_dto.due_date)
         .bind(&debt_dto.status)
         .bind(debt_dto.installment_count)
-        .bind(debt_dto.financial_instrument_id)
         .bind(debt_dto.created_at)
         .bind(debt_dto.updated_at)
         .fetch_one(&self.pool)
@@ -272,12 +268,6 @@ impl DebtRepository for DebtRepositoryImpl {
             builder.push(")");
         }
 
-        if let Some(ids) = filters.financial_instrument_ids() {
-            builder.push(" AND financial_instrument_id = ANY(");
-            builder.push_bind(ids);
-            builder.push(")");
-        }
-
         builder.push(" ORDER BY due_date ASC, status DESC");
 
         let query = builder.build();
@@ -321,7 +311,6 @@ pub mod entity {
         pub due_date: NaiveDate,
         pub status: String,
         pub installment_count: Option<i32>,
-        pub financial_instrument_id: Option<Uuid>,
         pub created_at: NaiveDateTime,
         pub updated_at: Option<NaiveDateTime>,
         pub deleted_by: Option<DeletedBy>,
@@ -344,7 +333,6 @@ pub mod entity {
                 due_date: row.get("due_date"),
                 status: row.get("status"),
                 installment_count: row.get("installment_count"),
-                financial_instrument_id: row.get("financial_instrument_id"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
                 deleted_by: row
@@ -371,7 +359,6 @@ pub mod entity {
                 due_date: *debt.due_date(),
                 status: debt.status().clone().into(),
                 installment_count: *debt.installment_count(),
-                financial_instrument_id: *debt.financial_instrument_id(),
                 created_at: debt.created_at().naive_utc(),
                 updated_at: debt.updated_at().map(|dt| dt.naive_utc()),
                 deleted_by: debt.deleted_by().clone(),
@@ -396,7 +383,6 @@ pub mod entity {
                 dto.due_date,
                 dto.status.into(),
                 dto.installment_count,
-                dto.financial_instrument_id,
                 dto.created_at.and_utc(),
                 dto.updated_at.map(|dt| dt.and_utc()),
                 dto.deleted_by,

@@ -32,7 +32,6 @@ pub struct Debt {
     #[serde(default)]
     status: DebtStatus,
     installment_count: Option<i32>,
-    financial_instrument_id: Option<Uuid>,
     created_at: DateTime<Utc>,
     updated_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -50,7 +49,6 @@ impl Debt {
         category: Option<DebtCategory>,
         expense_type: Option<ExpenseType>,
         tags: Option<Vec<String>>,
-        financial_instrument_id: Option<Uuid>,
         installment_count: Option<i32>,
     ) -> Self {
         let uuid = Uuid::new_v4();
@@ -73,7 +71,6 @@ impl Debt {
             due_date,
             status: DebtStatus::default(),
             installment_count,
-            financial_instrument_id,
             created_at: Utc::now(),
             updated_at: None,
             deleted_by: None,
@@ -120,7 +117,7 @@ impl Debt {
         Ok(())
     }
 
-    /// Generates installments based on the configured due day from the financial instrument.
+    /// Generates installments based on the due day from the debt's due date.
     /// Updates the debt's due_date to the last installment date.
     /// Should only be called when has_installments() is true.
     pub fn generate_installments(&mut self, due_day: u32) -> HttpResult<Vec<Installment>> {
@@ -375,7 +372,6 @@ getters!(
         due_date: NaiveDate,
         status: DebtStatus,
         installment_count: Option<i32>,
-        financial_instrument_id: Option<Uuid>,
         created_at: DateTime<Utc>,
         updated_at: Option<DateTime<Utc>>,
         deleted_by: Option<DeletedBy>,
@@ -425,7 +421,6 @@ from_row_constructor! {
         due_date: NaiveDate,
         status: DebtStatus,
         installment_count: Option<i32>,
-        financial_instrument_id: Option<Uuid>,
         created_at: DateTime<Utc>,
         updated_at: Option<DateTime<Utc>>,
         deleted_by: Option<DeletedBy>,
@@ -441,7 +436,6 @@ pub struct DebtFilters {
     start_date: Option<NaiveDate>,
     end_date: Option<NaiveDate>,
     category_names: Option<Vec<String>>,
-    financial_instrument_ids: Option<Vec<Uuid>>,
 }
 
 getters!(
@@ -452,7 +446,6 @@ getters!(
         start_date: Option<NaiveDate>,
         end_date: Option<NaiveDate>,
         category_names: Option<Vec<String>>,
-        financial_instrument_ids: Option<Vec<Uuid>>,
     }
 );
 
@@ -529,8 +522,4 @@ impl DebtFilters {
         self
     }
 
-    pub fn with_financial_instrument_ids(mut self, ids: Vec<Uuid>) -> Self {
-        self.financial_instrument_ids = Some(ids);
-        self
-    }
 }

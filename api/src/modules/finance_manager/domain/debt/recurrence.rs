@@ -135,7 +135,6 @@ impl Recurrence {
             Some(ExpenseType::Fixed),
             None,
             None,
-            None,
         )
     }
 
