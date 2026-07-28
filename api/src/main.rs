@@ -23,6 +23,14 @@ use api::modules::{
         FinanceManagerState,
     },
     routes::{self, AppState},
+    volleyball::{
+        handler::{game::GameHandlerImpl, player::PlayerHandlerImpl, session::SessionHandlerImpl},
+        repository::{
+            game::GameRepositoryImpl, player::PlayerRepositoryImpl,
+            session::SessionRepositoryImpl,
+        },
+        VolleyballState,
+    },
 };
 use axum::Router;
 use database::DbPool;
@@ -56,9 +64,19 @@ async fn main() {
         auth_handler: Arc::new(auth_handler),
     };
 
+    let player_handler = build_player_handler(pool);
+    let session_handler = build_session_handler(pool);
+    let game_handler = build_game_handler(pool);
+    let volleyball_state = VolleyballState {
+        player_handler: Arc::new(player_handler),
+        session_handler: Arc::new(session_handler),
+        game_handler: Arc::new(game_handler),
+    };
+
     let app_state = AppState {
         finance_manager_state: Arc::new(finance_manager_state),
         auth_state: Arc::new(auth_state),
+        volleyball_state: Arc::new(volleyball_state),
     };
 
     let app: Router = routes::configure_services().with_state(app_state);
@@ -112,6 +130,25 @@ fn build_financial_instrument_handler(pool: &Pool<Postgres>) -> FinancialInstrum
 fn build_income_handler(pool: &Pool<Postgres>) -> IncomeHandlerImpl {
     IncomeHandlerImpl {
         income_repository: Arc::new(IncomeRepositoryImpl::new(pool)),
+    }
+}
+
+fn build_player_handler(pool: &Pool<Postgres>) -> PlayerHandlerImpl {
+    PlayerHandlerImpl {
+        player_repository: Arc::new(PlayerRepositoryImpl::new(pool)),
+    }
+}
+
+fn build_session_handler(pool: &Pool<Postgres>) -> SessionHandlerImpl {
+    SessionHandlerImpl {
+        session_repository: Arc::new(SessionRepositoryImpl::new(pool)),
+        game_repository: Arc::new(GameRepositoryImpl::new(pool)),
+    }
+}
+
+fn build_game_handler(pool: &Pool<Postgres>) -> GameHandlerImpl {
+    GameHandlerImpl {
+        game_repository: Arc::new(GameRepositoryImpl::new(pool)),
     }
 }
 

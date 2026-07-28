@@ -54,6 +54,7 @@ dependencies = [
  "database",
  "http-error",
  "jsonwebtoken",
+ "rand",
  "rust_decimal",
  "serde",
  "serde_json",
