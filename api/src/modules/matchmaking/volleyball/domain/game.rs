@@ -33,12 +33,10 @@ impl Pair {
     }
 }
 
-getters!(
-    Pair {
-        player1_id: Uuid,
-        player2_id: Uuid,
-    }
-);
+getters!(Pair {
+    player1_id: Uuid,
+    player2_id: Uuid,
+});
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -89,7 +87,12 @@ pub struct Game {
 }
 
 impl Game {
-    pub fn new_pending(session_id: Uuid, court: i16, team_a: Pair, team_b: Pair) -> HttpResult<Self> {
+    pub fn new_pending(
+        session_id: Uuid,
+        court: i16,
+        team_a: Pair,
+        team_b: Pair,
+    ) -> HttpResult<Self> {
         if !(1..=2).contains(&court) {
             return Err(Box::new(HttpError::bad_request(format!(
                 "Invalid court: {}",
@@ -139,6 +142,43 @@ impl Game {
             Some(GameWinner::TeamA) => Some(&self.team_b),
             Some(GameWinner::TeamB) => Some(&self.team_a),
             None => None,
+        }
+    }
+
+    /// Pure business logic for rule #3: a pair that wins two matches in a row on
+    /// the same court must leave too, same as the losing pair. `previous_finished_on_court`
+    /// is the most recent *other* finished game on that same court (`None` if this
+    /// was the court's first finished game).
+    pub fn resolve_departures(
+        &self,
+        previous_finished_on_court: Option<&Game>,
+    ) -> HttpResult<DepartureOutcome> {
+        let winner_pair = self
+            .winning_pair()
+            .ok_or_else(|| Box::new(HttpError::bad_request("Game has no result yet")))?;
+        let loser_pair = self
+            .losing_pair()
+            .expect("losing_pair is Some whenever winning_pair is Some");
+
+        let is_second_consecutive_win = previous_finished_on_court
+            .and_then(|previous| previous.winning_pair())
+            .is_some_and(|previous_winner| previous_winner.same_players_as(winner_pair));
+
+        if is_second_consecutive_win {
+            let mut departing_player_ids = winner_pair.players().to_vec();
+            departing_player_ids.extend(loser_pair.players());
+
+            Ok(DepartureOutcome {
+                court: self.court,
+                departing_player_ids,
+                retained_pair: None,
+            })
+        } else {
+            Ok(DepartureOutcome {
+                court: self.court,
+                departing_player_ids: loser_pair.players().to_vec(),
+                retained_pair: Some(*winner_pair),
+            })
         }
     }
 }
@@ -241,43 +281,6 @@ impl DepartureOutcome {
     }
 }
 
-/// Pure business logic for rule #3: a pair that wins two matches in a row on
-/// the same court must leave too, same as the losing pair. `previous_finished_on_court`
-/// is the most recent *other* finished game on that same court (`None` if this
-/// was the court's first finished game).
-pub fn resolve_departures(
-    finished_game: &Game,
-    previous_finished_on_court: Option<&Game>,
-) -> HttpResult<DepartureOutcome> {
-    let winner_pair = finished_game
-        .winning_pair()
-        .ok_or_else(|| Box::new(HttpError::bad_request("Game has no result yet")))?;
-    let loser_pair = finished_game
-        .losing_pair()
-        .expect("losing_pair is Some whenever winning_pair is Some");
-
-    let is_second_consecutive_win = previous_finished_on_court
-        .and_then(|previous| previous.winning_pair())
-        .is_some_and(|previous_winner| previous_winner.same_players_as(winner_pair));
-
-    if is_second_consecutive_win {
-        let mut departing_player_ids = winner_pair.players().to_vec();
-        departing_player_ids.extend(loser_pair.players());
-
-        Ok(DepartureOutcome {
-            court: *finished_game.court(),
-            departing_player_ids,
-            retained_pair: None,
-        })
-    } else {
-        Ok(DepartureOutcome {
-            court: *finished_game.court(),
-            departing_player_ids: loser_pair.players().to_vec(),
-            retained_pair: Some(*winner_pair),
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -307,7 +310,7 @@ mod tests {
     fn first_game_on_court_never_double_exits() {
         let game = finished_game(1, pair(1, 2), pair(3, 4), GameWinner::TeamA);
 
-        let outcome = resolve_departures(&game, None).unwrap();
+        let outcome = game.resolve_departures(None).unwrap();
 
         assert_eq!(outcome.slots_needed(), 2);
         assert_eq!(outcome.retained_pair, Some(pair(1, 2)));
@@ -319,7 +322,7 @@ mod tests {
         let current = finished_game(1, pair(1, 2), pair(3, 4), GameWinner::TeamA); // {1,2} wins again -> 2nd win
 
         // previous winner is {1,2}, same as current winner -> forces double exit
-        let outcome = resolve_departures(&current, Some(&previous)).unwrap();
+        let outcome = current.resolve_departures(Some(&previous)).unwrap();
         assert_eq!(outcome.slots_needed(), 4);
         assert!(outcome.retained_pair.is_none());
     }
@@ -329,7 +332,7 @@ mod tests {
         let previous = finished_game(1, pair(5, 6), pair(7, 8), GameWinner::TeamA); // {5,6} won previously
         let current = finished_game(1, pair(1, 2), pair(3, 4), GameWinner::TeamA); // {1,2} wins now, different pair
 
-        let outcome = resolve_departures(&current, Some(&previous)).unwrap();
+        let outcome = current.resolve_departures(Some(&previous)).unwrap();
         assert_eq!(outcome.slots_needed(), 2);
         assert_eq!(outcome.retained_pair, Some(pair(1, 2)));
     }

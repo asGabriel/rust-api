@@ -22,15 +22,14 @@ use api::modules::{
         },
         FinanceManagerState,
     },
-    routes::{self, AppState},
     matchmaking::volleyball::{
         handler::{game::GameHandlerImpl, player::PlayerHandlerImpl, session::SessionHandlerImpl},
         repository::{
-            game::GameRepositoryImpl, player::PlayerRepositoryImpl,
-            session::SessionRepositoryImpl,
+            game::GameRepositoryImpl, player::PlayerRepositoryImpl, session::SessionRepositoryImpl,
         },
         VolleyballState,
     },
+    routes::{self, AppState},
 };
 use axum::Router;
 use database::DbPool;

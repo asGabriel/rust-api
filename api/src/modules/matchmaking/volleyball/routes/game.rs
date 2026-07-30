@@ -8,10 +8,10 @@ use http_error::HttpResult;
 use uuid::Uuid;
 
 use crate::modules::{
-    routes::AppState,
     matchmaking::volleyball::{
         domain::game::GameFilters, handler::game::use_cases::RecordGameResultRequest,
     },
+    routes::AppState,
 };
 
 pub fn configure_routes() -> Router<AppState> {
@@ -27,7 +27,11 @@ async fn list_games(
     state: State<AppState>,
     Json(filters): Json<GameFilters>,
 ) -> HttpResult<impl IntoResponse> {
-    let games = state.volleyball_state.game_handler.list_games(filters).await?;
+    let games = state
+        .volleyball_state
+        .game_handler
+        .list_games(filters)
+        .await?;
 
     Ok(Json(games))
 }

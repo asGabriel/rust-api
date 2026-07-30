@@ -65,9 +65,9 @@ impl PlayerRepository for PlayerRepositoryImpl {
     async fn get_by_id(&self, id: Uuid) -> HttpResult<Option<Player>> {
         let row =
             sqlx::query(r#"SELECT * FROM volleyball.player WHERE id = $1 AND deleted_at IS NULL"#)
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await?;
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?;
 
         Ok(row.map(|r| player_from_row(&r)))
     }

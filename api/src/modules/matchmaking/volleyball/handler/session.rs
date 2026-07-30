@@ -8,8 +8,8 @@ use uuid::Uuid;
 
 use crate::modules::matchmaking::volleyball::{
     domain::{
-        draw::{draw, PlayerStanding},
-        game::{resolve_departures, Game, GameFilters},
+        draw::PlayerStanding,
+        game::{Game, GameFilters},
         session::{Session, SessionFilters},
     },
     handler::session::use_cases::{
@@ -119,11 +119,11 @@ impl SessionHandler for SessionHandlerImpl {
         let mut rng = StdRng::from_entropy();
         let no_cooldown = HashSet::new();
 
-        let court_1_pairs = draw(&mut rng, &standings, &no_cooldown, 4)?;
+        let court_1_pairs = PlayerStanding::draw(&mut rng, &standings, &no_cooldown, 4)?;
         let drawn_ids: HashSet<Uuid> = court_1_pairs.iter().flat_map(|p| p.players()).collect();
         standings.retain(|s| !drawn_ids.contains(&s.player_id));
 
-        let court_2_pairs = draw(&mut rng, &standings, &no_cooldown, 4)?;
+        let court_2_pairs = PlayerStanding::draw(&mut rng, &standings, &no_cooldown, 4)?;
 
         let game_1 = Game::new_pending(session_id, 1, court_1_pairs[0], court_1_pairs[1])?;
         let game_2 = Game::new_pending(session_id, 2, court_2_pairs[0], court_2_pairs[1])?;
@@ -185,7 +185,9 @@ impl SessionHandler for SessionHandlerImpl {
                     )
                     .await?;
 
-                resolve_departures(&most_recent, previous.as_ref())?.departing_player_ids
+                most_recent
+                    .resolve_departures(previous.as_ref())?
+                    .departing_player_ids
             }
             None => Vec::new(),
         };
@@ -239,7 +241,9 @@ pub mod use_cases {
     use serde::{Deserialize, Serialize};
     use uuid::Uuid;
 
-    use crate::modules::matchmaking::volleyball::domain::{game::Game, player::Player, session::Session};
+    use crate::modules::matchmaking::volleyball::domain::{
+        game::Game, player::Player, session::Session,
+    };
 
     #[derive(Debug, Clone, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]

@@ -8,11 +8,11 @@ use http_error::HttpResult;
 use uuid::Uuid;
 
 use crate::modules::{
-    routes::AppState,
     matchmaking::volleyball::{
         domain::session::SessionFilters,
         handler::session::use_cases::{AddRosterPlayersRequest, CreateSessionRequest},
     },
+    routes::AppState,
 };
 
 pub fn configure_routes() -> Router<AppState> {

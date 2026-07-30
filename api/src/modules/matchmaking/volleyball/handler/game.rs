@@ -8,8 +8,8 @@ use uuid::Uuid;
 
 use crate::modules::matchmaking::volleyball::{
     domain::{
-        draw::draw,
-        game::{resolve_departures, Game, GameFilters},
+        draw::PlayerStanding,
+        game::{Game, GameFilters},
     },
     handler::game::use_cases::{GameResultOutcome, RecordGameResultRequest},
     repository::game::DynGameRepository,
@@ -64,7 +64,7 @@ impl GameHandler for GameHandlerImpl {
             )
             .await?;
 
-        let outcome = resolve_departures(&finished_game, previous.as_ref())?;
+        let outcome = finished_game.resolve_departures(previous.as_ref())?;
         let n = outcome.slots_needed();
 
         let mut excluded: Vec<Uuid> = self
@@ -83,7 +83,7 @@ impl GameHandler for GameHandlerImpl {
 
         let cooldown: HashSet<Uuid> = outcome.departing_player_ids.iter().copied().collect();
         let mut rng = StdRng::from_entropy();
-        let pairs = draw(&mut rng, &standings, &cooldown, n)?;
+        let pairs = PlayerStanding::draw(&mut rng, &standings, &cooldown, n)?;
 
         let new_game = match (n, outcome.retained_pair) {
             (2, Some(retained)) => Game::new_pending(

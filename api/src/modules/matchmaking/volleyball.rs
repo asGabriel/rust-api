@@ -3,10 +3,10 @@ use std::sync::Arc;
 use axum::Router;
 
 use crate::modules::{
-    routes::AppState,
     matchmaking::volleyball::handler::{
         game::DynGameHandler, player::DynPlayerHandler, session::DynSessionHandler,
     },
+    routes::AppState,
 };
 
 pub mod domain;
