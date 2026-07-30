@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::modules::{
     routes::AppState,
-    volleyball::{
+    matchmaking::volleyball::{
         domain::player::PlayerFilters,
         handler::player::use_cases::{CreatePlayerRequest, UpdatePlayerRequest},
     },

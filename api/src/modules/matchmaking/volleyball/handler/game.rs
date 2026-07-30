@@ -6,7 +6,7 @@ use http_error::{ext::OptionHttpExt, HttpError, HttpResult};
 use rand::{rngs::StdRng, SeedableRng};
 use uuid::Uuid;
 
-use crate::modules::volleyball::{
+use crate::modules::matchmaking::volleyball::{
     domain::{
         draw::draw,
         game::{resolve_departures, Game, GameFilters},
@@ -121,7 +121,7 @@ impl GameHandler for GameHandlerImpl {
 pub mod use_cases {
     use serde::{Deserialize, Serialize};
 
-    use crate::modules::volleyball::domain::game::{Game, GameWinner};
+    use crate::modules::matchmaking::volleyball::domain::game::{Game, GameWinner};
 
     #[derive(Debug, Clone, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]

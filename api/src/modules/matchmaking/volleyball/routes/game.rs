@@ -9,7 +9,9 @@ use uuid::Uuid;
 
 use crate::modules::{
     routes::AppState,
-    volleyball::{domain::game::GameFilters, handler::game::use_cases::RecordGameResultRequest},
+    matchmaking::volleyball::{
+        domain::game::GameFilters, handler::game::use_cases::RecordGameResultRequest,
+    },
 };
 
 pub fn configure_routes() -> Router<AppState> {

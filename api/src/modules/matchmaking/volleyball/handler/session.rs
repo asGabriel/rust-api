@@ -6,7 +6,7 @@ use http_error::{ext::OptionHttpExt, HttpError, HttpResult};
 use rand::{rngs::StdRng, SeedableRng};
 use uuid::Uuid;
 
-use crate::modules::volleyball::{
+use crate::modules::matchmaking::volleyball::{
     domain::{
         draw::{draw, PlayerStanding},
         game::{resolve_departures, Game, GameFilters},
@@ -32,7 +32,7 @@ pub trait SessionHandler {
         &self,
         session_id: Uuid,
         request: AddRosterPlayersRequest,
-    ) -> HttpResult<Vec<crate::modules::volleyball::domain::player::Player>>;
+    ) -> HttpResult<Vec<crate::modules::matchmaking::volleyball::domain::player::Player>>;
 
     async fn start_session(&self, session_id: Uuid) -> HttpResult<Vec<Game>>;
 
@@ -64,7 +64,7 @@ impl SessionHandler for SessionHandlerImpl {
         &self,
         session_id: Uuid,
         request: AddRosterPlayersRequest,
-    ) -> HttpResult<Vec<crate::modules::volleyball::domain::player::Player>> {
+    ) -> HttpResult<Vec<crate::modules::matchmaking::volleyball::domain::player::Player>> {
         self.session_repository
             .get_by_id(session_id)
             .await?
@@ -239,7 +239,7 @@ pub mod use_cases {
     use serde::{Deserialize, Serialize};
     use uuid::Uuid;
 
-    use crate::modules::volleyball::domain::{game::Game, player::Player, session::Session};
+    use crate::modules::matchmaking::volleyball::domain::{game::Game, player::Player, session::Session};
 
     #[derive(Debug, Clone, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]

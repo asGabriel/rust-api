@@ -5,7 +5,7 @@ use sqlx::postgres::PgRow;
 use sqlx::{Pool, Postgres, QueryBuilder, Row};
 use uuid::Uuid;
 
-use crate::modules::volleyball::domain::{
+use crate::modules::matchmaking::volleyball::domain::{
     player::Player,
     session::{Session, SessionFilters, SessionStatus},
 };

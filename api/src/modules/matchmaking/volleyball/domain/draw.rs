@@ -4,7 +4,7 @@ use http_error::{HttpError, HttpResult};
 use rand::{seq::SliceRandom, Rng};
 use uuid::Uuid;
 
-use crate::modules::volleyball::domain::game::Pair;
+use crate::modules::matchmaking::volleyball::domain::game::Pair;
 
 /// A player's standing within a session: how many matches they've already
 /// played and won. Used to balance both fairness of participation (rule:

@@ -4,7 +4,7 @@ use axum::Router;
 
 use crate::modules::{
     routes::AppState,
-    volleyball::handler::{
+    matchmaking::volleyball::handler::{
         game::DynGameHandler, player::DynPlayerHandler, session::DynSessionHandler,
     },
 };

@@ -3,7 +3,7 @@ use http_error::{ext::OptionHttpExt, HttpResult};
 use sqlx::{Pool, Postgres, QueryBuilder, Row};
 use uuid::Uuid;
 
-use crate::modules::volleyball::domain::{
+use crate::modules::matchmaking::volleyball::domain::{
     draw::PlayerStanding,
     game::{Game, GameFilters},
 };
@@ -269,7 +269,7 @@ pub mod entity {
     use sqlx::Row;
     use uuid::Uuid;
 
-    use crate::modules::volleyball::domain::game::{Game, GameWinner, Pair};
+    use crate::modules::matchmaking::volleyball::domain::game::{Game, GameWinner, Pair};
 
     pub struct GameEntity {
         pub id: Uuid,

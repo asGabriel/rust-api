@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::modules::{
     auth::{self, AuthState},
     finance_manager::{self, FinanceManagerState},
-    volleyball::{self, VolleyballState},
+    matchmaking::{self, volleyball::VolleyballState},
 };
 
 #[derive(Clone)]
@@ -21,14 +21,14 @@ pub struct AppState {
 pub fn configure_services() -> Router<AppState> {
     let finance_manager_routes = finance_manager::configure_service_routes();
     let auth_routes = auth::configure_service_routes();
-    let volleyball_routes = volleyball::configure_service_routes();
+    let matchmaking_routes = matchmaking::configure_service_routes();
 
     Router::new().nest(
         "/api",
         Router::new()
             .merge(finance_manager_routes)
             .merge(auth_routes)
-            .merge(volleyball_routes)
+            .merge(matchmaking_routes)
             .route("/status", get(api_status)),
     )
 }

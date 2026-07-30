@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use http_error::{ext::OptionHttpExt, HttpResult};
 use uuid::Uuid;
 
-use crate::modules::volleyball::{
+use crate::modules::matchmaking::volleyball::{
     domain::player::{Player, PlayerFilters},
     handler::player::use_cases::{CreatePlayerRequest, UpdatePlayerRequest},
     repository::player::DynPlayerRepository,
