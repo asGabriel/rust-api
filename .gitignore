@@ -31,3 +31,6 @@ env.prod
 
 # Others
 anotations.txt
+
+# Local project instructions for Claude Code (not shared via git)
+CLAUDE.md
