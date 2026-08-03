@@ -19,6 +19,16 @@ rust-api/
 
 Cada serviço tem seu próprio `main.rs`, sua própria porta e seu próprio `AppState`. Não há comunicação HTTP entre `api` e `matchmaking` hoje — são independentes, compartilhando apenas o Postgres e as libs de `lib/*`.
 
+## Serviços
+
+Contexto de negócio e regras específicas de cada serviço (complementa a seção de Estrutura acima).
+
+### matchmaking
+
+Responsável por organizar sorteio de equipes para partidas de esportes.
+
+Caso de uso atual: sorteio para um grupo de vôlei (jogadores, sessões, partidas). As regras de sorteio (critérios de balanceamento de times, restrições, etc.) ainda serão definidas e documentadas aqui conforme forem implementadas nos próximos PRs.
+
 ## Comandos
 
 ```bash
