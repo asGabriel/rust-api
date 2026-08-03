@@ -13,7 +13,7 @@ use crate::modules::matchmaking::{
 pub trait TeamHandler {
     async fn create_team(&self, request: CreateTeamRequest) -> HttpResult<Team>;
 
-    async fn list_teams_by_game_day(&self, game_day_id: Uuid) -> HttpResult<Vec<Team>>;
+    async fn list_teams_by_session(&self, session_id: Uuid) -> HttpResult<Vec<Team>>;
 }
 
 pub type DynTeamHandler = dyn TeamHandler + Send + Sync;
@@ -26,13 +26,13 @@ pub struct TeamHandlerImpl {
 #[async_trait]
 impl TeamHandler for TeamHandlerImpl {
     async fn create_team(&self, request: CreateTeamRequest) -> HttpResult<Team> {
-        let team = Team::new(request.game_day_id, request.player_ids);
+        let team = Team::new(request.session_id, request.player_ids);
 
         self.team_repository.insert(team).await
     }
 
-    async fn list_teams_by_game_day(&self, game_day_id: Uuid) -> HttpResult<Vec<Team>> {
-        self.team_repository.list_by_game_day(&game_day_id).await
+    async fn list_teams_by_session(&self, session_id: Uuid) -> HttpResult<Vec<Team>> {
+        self.team_repository.list_by_session(&session_id).await
     }
 }
 
@@ -43,7 +43,7 @@ pub mod use_cases {
     #[derive(Debug, Clone, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct CreateTeamRequest {
-        pub game_day_id: Uuid,
+        pub session_id: Uuid,
         pub player_ids: Vec<Uuid>,
     }
 }

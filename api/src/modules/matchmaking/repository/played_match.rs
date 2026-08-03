@@ -10,7 +10,7 @@ use crate::modules::matchmaking::domain::played_match::PlayedMatch;
 pub trait PlayedMatchRepository {
     async fn insert(&self, played_match: PlayedMatch) -> HttpResult<PlayedMatch>;
 
-    async fn list_by_game_day(&self, game_day_id: &Uuid) -> HttpResult<Vec<PlayedMatch>>;
+    async fn list_by_session(&self, session_id: &Uuid) -> HttpResult<Vec<PlayedMatch>>;
 }
 
 pub type DynPlayedMatchRepository = dyn PlayedMatchRepository + Send + Sync;
@@ -40,7 +40,7 @@ impl PlayedMatchRepository for InMemoryPlayedMatchRepository {
         Ok(played_match)
     }
 
-    async fn list_by_game_day(&self, game_day_id: &Uuid) -> HttpResult<Vec<PlayedMatch>> {
+    async fn list_by_session(&self, session_id: &Uuid) -> HttpResult<Vec<PlayedMatch>> {
         let played_matches = self
             .played_matches
             .lock()
@@ -48,7 +48,7 @@ impl PlayedMatchRepository for InMemoryPlayedMatchRepository {
 
         Ok(played_matches
             .values()
-            .filter(|played_match| played_match.game_day_id() == game_day_id)
+            .filter(|played_match| played_match.session_id() == session_id)
             .cloned()
             .collect())
     }

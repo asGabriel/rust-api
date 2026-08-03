@@ -9,7 +9,7 @@ use uuid::Uuid;
 #[serde(rename_all = "camelCase")]
 pub struct PlayedMatch {
     id: Uuid,
-    game_day_id: Uuid,
+    session_id: Uuid,
     court: u8,
     team_a_id: Uuid,
     team_b_id: Uuid,
@@ -19,7 +19,7 @@ pub struct PlayedMatch {
 
 impl PlayedMatch {
     pub fn new(
-        game_day_id: Uuid,
+        session_id: Uuid,
         court: u8,
         team_a_id: Uuid,
         team_b_id: Uuid,
@@ -27,7 +27,7 @@ impl PlayedMatch {
     ) -> Self {
         Self {
             id: Uuid::new_v4(),
-            game_day_id,
+            session_id,
             court,
             team_a_id,
             team_b_id,
@@ -40,7 +40,7 @@ impl PlayedMatch {
 getters! {
     PlayedMatch {
         id: Uuid,
-        game_day_id: Uuid,
+        session_id: Uuid,
         court: u8,
         team_a_id: Uuid,
         team_b_id: Uuid,

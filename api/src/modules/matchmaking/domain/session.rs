@@ -5,13 +5,13 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GameDaySettings {
+pub struct SessionSettings {
     players_per_team: u8,
     sets_to_win: u8,
     points_per_set: u8,
 }
 
-impl Default for GameDaySettings {
+impl Default for SessionSettings {
     fn default() -> Self {
         Self {
             players_per_team: 6,
@@ -22,7 +22,7 @@ impl Default for GameDaySettings {
 }
 
 getters! {
-    GameDaySettings {
+    SessionSettings {
         players_per_team: u8,
         sets_to_win: u8,
         points_per_set: u8,
@@ -33,18 +33,18 @@ getters! {
 /// disponíveis e a lista de jogadores confirmados para aquele dia.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GameDay {
+pub struct Session {
     id: Uuid,
     date: NaiveDate,
-    settings: GameDaySettings,
+    settings: SessionSettings,
     available_courts: u8,
     player_ids: Vec<Uuid>,
     created_at: DateTime<Utc>,
     updated_at: Option<DateTime<Utc>>,
 }
 
-impl GameDay {
-    pub fn new(date: NaiveDate, settings: GameDaySettings, available_courts: u8) -> Self {
+impl Session {
+    pub fn new(date: NaiveDate, settings: SessionSettings, available_courts: u8) -> Self {
         Self {
             id: Uuid::new_v4(),
             date,
@@ -61,7 +61,7 @@ impl GameDay {
         self.updated_at = Some(Utc::now());
     }
 
-    pub fn set_settings(&mut self, settings: GameDaySettings) {
+    pub fn set_settings(&mut self, settings: SessionSettings) {
         self.settings = settings;
         self.updated_at = Some(Utc::now());
     }
@@ -78,10 +78,10 @@ impl GameDay {
 }
 
 getters! {
-    GameDay {
+    Session {
         id: Uuid,
         date: NaiveDate,
-        settings: GameDaySettings,
+        settings: SessionSettings,
         available_courts: u8,
         player_ids: Vec<Uuid>,
         created_at: DateTime<Utc>,

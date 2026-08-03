@@ -24,12 +24,12 @@ use api::modules::{
     },
     matchmaking::{
         handler::{
-            game_day::GameDayHandlerImpl, played_match::PlayedMatchHandlerImpl,
-            player::PlayerHandlerImpl, team::TeamHandlerImpl,
+            played_match::PlayedMatchHandlerImpl, player::PlayerHandlerImpl,
+            session::SessionHandlerImpl, team::TeamHandlerImpl,
         },
         repository::{
-            game_day::InMemoryGameDayRepository, played_match::InMemoryPlayedMatchRepository,
-            player::InMemoryPlayerRepository, team::InMemoryTeamRepository,
+            played_match::InMemoryPlayedMatchRepository, player::InMemoryPlayerRepository,
+            session::InMemorySessionRepository, team::InMemoryTeamRepository,
         },
         MatchmakingState,
     },
@@ -133,8 +133,8 @@ fn build_matchmaking_state() -> MatchmakingState {
         player_handler: Arc::new(PlayerHandlerImpl {
             player_repository: Arc::new(InMemoryPlayerRepository::new()),
         }),
-        game_day_handler: Arc::new(GameDayHandlerImpl {
-            game_day_repository: Arc::new(InMemoryGameDayRepository::new()),
+        session_handler: Arc::new(SessionHandlerImpl {
+            session_repository: Arc::new(InMemorySessionRepository::new()),
         }),
         team_handler: Arc::new(TeamHandlerImpl {
             team_repository: Arc::new(InMemoryTeamRepository::new()),

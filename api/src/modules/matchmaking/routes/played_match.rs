@@ -16,7 +16,7 @@ pub fn configure_routes() -> Router<AppState> {
         "/matches",
         Router::new()
             .route("/", post(create_match))
-            .route("/{game_day_id}", get(list_matches_by_game_day)),
+            .route("/{session_id}", get(list_matches_by_session)),
     )
 }
 
@@ -33,14 +33,14 @@ async fn create_match(
     Ok(Json(played_match))
 }
 
-async fn list_matches_by_game_day(
+async fn list_matches_by_session(
     state: State<AppState>,
-    Path(game_day_id): Path<Uuid>,
+    Path(session_id): Path<Uuid>,
 ) -> HttpResult<impl IntoResponse> {
     let matches = state
         .matchmaking_state
         .played_match_handler
-        .list_matches_by_game_day(game_day_id)
+        .list_matches_by_session(session_id)
         .await?;
 
     Ok(Json(matches))

@@ -13,7 +13,7 @@ use crate::modules::matchmaking::{
 pub trait PlayedMatchHandler {
     async fn create_match(&self, request: CreateMatchRequest) -> HttpResult<PlayedMatch>;
 
-    async fn list_matches_by_game_day(&self, game_day_id: Uuid) -> HttpResult<Vec<PlayedMatch>>;
+    async fn list_matches_by_session(&self, session_id: Uuid) -> HttpResult<Vec<PlayedMatch>>;
 }
 
 pub type DynPlayedMatchHandler = dyn PlayedMatchHandler + Send + Sync;
@@ -27,7 +27,7 @@ pub struct PlayedMatchHandlerImpl {
 impl PlayedMatchHandler for PlayedMatchHandlerImpl {
     async fn create_match(&self, request: CreateMatchRequest) -> HttpResult<PlayedMatch> {
         let played_match = PlayedMatch::new(
-            request.game_day_id,
+            request.session_id,
             request.court,
             request.team_a_id,
             request.team_b_id,
@@ -37,9 +37,9 @@ impl PlayedMatchHandler for PlayedMatchHandlerImpl {
         self.played_match_repository.insert(played_match).await
     }
 
-    async fn list_matches_by_game_day(&self, game_day_id: Uuid) -> HttpResult<Vec<PlayedMatch>> {
+    async fn list_matches_by_session(&self, session_id: Uuid) -> HttpResult<Vec<PlayedMatch>> {
         self.played_match_repository
-            .list_by_game_day(&game_day_id)
+            .list_by_session(&session_id)
             .await
     }
 }
@@ -51,7 +51,7 @@ pub mod use_cases {
     #[derive(Debug, Clone, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct CreateMatchRequest {
-        pub game_day_id: Uuid,
+        pub session_id: Uuid,
         pub court: u8,
         pub team_a_id: Uuid,
         pub team_b_id: Uuid,

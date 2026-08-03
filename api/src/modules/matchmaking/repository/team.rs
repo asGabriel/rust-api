@@ -10,7 +10,7 @@ use crate::modules::matchmaking::domain::team::Team;
 pub trait TeamRepository {
     async fn insert(&self, team: Team) -> HttpResult<Team>;
 
-    async fn list_by_game_day(&self, game_day_id: &Uuid) -> HttpResult<Vec<Team>>;
+    async fn list_by_session(&self, session_id: &Uuid) -> HttpResult<Vec<Team>>;
 }
 
 pub type DynTeamRepository = dyn TeamRepository + Send + Sync;
@@ -37,12 +37,12 @@ impl TeamRepository for InMemoryTeamRepository {
         Ok(team)
     }
 
-    async fn list_by_game_day(&self, game_day_id: &Uuid) -> HttpResult<Vec<Team>> {
+    async fn list_by_session(&self, session_id: &Uuid) -> HttpResult<Vec<Team>> {
         let teams = self.teams.lock().expect("team repository lock poisoned");
 
         Ok(teams
             .values()
-            .filter(|team| team.game_day_id() == game_day_id)
+            .filter(|team| team.session_id() == session_id)
             .cloned()
             .collect())
     }
