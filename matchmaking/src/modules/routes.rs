@@ -10,7 +10,7 @@ pub struct AppState {
 }
 
 pub fn configure_services() -> Router<AppState> {
-    Router::new().nest("/api", Router::new().route("/status", get(api_status)))
+    Router::new().nest("/matchmaking", Router::new().route("/status", get(api_status)))
 }
 
 async fn api_status() -> HttpResult<impl IntoResponse> {
