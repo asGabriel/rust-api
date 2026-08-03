@@ -26,7 +26,7 @@ Contexto de negócio e regras específicas de cada módulo (complementa a seçã
 
 Responsável por organizar sorteio de equipes para partidas de esportes. Hoje roda como módulo dentro do serviço `api` (não como processo separado), pela limitação de infraestrutura descrita no topo deste arquivo.
 
-Caso de uso atual: sorteio para um grupo de vôlei (jogadores, sessões, partidas). As regras de sorteio (critérios de balanceamento de times, restrições, etc.) ainda serão definidas e documentadas aqui conforme forem implementadas nos próximos PRs.
+Caso de uso atual: sorteio para um grupo de vôlei de praia (beach volley) — jogadores (`Player`), dias de jogo (`Session`, com configurações padrão e quadras disponíveis), duplas (`Team`) e partidas registradas (`Match`). Repositórios hoje são em cache (memória do processo, sem migration) enquanto o modelo ainda está sendo validado. As regras de sorteio (critérios de balanceamento de times, restrições, etc.) ainda serão definidas e documentadas aqui conforme forem implementadas nos próximos PRs.
 
 ## Comandos
 

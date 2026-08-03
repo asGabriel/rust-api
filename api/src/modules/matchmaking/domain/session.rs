@@ -1,0 +1,90 @@
+use chrono::{DateTime, NaiveDate, Utc};
+use serde::{Deserialize, Serialize};
+use util::getters;
+use uuid::Uuid;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSettings {
+    players_per_team: u8,
+    sets_to_win: u8,
+    points_per_set: u8,
+}
+
+impl Default for SessionSettings {
+    fn default() -> Self {
+        Self {
+            players_per_team: 2,
+            sets_to_win: 2,
+            points_per_set: 21,
+        }
+    }
+}
+
+getters! {
+    SessionSettings {
+        players_per_team: u8,
+        sets_to_win: u8,
+        points_per_set: u8,
+    }
+}
+
+/// Represents the day of games: default settings for the round,
+/// available courts and the list of players confirmed for that day.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Session {
+    id: Uuid,
+    date: NaiveDate,
+    settings: SessionSettings,
+    available_courts: u8,
+    player_ids: Vec<Uuid>,
+    created_at: DateTime<Utc>,
+    updated_at: Option<DateTime<Utc>>,
+}
+
+impl Session {
+    pub fn new(date: NaiveDate, settings: SessionSettings, available_courts: u8) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            date,
+            settings,
+            available_courts,
+            player_ids: Vec::new(),
+            created_at: Utc::now(),
+            updated_at: None,
+        }
+    }
+
+    pub fn set_date(&mut self, date: NaiveDate) {
+        self.date = date;
+        self.updated_at = Some(Utc::now());
+    }
+
+    pub fn set_settings(&mut self, settings: SessionSettings) {
+        self.settings = settings;
+        self.updated_at = Some(Utc::now());
+    }
+
+    pub fn set_available_courts(&mut self, available_courts: u8) {
+        self.available_courts = available_courts;
+        self.updated_at = Some(Utc::now());
+    }
+
+    pub fn set_player_ids(&mut self, player_ids: Vec<Uuid>) {
+        self.player_ids = player_ids;
+        self.updated_at = Some(Utc::now());
+    }
+}
+
+getters! {
+    Session {
+        id: Uuid,
+        date: NaiveDate,
+        settings: SessionSettings,
+        available_courts: u8,
+        player_ids: Vec<Uuid>,
+        created_at: DateTime<Utc>,
+        updated_at: Option<DateTime<Utc>>,
+    }
+}
