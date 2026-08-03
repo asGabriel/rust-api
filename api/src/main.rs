@@ -22,6 +22,17 @@ use api::modules::{
         },
         FinanceManagerState,
     },
+    matchmaking::{
+        handler::{
+            game_day::GameDayHandlerImpl, played_match::PlayedMatchHandlerImpl,
+            player::PlayerHandlerImpl, team::TeamHandlerImpl,
+        },
+        repository::{
+            game_day::InMemoryGameDayRepository, played_match::InMemoryPlayedMatchRepository,
+            player::InMemoryPlayerRepository, team::InMemoryTeamRepository,
+        },
+        MatchmakingState,
+    },
     routes::{self, AppState},
 };
 use axum::Router;
@@ -56,9 +67,12 @@ async fn main() {
         auth_handler: Arc::new(auth_handler),
     };
 
+    let matchmaking_state = build_matchmaking_state();
+
     let app_state = AppState {
         finance_manager_state: Arc::new(finance_manager_state),
         auth_state: Arc::new(auth_state),
+        matchmaking_state: Arc::new(matchmaking_state),
     };
 
     let app: Router = routes::configure_services().with_state(app_state);
@@ -111,6 +125,23 @@ fn build_financial_instrument_handler(pool: &Pool<Postgres>) -> FinancialInstrum
 fn build_income_handler(pool: &Pool<Postgres>) -> IncomeHandlerImpl {
     IncomeHandlerImpl {
         income_repository: Arc::new(IncomeRepositoryImpl::new(pool)),
+    }
+}
+
+fn build_matchmaking_state() -> MatchmakingState {
+    MatchmakingState {
+        player_handler: Arc::new(PlayerHandlerImpl {
+            player_repository: Arc::new(InMemoryPlayerRepository::new()),
+        }),
+        game_day_handler: Arc::new(GameDayHandlerImpl {
+            game_day_repository: Arc::new(InMemoryGameDayRepository::new()),
+        }),
+        team_handler: Arc::new(TeamHandlerImpl {
+            team_repository: Arc::new(InMemoryTeamRepository::new()),
+        }),
+        played_match_handler: Arc::new(PlayedMatchHandlerImpl {
+            played_match_repository: Arc::new(InMemoryPlayedMatchRepository::new()),
+        }),
     }
 }
 

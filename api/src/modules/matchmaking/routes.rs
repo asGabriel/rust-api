@@ -5,6 +5,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::modules::routes::AppState;
 
+pub mod game_day;
+pub mod played_match;
+pub mod player;
+pub mod team;
+
 pub fn configure_routes() -> Router<AppState> {
     Router::new().route("/status", get(api_status))
 }
