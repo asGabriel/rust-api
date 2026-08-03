@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::modules::routes::AppState;
 
-pub mod played_match;
+pub mod matches;
 pub mod player;
 pub mod session;
 pub mod team;

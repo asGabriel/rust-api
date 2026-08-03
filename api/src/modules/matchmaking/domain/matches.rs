@@ -7,7 +7,7 @@ use uuid::Uuid;
 /// time vencedor.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PlayedMatch {
+pub struct Match {
     id: Uuid,
     session_id: Uuid,
     court: u8,
@@ -17,7 +17,7 @@ pub struct PlayedMatch {
     played_at: DateTime<Utc>,
 }
 
-impl PlayedMatch {
+impl Match {
     pub fn new(
         session_id: Uuid,
         court: u8,
@@ -38,7 +38,7 @@ impl PlayedMatch {
 }
 
 getters! {
-    PlayedMatch {
+    Match {
         id: Uuid,
         session_id: Uuid,
         court: u8,

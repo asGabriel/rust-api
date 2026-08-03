@@ -7,9 +7,7 @@ use axum::{
 use http_error::HttpResult;
 use uuid::Uuid;
 
-use crate::modules::{
-    matchmaking::handler::played_match::use_cases::CreateMatchRequest, routes::AppState,
-};
+use crate::modules::{matchmaking::handler::matches::use_cases::CreateMatchRequest, routes::AppState};
 
 pub fn configure_routes() -> Router<AppState> {
     Router::new().nest(
@@ -24,13 +22,13 @@ async fn create_match(
     state: State<AppState>,
     Json(request): Json<CreateMatchRequest>,
 ) -> HttpResult<impl IntoResponse> {
-    let played_match = state
+    let match_ = state
         .matchmaking_state
-        .played_match_handler
+        .match_handler
         .create_match(request)
         .await?;
 
-    Ok(Json(played_match))
+    Ok(Json(match_))
 }
 
 async fn list_matches_by_session(
@@ -39,7 +37,7 @@ async fn list_matches_by_session(
 ) -> HttpResult<impl IntoResponse> {
     let matches = state
         .matchmaking_state
-        .played_match_handler
+        .match_handler
         .list_matches_by_session(session_id)
         .await?;
 
