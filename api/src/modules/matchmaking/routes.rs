@@ -2,15 +2,11 @@ use axum::{response::IntoResponse, routing::get, Json, Router};
 use chrono::{DateTime, Utc};
 use http_error::HttpResult;
 use serde::{Deserialize, Serialize};
-use sqlx::{Pool, Postgres};
 
-#[derive(Clone)]
-pub struct AppState {
-    pub db_pool: Pool<Postgres>,
-}
+use crate::modules::routes::AppState;
 
-pub fn configure_services() -> Router<AppState> {
-    Router::new().nest("/matchmaking", Router::new().route("/status", get(api_status)))
+pub fn configure_routes() -> Router<AppState> {
+    Router::new().route("/status", get(api_status))
 }
 
 async fn api_status() -> HttpResult<impl IntoResponse> {
