@@ -14,9 +14,9 @@ pub struct SessionSettings {
 impl Default for SessionSettings {
     fn default() -> Self {
         Self {
-            players_per_team: 6,
+            players_per_team: 2,
             sets_to_win: 2,
-            points_per_set: 25,
+            points_per_set: 21,
         }
     }
 }
