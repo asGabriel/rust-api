@@ -31,3 +31,6 @@ env.prod
 
 # Others
 anotations.txt
+
+# Claude Code (worktrees, local settings, session state)
+.claude/
