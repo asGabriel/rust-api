@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use util::getters;
 use uuid::Uuid;
 
-/// Uma dupla/equipe formada a partir dos jogadores confirmados em um
-/// `Session`, usada para compor as partidas daquele dia.
+/// A pair/team formed from the players confirmed in a `Session`,
+/// used to compose that day's matches.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Team {

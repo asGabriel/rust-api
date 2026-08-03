@@ -29,8 +29,8 @@ getters! {
     }
 }
 
-/// Representa o dia de jogos: configurações padrão da rodada, quadras
-/// disponíveis e a lista de jogadores confirmados para aquele dia.
+/// Represents the day of games: default settings for the round,
+/// available courts and the list of players confirmed for that day.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Session {

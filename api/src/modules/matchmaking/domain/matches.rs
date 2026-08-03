@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use util::getters;
 use uuid::Uuid;
 
-/// Registro de uma partida já disputada: quadra, times envolvidos e o
-/// time vencedor.
+/// Record of a match that already happened: court, teams involved and
+/// the winning team.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Match {

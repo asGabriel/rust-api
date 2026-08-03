@@ -19,8 +19,8 @@ pub trait SessionRepository {
 
 pub type DynSessionRepository = dyn SessionRepository + Send + Sync;
 
-/// Repositório em cache (memória do processo), sem persistência em banco.
-/// Serve para viabilizar os testes de sorteio antes de existir a migration.
+/// Process-memory cache repository, no database persistence.
+/// Lets the pairing logic be tested before a migration exists.
 #[derive(Default)]
 pub struct InMemorySessionRepository {
     sessions: Mutex<HashMap<Uuid, Session>>,

@@ -19,8 +19,8 @@ pub trait PlayerRepository {
 
 pub type DynPlayerRepository = dyn PlayerRepository + Send + Sync;
 
-/// Repositório em cache (memória do processo), sem persistência em banco.
-/// Serve para viabilizar os testes de sorteio antes de existir a migration.
+/// Process-memory cache repository, no database persistence.
+/// Lets the pairing logic be tested before a migration exists.
 #[derive(Default)]
 pub struct InMemoryPlayerRepository {
     players: Mutex<HashMap<Uuid, Player>>,
