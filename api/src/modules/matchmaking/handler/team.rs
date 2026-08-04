@@ -5,7 +5,8 @@ use http_error::HttpResult;
 use uuid::Uuid;
 
 use crate::modules::matchmaking::{
-    domain::team::Team, handler::team::use_cases::CreateTeamRequest,
+    domain::team::{Team, TeamValidator},
+    handler::team::use_cases::CreateTeamRequest,
     repository::team::DynTeamRepository,
 };
 
@@ -26,6 +27,14 @@ pub struct TeamHandlerImpl {
 #[async_trait]
 impl TeamHandler for TeamHandlerImpl {
     async fn create_team(&self, request: CreateTeamRequest) -> HttpResult<Team> {
+        let existing_teams = self
+            .team_repository
+            .list_by_session(&request.session_id)
+            .await?;
+
+        TeamValidator::new(request.session_id)
+            .validate_new_team(&existing_teams, &request.player_ids)?;
+
         let team = Team::new(request.session_id, request.player_ids);
 
         self.team_repository.insert(team).await

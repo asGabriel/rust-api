@@ -24,6 +24,11 @@ habilidade, histórico de parceria, aleatoriedade controlada, etc.
 ## Restrições
 
 - Um jogador não pode aparecer em duas `Team`s da mesma `Session`.
+- Um jogador não pode se repetir dentro da mesma `Team`.
+
+Ambas validadas por `TeamValidator::validate_new_team`
+(`api/src/modules/matchmaking/domain/team.rs`), chamado por
+`TeamHandlerImpl::create_team`.
 
 <!--
 Condições que uma implementação NUNCA pode violar. Ex: número mínimo/máximo
@@ -52,7 +57,9 @@ removido de uma Session após os times já terem sido sorteados, etc.
 
 ## Histórico de mudanças
 
-_A definir._
+- 2026-08-04 — implementada validação em `create_team`: rejeita jogador
+  duplicado dentro da mesma `Team` (`HttpError::bad_request`) e jogador já
+  presente em outra `Team` da mesma `Session` (`HttpError::conflict`).
 
 <!--
 Registro cronológico de decisões de regra de negócio, com data e motivo.
