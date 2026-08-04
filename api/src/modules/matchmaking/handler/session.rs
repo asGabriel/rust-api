@@ -35,7 +35,8 @@ impl SessionHandler for SessionHandlerImpl {
             request.date,
             request.settings.unwrap_or_default(),
             request.available_courts,
-        );
+            request.game_mode,
+        )?;
 
         self.session_repository.insert(session).await
     }
@@ -59,11 +60,15 @@ impl SessionHandler for SessionHandlerImpl {
         }
 
         if let Some(settings) = request.settings {
-            session.set_settings(settings);
+            session.set_settings(settings)?;
         }
 
         if let Some(available_courts) = request.available_courts {
             session.set_available_courts(available_courts);
+        }
+
+        if let Some(game_mode) = request.game_mode {
+            session.set_game_mode(game_mode)?;
         }
 
         if let Some(player_ids) = request.player_ids {
@@ -79,13 +84,14 @@ pub mod use_cases {
     use serde::{Deserialize, Serialize};
     use uuid::Uuid;
 
-    use crate::modules::matchmaking::domain::session::SessionSettings;
+    use crate::modules::matchmaking::domain::session::{GameMode, SessionSettings};
 
     #[derive(Debug, Clone, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct CreateSessionRequest {
         pub date: NaiveDate,
         pub available_courts: u8,
+        pub game_mode: GameMode,
         pub settings: Option<SessionSettings>,
     }
 
@@ -94,6 +100,7 @@ pub mod use_cases {
     pub struct UpdateSessionRequest {
         pub date: Option<NaiveDate>,
         pub available_courts: Option<u8>,
+        pub game_mode: Option<GameMode>,
         pub settings: Option<SessionSettings>,
         pub player_ids: Option<Vec<Uuid>>,
     }
