@@ -15,12 +15,16 @@ pub enum GameMode {
 }
 
 impl GameMode {
+    pub fn is_mixed(&self) -> bool {
+        *self == GameMode::Mixed
+    }
+
     /// `Mixed` needs to split `players_per_team` evenly between men and
     /// women, so it only makes sense for an even count. Checked here, at the
     /// Session boundary, so a Session can never be saved in a configuration
     /// that a later team draw would be unable to honor.
     pub fn validate_players_per_team(&self, players_per_team: u8) -> HttpResult<()> {
-        if *self == GameMode::Mixed && !players_per_team.is_multiple_of(2) {
+        if self.is_mixed() && !players_per_team.is_multiple_of(2) {
             return Err(Box::new(HttpError::bad_request(
                 "Mixed game mode requires an even number of players per team",
             )));
