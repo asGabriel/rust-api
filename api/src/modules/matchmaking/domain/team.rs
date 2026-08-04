@@ -148,11 +148,13 @@ impl TeamDrawer {
         let mut pool = Self::player_ids_of_gender(players, gender);
         pool.shuffle(&mut thread_rng());
 
-        Self::chunk_into_teams(&pool, self.players_per_team as usize)
+        let players_per_team: usize = self.players_per_team.into();
+        Self::chunk_into_teams(&pool, players_per_team)
     }
 
     fn draw_mixed(&self, players: &[Player]) -> Vec<Vec<Uuid>> {
-        let players_per_gender = (self.players_per_team / 2) as usize;
+        let players_per_team: usize = self.players_per_team.into();
+        let players_per_gender = players_per_team / 2;
 
         let mut males = Self::player_ids_of_gender(players, Gender::Male);
         let mut females = Self::player_ids_of_gender(players, Gender::Female);
