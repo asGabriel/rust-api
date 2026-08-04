@@ -44,6 +44,11 @@ impl Match {
         self.winner_team_id.is_some()
     }
 
+    /// Whether `team_id` is one of the two teams playing this match.
+    pub fn has_team(&self, team_id: Uuid) -> bool {
+        team_id == self.team_a_id || team_id == self.team_b_id
+    }
+
     /// Records the result of this in-progress match. Fails if a result was
     /// already reported, or if `winner_team_id` isn't one of the two teams
     /// that played it.
@@ -54,7 +59,7 @@ impl Match {
             )));
         }
 
-        if winner_team_id != self.team_a_id && winner_team_id != self.team_b_id {
+        if !self.has_team(winner_team_id) {
             return Err(Box::new(HttpError::bad_request(
                 "winner_team_id must be one of the match's two teams",
             )));
