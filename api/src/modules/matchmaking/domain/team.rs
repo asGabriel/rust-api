@@ -110,7 +110,7 @@ impl TeamValidator {
 /// Randomly forms teams out of a session's confirmed players, honoring the
 /// session's `GameMode` filter. Used for a session's first draw, when there
 /// is no history yet to balance teams by; later draws may layer other
-/// criteria on top (see matchmaking-business-rules skill).
+/// criteria on top.
 pub struct TeamDrawer {
     game_mode: GameMode,
     players_per_team: u8,
