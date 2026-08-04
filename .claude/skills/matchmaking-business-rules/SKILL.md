@@ -46,6 +46,16 @@ habilidade, histórico de parceria, aleatoriedade controlada, etc.
 - `draw_teams` só pode ser chamado uma vez por `Session` (é o sorteio de
   *inicialização*): se a `Session` já tiver alguma `Team`, retorna
   `HttpError::conflict`. Não existe hoje endpoint para resetar/re-sortear.
+- Um `Match` não pode ter as duas equipes iguais (`team_a_id != team_b_id`).
+- O resultado de um `Match` só pode ser reportado uma vez: reportar de novo
+  um `Match` que já tem `winner_team_id` retorna `HttpError::conflict`.
+- `winner_team_id` reportado precisa ser `team_a_id` ou `team_b_id` do
+  próprio `Match`; qualquer outro valor retorna `HttpError::bad_request`.
+
+Validado por `Match::new`/`Match::finish`
+(`api/src/modules/matchmaking/domain/matches.rs`), chamados por
+`MatchHandlerImpl::create_match`/`report_match_result` via `POST
+/matchmaking/matches/` e `POST /matchmaking/matches/{match_id}/result`.
 
 Restrições de duplicidade de jogador validadas por
 `TeamValidator::validate_new_team` (`api/src/modules/matchmaking/domain/team.rs`),
@@ -86,8 +96,27 @@ Session sem jogadores suficientes para as quadras disponíveis, jogador
 removido de uma Session após os times já terem sido sorteados, etc.
 -->
 
+## Casos-limite conhecidos (continuação)
+
+- Ainda não existe checagem de que `team_a_id`/`team_b_id` de um `Match`
+  pertencem de fato a `Team`s da `Session` informada, nem de que uma
+  `Team`/quadra não tenha mais de um `Match` em andamento simultaneamente.
+  Estrutura inicial deliberadamente simples (só o estado
+  em-andamento → resultado reportado); regras de "o que sortear a seguir
+  quando uma partida termina" ainda serão definidas e documentadas aqui
+  conforme forem implementadas.
+
 ## Histórico de mudanças
 
+- 2026-08-04 — `Match` passa a nascer sem resultado (`winner_team_id`/
+  `played_at` como `Option`, partida "em andamento" na quadra) via `POST
+  /matchmaking/matches/`; novo endpoint `POST
+  /matchmaking/matches/{match_id}/result` reporta o resultado
+  (`ReportMatchResultRequest { winner_team_id }`), validando que a partida
+  ainda não tem resultado e que o vencedor é uma das duas equipes do
+  `Match`. Primeira peça da estrutura de "regras de sorteio conforme os
+  jogos vão finalizando" — regras de qual será o próximo sorteio após um
+  resultado ainda serão decididas e adicionadas aqui.
 - 2026-08-04 — implementada validação em `create_team`: rejeita jogador
   duplicado dentro da mesma `Team` (`HttpError::bad_request`) e jogador já
   presente em outra `Team` da mesma `Session` (`HttpError::conflict`).
