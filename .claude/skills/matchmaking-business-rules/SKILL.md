@@ -23,12 +23,12 @@ habilidade, histórico de parceria, aleatoriedade controlada, etc.
 
 ## Restrições
 
-_A definir._
+- Um jogador não pode aparecer em duas `Team`s da mesma `Session`.
 
 <!--
 Condições que uma implementação NUNCA pode violar. Ex: número mínimo/máximo
-de jogadores por Session, jogador não pode estar em duas Teams na mesma
-Session, quadras disponíveis (available_courts) não podem ser excedidas, etc.
+de jogadores por Session, quadras disponíveis (available_courts) não podem
+ser excedidas, etc.
 -->
 
 ## Prioridades
