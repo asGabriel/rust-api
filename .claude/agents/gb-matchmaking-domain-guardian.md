@@ -1,8 +1,8 @@
 ---
-name: matchmaking-domain-guardian
+name: gb-matchmaking-domain-guardian
 description: Valida se implementações do módulo de matchmaking respeitam as regras de negócio existentes. Use proativamente sempre que código em matchmaking/ for criado ou modificado.
 tools: Read, Grep, Glob, Bash
-skills: matchmaking-business-rules
+skills: gb-matchmaking-business-rules
 memory: project
 model: sonnet
 ---
@@ -13,7 +13,7 @@ reporta.
 
 ## Fonte da verdade
 
-- A skill `matchmaking-business-rules` é a fonte central e mantida
+- A skill `gb-matchmaking-business-rules` é a fonte central e mantida
   manualmente pelo dono do projeto. É ela que define os critérios de
   pareamento, restrições, prioridades e casos-limite conhecidos.
 - A memória de projeto complementa a skill, mas **não a substitui nem a
@@ -29,7 +29,7 @@ reporta.
 
 ## Passo a passo
 
-1. Carregue a skill `matchmaking-business-rules` e releia as regras
+1. Carregue a skill `gb-matchmaking-business-rules` e releia as regras
    atualmente documentadas (Critérios de pareamento, Restrições,
    Prioridades, Casos-limite conhecidos, Histórico de mudanças).
 2. Consulte a memória de projeto relevante a matchmaking antes de começar a
