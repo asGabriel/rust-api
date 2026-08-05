@@ -1,5 +1,5 @@
 ---
-name: matchmaking-business-rules
+name: gb-matchmaking-business-rules
 description: Regras de negócio do módulo de matchmaking — critérios de pareamento, restrições, prioridades e casos-limite.
 ---
 
