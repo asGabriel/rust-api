@@ -11,6 +11,10 @@ pub trait MatchRepository {
     async fn insert(&self, match_: Match) -> HttpResult<Match>;
 
     async fn list_by_session(&self, session_id: &Uuid) -> HttpResult<Vec<Match>>;
+
+    async fn get(&self, id: &Uuid) -> HttpResult<Option<Match>>;
+
+    async fn update(&self, match_: Match) -> HttpResult<Match>;
 }
 
 pub type DynMatchRepository = dyn MatchRepository + Send + Sync;
@@ -45,5 +49,18 @@ impl MatchRepository for InMemoryMatchRepository {
             .filter(|match_| match_.session_id() == session_id)
             .cloned()
             .collect())
+    }
+
+    async fn get(&self, id: &Uuid) -> HttpResult<Option<Match>> {
+        let matches = self.matches.lock().expect("match repository lock poisoned");
+
+        Ok(matches.get(id).cloned())
+    }
+
+    async fn update(&self, match_: Match) -> HttpResult<Match> {
+        let mut matches = self.matches.lock().expect("match repository lock poisoned");
+        matches.insert(*match_.id(), match_.clone());
+
+        Ok(match_)
     }
 }

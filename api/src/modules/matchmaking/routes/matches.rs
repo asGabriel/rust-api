@@ -7,14 +7,18 @@ use axum::{
 use http_error::HttpResult;
 use uuid::Uuid;
 
-use crate::modules::{matchmaking::handler::matches::use_cases::CreateMatchRequest, routes::AppState};
+use crate::modules::{
+    matchmaking::handler::matches::use_cases::{CreateMatchRequest, ReportMatchResultRequest},
+    routes::AppState,
+};
 
 pub fn configure_routes() -> Router<AppState> {
     Router::new().nest(
         "/matches",
         Router::new()
             .route("/", post(create_match))
-            .route("/{session_id}", get(list_matches_by_session)),
+            .route("/{session_id}", get(list_matches_by_session))
+            .route("/{match_id}/result", post(report_match_result)),
     )
 }
 
@@ -42,4 +46,18 @@ async fn list_matches_by_session(
         .await?;
 
     Ok(Json(matches))
+}
+
+async fn report_match_result(
+    state: State<AppState>,
+    Path(match_id): Path<Uuid>,
+    Json(request): Json<ReportMatchResultRequest>,
+) -> HttpResult<impl IntoResponse> {
+    let match_ = state
+        .matchmaking_state
+        .match_handler
+        .report_match_result(match_id, request)
+        .await?;
+
+    Ok(Json(match_))
 }

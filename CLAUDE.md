@@ -57,7 +57,7 @@ sqlx migrate add --source migrations/<domínio> nome_da_migration
 
 Cada módulo/domínio segue o padrão `domain / handler / repository / routes`:
 
-- **`domain/`** — structs do modelo (ex: `User`, `Debt`), sem lógica de infra.
+- **`domain/`** — structs do modelo (ex: `User`, `Debt`), sem lógica de infra. Condições booleanas usadas para validação/regra de negócio (ex: "esse `winner_team_id` é um dos times do `Match`?") devem ser extraídas como método nomeado na própria struct (ex: `Match::has_team`, `Match::is_finished`), não deixadas como expressão inline dentro de outro método. Quando a validação envolver múltiplos passos ou precisar de um valor de escopo (ex: `session_id`), usar uma struct validadora dedicada com esse valor vinculado na construção (ex: `TeamValidator::new(session_id)`) em vez de funções soltas no módulo.
 - **`repository/`** — trait `DynXRepository` + impl (`XRepositoryImpl`) que recebe `&Pool<Postgres>` e faz as queries via `sqlx`.
 - **`handler/`** — trait `XHandler` (`#[async_trait]`) + impl (`XHandlerImpl`) que orquestra regra de negócio, chamando o repository. É o que fica dentro do `AppState`, sempre atrás de `Arc<...>`.
 - **`routes/`** — funções `async fn` que recebem `State<AppState>` + `Json`/`Path`/`HeaderMap`, chamam o handler e retornam `HttpResult<impl IntoResponse>`. `configure_routes()`/`configure_service_routes()` monta o `Router<AppState>` do módulo.
