@@ -11,6 +11,8 @@ pub trait TeamRepository {
     async fn insert(&self, team: Team) -> HttpResult<Team>;
 
     async fn list_by_session(&self, session_id: &Uuid) -> HttpResult<Vec<Team>>;
+
+    async fn get(&self, id: &Uuid) -> HttpResult<Option<Team>>;
 }
 
 pub type DynTeamRepository = dyn TeamRepository + Send + Sync;
@@ -45,5 +47,11 @@ impl TeamRepository for InMemoryTeamRepository {
             .filter(|team| team.session_id() == session_id)
             .cloned()
             .collect())
+    }
+
+    async fn get(&self, id: &Uuid) -> HttpResult<Option<Team>> {
+        let teams = self.teams.lock().expect("team repository lock poisoned");
+
+        Ok(teams.get(id).cloned())
     }
 }

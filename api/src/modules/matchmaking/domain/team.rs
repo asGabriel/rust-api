@@ -2,15 +2,21 @@ use std::collections::HashSet;
 
 use chrono::{DateTime, Utc};
 use http_error::{HttpError, HttpResult};
-use rand::{seq::SliceRandom, thread_rng};
 use serde::{Deserialize, Serialize};
 use util::getters;
 use uuid::Uuid;
 
-use crate::modules::matchmaking::domain::{
-    player::{Gender, Player},
-    session::GameMode,
-};
+/// A team's place in the session's rotation: `Waiting` in the queue to be
+/// called up to a court, `Holding` a court after a win (until it either
+/// loses or hits the consecutive-win cap), or `Disbanded` once it's done,
+/// freeing its players back into the queue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TeamStatus {
+    Waiting,
+    Holding,
+    Disbanded,
+}
 
 /// A pair/team formed from the players confirmed in a `Session`,
 /// used to compose that day's matches.
@@ -20,16 +26,66 @@ pub struct Team {
     id: Uuid,
     session_id: Uuid,
     player_ids: Vec<Uuid>,
+    status: TeamStatus,
+    consecutive_wins: u8,
     created_at: DateTime<Utc>,
 }
 
 impl Team {
+    /// A team is rotated out after this many consecutive wins on the same
+    /// court, so other waiting teams get a turn.
+    const MAX_CONSECUTIVE_WINS: u8 = 2;
+
     pub fn new(session_id: Uuid, player_ids: Vec<Uuid>) -> Self {
         Self {
             id: Uuid::new_v4(),
             session_id,
             player_ids,
+            status: TeamStatus::Waiting,
+            consecutive_wins: 0,
             created_at: Utc::now(),
+        }
+    }
+
+    pub fn is_waiting(&self) -> bool {
+        self.status == TeamStatus::Waiting
+    }
+
+    pub fn is_holding(&self) -> bool {
+        self.status == TeamStatus::Holding
+    }
+
+    pub fn is_disbanded(&self) -> bool {
+        self.status == TeamStatus::Disbanded
+    }
+
+    /// Whether this team has as many players as a full team needs.
+    pub fn is_complete(&self, players_per_team: u8) -> bool {
+        self.player_ids.len() >= players_per_team.into()
+    }
+
+    /// Frees this team's players back into the queue: it's done, whether it
+    /// just lost or hit the consecutive-win cap. Idempotent.
+    pub fn disband(&mut self) {
+        self.status = TeamStatus::Disbanded;
+    }
+
+    /// Adds a freed player to this (presumably incomplete) waiting team,
+    /// completing it or extending how many players it still needs.
+    pub fn add_player(&mut self, player_id: Uuid) {
+        self.player_ids.push(player_id);
+    }
+
+    /// Records a win. A team keeps holding its court after a win, but only
+    /// up to `MAX_CONSECUTIVE_WINS` in a row — past that, it's disbanded
+    /// like a loss would be, so other waiting teams get a turn.
+    pub fn register_win(&mut self) {
+        self.consecutive_wins += 1;
+
+        if self.consecutive_wins >= Self::MAX_CONSECUTIVE_WINS {
+            self.disband();
+        } else {
+            self.status = TeamStatus::Holding;
         }
     }
 }
@@ -39,6 +95,8 @@ getters! {
         id: Uuid,
         session_id: Uuid,
         player_ids: Vec<Uuid>,
+        status: TeamStatus,
+        consecutive_wins: u8,
         created_at: DateTime<Utc>,
     }
 }
@@ -107,94 +165,72 @@ impl TeamValidator {
     }
 }
 
-/// Randomly forms teams out of a session's confirmed players, honoring the
-/// session's `GameMode` filter. Used for a session's first draw, when there
-/// is no history yet to balance teams by; later draws may layer other
-/// criteria on top.
-pub struct TeamDrawer {
-    game_mode: GameMode,
-    players_per_team: u8,
-}
-
-impl TeamDrawer {
-    pub fn new(game_mode: GameMode, players_per_team: u8) -> Self {
-        Self {
-            game_mode,
-            players_per_team,
-        }
-    }
-
-    /// Returns as many full teams as can be formed from `players`, each a
-    /// list of player ids. Players left over (not enough to fill one more
-    /// team, or of the gender not needed to complete a mixed team) are
-    /// simply not included in any group.
-    pub fn draw(&self, players: &[Player]) -> HttpResult<Vec<Vec<Uuid>>> {
-        if self.players_per_team == 0 {
-            return Err(Box::new(HttpError::bad_request(
-                "Session settings must have at least one player per team",
-            )));
-        }
-        self.game_mode
-            .validate_players_per_team(self.players_per_team)?;
-
-        match self.game_mode {
-            GameMode::Male => Ok(self.draw_single_gender(players, Gender::Male)),
-            GameMode::Female => Ok(self.draw_single_gender(players, Gender::Female)),
-            GameMode::Mixed => Ok(self.draw_mixed(players)),
-        }
-    }
-
-    fn draw_single_gender(&self, players: &[Player], gender: Gender) -> Vec<Vec<Uuid>> {
-        let mut pool = Self::player_ids_of_gender(players, gender);
-        pool.shuffle(&mut thread_rng());
-
-        let players_per_team: usize = self.players_per_team.into();
-        Self::chunk_into_teams(&pool, players_per_team)
-    }
-
-    fn draw_mixed(&self, players: &[Player]) -> Vec<Vec<Uuid>> {
-        let players_per_team: usize = self.players_per_team.into();
-        let players_per_gender = players_per_team / 2;
-
-        let mut males = Self::player_ids_of_gender(players, Gender::Male);
-        let mut females = Self::player_ids_of_gender(players, Gender::Female);
-        males.shuffle(&mut thread_rng());
-        females.shuffle(&mut thread_rng());
-
-        let team_count = (males.len() / players_per_gender).min(females.len() / players_per_gender);
-
-        (0..team_count)
-            .map(|i| {
-                let start = i * players_per_gender;
-                let end = start + players_per_gender;
-
-                let mut team = males[start..end].to_vec();
-                team.extend_from_slice(&females[start..end]);
-                team
-            })
-            .collect()
-    }
-
-    fn player_ids_of_gender(players: &[Player], gender: Gender) -> Vec<Uuid> {
-        players
-            .iter()
-            .filter(|player| *player.gender() == gender)
-            .map(|player| *player.id())
-            .collect()
-    }
-
-    fn chunk_into_teams(pool: &[Uuid], players_per_team: usize) -> Vec<Vec<Uuid>> {
-        pool.chunks_exact(players_per_team)
-            .map(|chunk| chunk.to_vec())
-            .collect()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use http_error::HttpErrorKind;
 
     use super::*;
+
+    #[test]
+    fn test_new_team_starts_waiting_with_no_wins() {
+        let team = Team::new(Uuid::new_v4(), vec![Uuid::new_v4(), Uuid::new_v4()]);
+
+        assert!(team.is_waiting());
+        assert_eq!(*team.consecutive_wins(), 0);
+    }
+
+    #[test]
+    fn test_register_win_once_holds_the_court() {
+        let mut team = Team::new(Uuid::new_v4(), vec![Uuid::new_v4(), Uuid::new_v4()]);
+
+        team.register_win();
+
+        assert!(team.is_holding());
+        assert_eq!(*team.consecutive_wins(), 1);
+    }
+
+    #[test]
+    fn test_register_win_twice_in_a_row_disbands_the_team() {
+        let mut team = Team::new(Uuid::new_v4(), vec![Uuid::new_v4(), Uuid::new_v4()]);
+
+        team.register_win();
+        team.register_win();
+
+        assert!(team.is_disbanded());
+        assert_eq!(*team.consecutive_wins(), 2);
+    }
+
+    #[test]
+    fn test_disband_is_idempotent() {
+        let mut team = Team::new(Uuid::new_v4(), vec![Uuid::new_v4(), Uuid::new_v4()]);
+
+        team.disband();
+        team.disband();
+
+        assert!(team.is_disbanded());
+    }
+
+    #[test]
+    fn test_is_complete_checks_player_count_against_players_per_team() {
+        let team = Team::new(Uuid::new_v4(), vec![Uuid::new_v4()]);
+
+        assert!(!team.is_complete(2));
+
+        let full_team = Team::new(Uuid::new_v4(), vec![Uuid::new_v4(), Uuid::new_v4()]);
+
+        assert!(full_team.is_complete(2));
+    }
+
+    #[test]
+    fn test_add_player_extends_the_team() {
+        let player_id = Uuid::new_v4();
+        let mut team = Team::new(Uuid::new_v4(), vec![Uuid::new_v4()]);
+
+        team.add_player(player_id);
+
+        assert!(team.player_ids().contains(&player_id));
+        assert!(team.is_complete(2));
+    }
 
     #[test]
     fn test_validate_new_team_with_no_existing_teams() {
@@ -290,110 +326,5 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(err.kind, HttpErrorKind::Conflict);
-    }
-
-    fn player(gender: Gender) -> Player {
-        Player::new("Player".to_string(), gender)
-    }
-
-    #[test]
-    fn test_draw_male_mode_only_pairs_male_players() {
-        let players = vec![
-            player(Gender::Male),
-            player(Gender::Male),
-            player(Gender::Male),
-            player(Gender::Male),
-            player(Gender::Female),
-            player(Gender::Female),
-        ];
-        let male_ids: HashSet<Uuid> = players
-            .iter()
-            .filter(|player| *player.gender() == Gender::Male)
-            .map(|player| *player.id())
-            .collect();
-
-        let teams = TeamDrawer::new(GameMode::Male, 2).draw(&players).unwrap();
-
-        assert_eq!(teams.len(), 2);
-        for team in teams {
-            assert_eq!(team.len(), 2);
-            assert!(team.iter().all(|id| male_ids.contains(id)));
-        }
-    }
-
-    #[test]
-    fn test_draw_female_mode_leaves_leftover_player_unassigned() {
-        let players = vec![
-            player(Gender::Female),
-            player(Gender::Female),
-            player(Gender::Female),
-            player(Gender::Male),
-        ];
-
-        let teams = TeamDrawer::new(GameMode::Female, 2).draw(&players).unwrap();
-
-        assert_eq!(teams.len(), 1);
-        assert_eq!(teams[0].len(), 2);
-    }
-
-    #[test]
-    fn test_draw_mixed_mode_pairs_one_man_and_one_woman_per_team() {
-        let players = vec![
-            player(Gender::Male),
-            player(Gender::Male),
-            player(Gender::Female),
-            player(Gender::Female),
-        ];
-        let male_ids: HashSet<Uuid> = players
-            .iter()
-            .filter(|player| *player.gender() == Gender::Male)
-            .map(|player| *player.id())
-            .collect();
-        let female_ids: HashSet<Uuid> = players
-            .iter()
-            .filter(|player| *player.gender() == Gender::Female)
-            .map(|player| *player.id())
-            .collect();
-
-        let teams = TeamDrawer::new(GameMode::Mixed, 2).draw(&players).unwrap();
-
-        assert_eq!(teams.len(), 2);
-        for team in teams {
-            assert_eq!(team.len(), 2);
-            assert_eq!(team.iter().filter(|id| male_ids.contains(id)).count(), 1);
-            assert_eq!(team.iter().filter(|id| female_ids.contains(id)).count(), 1);
-        }
-    }
-
-    #[test]
-    fn test_draw_mixed_mode_limited_by_smaller_gender_pool() {
-        let players = vec![
-            player(Gender::Male),
-            player(Gender::Male),
-            player(Gender::Male),
-            player(Gender::Female),
-        ];
-
-        let teams = TeamDrawer::new(GameMode::Mixed, 2).draw(&players).unwrap();
-
-        assert_eq!(teams.len(), 1);
-    }
-
-    #[test]
-    fn test_draw_rejects_zero_players_per_team() {
-        let err = TeamDrawer::new(GameMode::Male, 0).draw(&[]).unwrap_err();
-
-        assert_eq!(err.kind, HttpErrorKind::BadRequest);
-    }
-
-    #[test]
-    fn test_draw_mixed_rejects_odd_players_per_team() {
-        let players = vec![player(Gender::Male), player(Gender::Female)];
-
-        let err = TeamDrawer::new(GameMode::Mixed, 3)
-            .draw(&players)
-            .unwrap_err();
-
-        assert_eq!(err.kind, HttpErrorKind::BadRequest);
     }
 }
