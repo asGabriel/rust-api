@@ -1,8 +1,12 @@
+use std::collections::HashSet;
+
 use chrono::{DateTime, Utc};
 use http_error::{HttpError, HttpResult};
 use serde::{Deserialize, Serialize};
 use util::getters;
 use uuid::Uuid;
+
+use crate::modules::matchmaking::domain::team::Team;
 
 /// A match assigned to a court: the two teams facing off, and the result
 /// once it's been reported. `winner_team_id`/`played_at` are `None` while
@@ -67,6 +71,84 @@ impl Match {
 
         self.winner_team_id = Some(winner_team_id);
         self.played_at = Some(Utc::now());
+
+        Ok(())
+    }
+
+    /// The ids of every team currently tied up in an in-progress match,
+    /// across any court — used to keep a team from being started on a
+    /// second court before its current match is reported.
+    pub fn busy_team_ids(matches: &[Match]) -> HashSet<Uuid> {
+        matches
+            .iter()
+            .filter(|match_| !match_.is_finished())
+            .flat_map(|match_| [*match_.team_a_id(), *match_.team_b_id()])
+            .collect()
+    }
+}
+
+/// Centralizes the checks for starting a match: both teams must belong to
+/// this session, be a full team (not one still waiting on a partner), still
+/// be around to play (not disbanded), and not already be busy in another
+/// in-progress match. Bound to a `session_id` and `players_per_team` at
+/// construction, same as `TeamValidator`.
+pub struct MatchStartValidator {
+    session_id: Uuid,
+    players_per_team: u8,
+}
+
+impl MatchStartValidator {
+    pub fn new(session_id: Uuid, players_per_team: u8) -> Self {
+        Self {
+            session_id,
+            players_per_team,
+        }
+    }
+
+    pub fn validate_start(
+        &self,
+        session_teams: &[Team],
+        session_matches: &[Match],
+        team_a_id: Uuid,
+        team_b_id: Uuid,
+    ) -> HttpResult<()> {
+        let busy_team_ids = Match::busy_team_ids(session_matches);
+
+        for team_id in [team_a_id, team_b_id] {
+            self.validate_team_can_start(session_teams, &busy_team_ids, team_id)?;
+        }
+
+        Ok(())
+    }
+
+    fn validate_team_can_start(
+        &self,
+        session_teams: &[Team],
+        busy_team_ids: &HashSet<Uuid>,
+        team_id: Uuid,
+    ) -> HttpResult<()> {
+        let team = session_teams
+            .iter()
+            .find(|team| *team.id() == team_id && *team.session_id() == self.session_id)
+            .ok_or_else(|| Box::new(HttpError::not_found("Team", team_id)))?;
+
+        if team.is_disbanded() {
+            return Err(Box::new(HttpError::conflict(format!(
+                "Team {team_id} has been disbanded and cannot start a match"
+            ))));
+        }
+
+        if !team.is_complete(self.players_per_team) {
+            return Err(Box::new(HttpError::conflict(format!(
+                "Team {team_id} is still waiting on a partner and cannot start a match"
+            ))));
+        }
+
+        if busy_team_ids.contains(&team_id) {
+            return Err(Box::new(HttpError::conflict(format!(
+                "Team {team_id} is already playing an in-progress match"
+            ))));
+        }
 
         Ok(())
     }
@@ -141,6 +223,113 @@ mod tests {
         match_.finish(winner).unwrap();
 
         let err = match_.finish(winner).unwrap_err();
+
+        assert_eq!(err.kind, HttpErrorKind::Conflict);
+    }
+
+    #[test]
+    fn test_busy_team_ids_only_includes_unfinished_matches() {
+        let team_a = Uuid::new_v4();
+        let team_b = Uuid::new_v4();
+        let team_c = Uuid::new_v4();
+        let team_d = Uuid::new_v4();
+        let session_id = Uuid::new_v4();
+
+        let ongoing = Match::new(session_id, 1, team_a, team_b).unwrap();
+        let mut finished = Match::new(session_id, 2, team_c, team_d).unwrap();
+        finished.finish(team_c).unwrap();
+
+        let busy = Match::busy_team_ids(&[ongoing, finished]);
+
+        assert!(busy.contains(&team_a));
+        assert!(busy.contains(&team_b));
+        assert!(!busy.contains(&team_c));
+        assert!(!busy.contains(&team_d));
+    }
+
+    fn team(session_id: Uuid) -> Team {
+        Team::new(session_id, vec![Uuid::new_v4(), Uuid::new_v4()])
+    }
+
+    #[test]
+    fn test_match_start_validator_accepts_waiting_teams_from_the_same_session() {
+        let session_id = Uuid::new_v4();
+        let team_a = team(session_id);
+        let team_b = team(session_id);
+        let team_a_id = *team_a.id();
+        let team_b_id = *team_b.id();
+
+        let result = MatchStartValidator::new(session_id, 2).validate_start(
+            &[team_a, team_b],
+            &[],
+            team_a_id,
+            team_b_id,
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_match_start_validator_rejects_incomplete_team() {
+        let session_id = Uuid::new_v4();
+        let incomplete_team = Team::new(session_id, vec![Uuid::new_v4()]);
+        let team_b = team(session_id);
+        let team_a_id = *incomplete_team.id();
+        let team_b_id = *team_b.id();
+
+        let err = MatchStartValidator::new(session_id, 2)
+            .validate_start(&[incomplete_team, team_b], &[], team_a_id, team_b_id)
+            .unwrap_err();
+
+        assert_eq!(err.kind, HttpErrorKind::Conflict);
+    }
+
+    #[test]
+    fn test_match_start_validator_rejects_team_from_another_session() {
+        let session_id = Uuid::new_v4();
+        let team_a = team(session_id);
+        let team_b = team(Uuid::new_v4());
+        let team_a_id = *team_a.id();
+        let team_b_id = *team_b.id();
+
+        let err = MatchStartValidator::new(session_id, 2)
+            .validate_start(&[team_a, team_b], &[], team_a_id, team_b_id)
+            .unwrap_err();
+
+        assert_eq!(err.kind, HttpErrorKind::NotFound);
+    }
+
+    #[test]
+    fn test_match_start_validator_rejects_disbanded_team() {
+        let session_id = Uuid::new_v4();
+        let mut team_a = team(session_id);
+        team_a.disband();
+        let team_b = team(session_id);
+        let team_a_id = *team_a.id();
+        let team_b_id = *team_b.id();
+
+        let err = MatchStartValidator::new(session_id, 2)
+            .validate_start(&[team_a, team_b], &[], team_a_id, team_b_id)
+            .unwrap_err();
+
+        assert_eq!(err.kind, HttpErrorKind::Conflict);
+    }
+
+    #[test]
+    fn test_match_start_validator_rejects_team_already_in_an_ongoing_match() {
+        let session_id = Uuid::new_v4();
+        let team_a = team(session_id);
+        let team_b = team(session_id);
+        let team_c = team(session_id);
+        let team_a_id = *team_a.id();
+        let team_b_id = *team_b.id();
+        let team_c_id = *team_c.id();
+
+        let ongoing = Match::new(session_id, 1, team_a_id, team_b_id).unwrap();
+
+        let err = MatchStartValidator::new(session_id, 2)
+            .validate_start(&[team_a, team_b, team_c], &[ongoing], team_a_id, team_c_id)
+            .unwrap_err();
 
         assert_eq!(err.kind, HttpErrorKind::Conflict);
     }

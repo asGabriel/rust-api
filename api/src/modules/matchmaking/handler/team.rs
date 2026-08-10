@@ -5,10 +5,16 @@ use http_error::{HttpError, HttpResult};
 use uuid::Uuid;
 
 use crate::modules::matchmaking::{
-    domain::team::{Team, TeamDrawer, TeamValidator},
-    handler::team::use_cases::CreateTeamRequest,
+    domain::{
+        matches::Match,
+        team::{Team, TeamValidator},
+        team_drawer::{PartnerHistory, TeamDrawer},
+        team_queue::TeamQueueManager,
+    },
+    handler::team::use_cases::{CreateTeamRequest, ResolvedRotation},
     repository::{
-        player::DynPlayerRepository, session::DynSessionRepository, team::DynTeamRepository,
+        matches::DynMatchRepository, player::DynPlayerRepository, session::DynSessionRepository,
+        team::DynTeamRepository,
     },
 };
 
@@ -22,6 +28,19 @@ pub trait TeamHandler {
     /// confirmed players, honoring the session's `GameMode` filter. Fails if
     /// the session already has teams, since it's meant to initialize them.
     async fn draw_teams(&self, session_id: Uuid) -> HttpResult<Vec<Team>>;
+
+    /// Applies a match's result to the team rotation: the loser is always
+    /// disbanded, the winner either keeps holding the court (up to the
+    /// consecutive-win cap) or is disbanded too, and every player freed by
+    /// either outcome is slotted back into the waiting queue. Returns
+    /// whichever complete team(s) should now auto-fill the freed court
+    /// slot(s), if the queue already has enough of them.
+    async fn resolve_match_result(
+        &self,
+        session_id: Uuid,
+        winner_team_id: Uuid,
+        loser_team_id: Uuid,
+    ) -> HttpResult<ResolvedRotation>;
 }
 
 pub type DynTeamHandler = dyn TeamHandler + Send + Sync;
@@ -31,6 +50,7 @@ pub struct TeamHandlerImpl {
     pub team_repository: Arc<DynTeamRepository>,
     pub session_repository: Arc<DynSessionRepository>,
     pub player_repository: Arc<DynPlayerRepository>,
+    pub match_repository: Arc<DynMatchRepository>,
 }
 
 #[async_trait]
@@ -77,7 +97,7 @@ impl TeamHandler for TeamHandlerImpl {
 
         let drawn_teams =
             TeamDrawer::new(*session.game_mode(), *session.settings().players_per_team())
-                .draw(&session_players)?;
+                .draw(&session_players, &PartnerHistory::empty())?;
 
         if drawn_teams.is_empty() {
             return Err(Box::new(HttpError::bad_request(
@@ -97,16 +117,137 @@ impl TeamHandler for TeamHandlerImpl {
 
         Ok(created_teams)
     }
+
+    async fn resolve_match_result(
+        &self,
+        session_id: Uuid,
+        winner_team_id: Uuid,
+        loser_team_id: Uuid,
+    ) -> HttpResult<ResolvedRotation> {
+        let session = self
+            .session_repository
+            .get(&session_id)
+            .await?
+            .ok_or_else(|| Box::new(HttpError::not_found("Session", session_id)))?;
+
+        let session_teams = self.team_repository.list_by_session(&session_id).await?;
+        let session_matches = self.match_repository.list_by_session(&session_id).await?;
+        let history = PartnerHistory::from_matches(&session_teams, &session_matches);
+        let busy_team_ids = Match::busy_team_ids(&session_matches);
+
+        let mut winner = self
+            .team_repository
+            .get(&winner_team_id)
+            .await?
+            .ok_or_else(|| Box::new(HttpError::not_found("Team", winner_team_id)))?;
+        let mut loser = self
+            .team_repository
+            .get(&loser_team_id)
+            .await?
+            .ok_or_else(|| Box::new(HttpError::not_found("Team", loser_team_id)))?;
+
+        loser.disband();
+        winner.register_win();
+        let winner_still_holding = winner.is_holding();
+
+        let mut freed_player_ids = loser.player_ids().clone();
+        if !winner_still_holding {
+            freed_player_ids.extend(winner.player_ids().clone());
+        }
+
+        self.team_repository.insert(loser).await?;
+        self.team_repository.insert(winner).await?;
+
+        let session_players: Vec<_> = self
+            .player_repository
+            .list()
+            .await?
+            .into_iter()
+            .filter(|player| session.player_ids().contains(player.id()))
+            .collect();
+
+        let queue_manager = TeamQueueManager::new(
+            session_id,
+            *session.game_mode(),
+            *session.settings().players_per_team(),
+        );
+
+        // The winner/loser rows above are stale here (fetched before this
+        // resolution mutated them), and a `Waiting` team elsewhere in the
+        // session might actually be busy on another court right now — both
+        // must be kept out of the queue view this rotation acts on.
+        let mut waiting_teams: Vec<Team> = session_teams
+            .into_iter()
+            .filter(|team| {
+                team.is_waiting()
+                    && *team.id() != winner_team_id
+                    && *team.id() != loser_team_id
+                    && !busy_team_ids.contains(team.id())
+            })
+            .collect();
+
+        let changed_teams = queue_manager.release_players(
+            &waiting_teams,
+            &freed_player_ids,
+            &session_players,
+            &history,
+        );
+
+        for team in &changed_teams {
+            self.team_repository.insert(team.clone()).await?;
+        }
+
+        for changed in changed_teams {
+            match waiting_teams
+                .iter_mut()
+                .find(|team| team.id() == changed.id())
+            {
+                Some(existing) => *existing = changed,
+                None => waiting_teams.push(changed),
+            }
+        }
+
+        let needed_teams = if winner_still_holding { 1 } else { 2 };
+        let next_teams: Vec<Team> = queue_manager
+            .next_complete_teams(&waiting_teams, needed_teams)
+            .into_iter()
+            .cloned()
+            .collect();
+
+        Ok(ResolvedRotation {
+            winner_team_id,
+            winner_still_holding,
+            next_teams: if next_teams.len() == needed_teams {
+                next_teams
+            } else {
+                Vec::new()
+            },
+        })
+    }
 }
 
 pub mod use_cases {
     use serde::{Deserialize, Serialize};
     use uuid::Uuid;
 
+    use crate::modules::matchmaking::domain::team::Team;
+
     #[derive(Debug, Clone, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct CreateTeamRequest {
         pub session_id: Uuid,
         pub player_ids: Vec<Uuid>,
+    }
+
+    /// The outcome of applying a match result to the team rotation: whether
+    /// the winner is still holding its court, and whichever complete
+    /// team(s) from the queue should now auto-fill the freed slot(s) —
+    /// empty when the winner rotated out but the queue doesn't have two
+    /// complete teams ready yet.
+    #[derive(Debug, Clone)]
+    pub struct ResolvedRotation {
+        pub winner_team_id: Uuid,
+        pub winner_still_holding: bool,
+        pub next_teams: Vec<Team>,
     }
 }

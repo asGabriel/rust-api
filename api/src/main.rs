@@ -132,21 +132,25 @@ fn build_matchmaking_state() -> MatchmakingState {
     let player_repository = Arc::new(InMemoryPlayerRepository::new());
     let session_repository = Arc::new(InMemorySessionRepository::new());
     let team_repository = Arc::new(InMemoryTeamRepository::new());
+    let match_repository = Arc::new(InMemoryMatchRepository::new());
+
+    let team_handler = Arc::new(TeamHandlerImpl {
+        team_repository,
+        session_repository: session_repository.clone(),
+        player_repository: player_repository.clone(),
+        match_repository: match_repository.clone(),
+    });
 
     MatchmakingState {
-        player_handler: Arc::new(PlayerHandlerImpl {
-            player_repository: player_repository.clone(),
-        }),
+        player_handler: Arc::new(PlayerHandlerImpl { player_repository }),
         session_handler: Arc::new(SessionHandlerImpl {
             session_repository: session_repository.clone(),
         }),
-        team_handler: Arc::new(TeamHandlerImpl {
-            team_repository,
-            session_repository,
-            player_repository,
-        }),
+        team_handler: team_handler.clone(),
         match_handler: Arc::new(MatchHandlerImpl {
-            match_repository: Arc::new(InMemoryMatchRepository::new()),
+            match_repository,
+            session_repository,
+            team_handler,
         }),
     }
 }
