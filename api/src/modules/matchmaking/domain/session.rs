@@ -34,6 +34,14 @@ impl GameMode {
     }
 }
 
+/// The strategy governing how a session's team queue evolves as matches
+/// finish.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ShuffleType {
+    KingAndQueen,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSettings {
@@ -70,6 +78,7 @@ pub struct Session {
     settings: SessionSettings,
     available_courts: u8,
     game_mode: GameMode,
+    shuffle_type: ShuffleType,
     player_ids: Vec<Uuid>,
     created_at: DateTime<Utc>,
     updated_at: Option<DateTime<Utc>>,
@@ -81,6 +90,7 @@ impl Session {
         settings: SessionSettings,
         available_courts: u8,
         game_mode: GameMode,
+        shuffle_type: ShuffleType,
     ) -> HttpResult<Self> {
         game_mode.validate_players_per_team(*settings.players_per_team())?;
 
@@ -90,6 +100,7 @@ impl Session {
             settings,
             available_courts,
             game_mode,
+            shuffle_type,
             player_ids: Vec::new(),
             created_at: Utc::now(),
             updated_at: None,
@@ -123,6 +134,11 @@ impl Session {
         Ok(())
     }
 
+    pub fn set_shuffle_type(&mut self, shuffle_type: ShuffleType) {
+        self.shuffle_type = shuffle_type;
+        self.updated_at = Some(Utc::now());
+    }
+
     pub fn set_player_ids(&mut self, player_ids: Vec<Uuid>) {
         self.player_ids = player_ids;
         self.updated_at = Some(Utc::now());
@@ -136,6 +152,7 @@ getters! {
         settings: SessionSettings,
         available_courts: u8,
         game_mode: GameMode,
+        shuffle_type: ShuffleType,
         player_ids: Vec<Uuid>,
         created_at: DateTime<Utc>,
         updated_at: Option<DateTime<Utc>>,
@@ -157,14 +174,27 @@ mod tests {
         let mut settings = SessionSettings::default();
         settings.players_per_team = 3;
 
-        let err = Session::new(date(), settings, 2, GameMode::Mixed).unwrap_err();
+        let err = Session::new(
+            date(),
+            settings,
+            2,
+            GameMode::Mixed,
+            ShuffleType::KingAndQueen,
+        )
+        .unwrap_err();
 
         assert_eq!(err.kind, HttpErrorKind::BadRequest);
     }
 
     #[test]
     fn test_new_session_allows_mixed_mode_with_even_players_per_team() {
-        let session = Session::new(date(), SessionSettings::default(), 2, GameMode::Mixed);
+        let session = Session::new(
+            date(),
+            SessionSettings::default(),
+            2,
+            GameMode::Mixed,
+            ShuffleType::KingAndQueen,
+        );
 
         assert!(session.is_ok());
     }
@@ -173,7 +203,14 @@ mod tests {
     fn test_set_game_mode_rejects_mixed_when_current_settings_are_odd() {
         let mut settings = SessionSettings::default();
         settings.players_per_team = 3;
-        let mut session = Session::new(date(), settings, 2, GameMode::Male).unwrap();
+        let mut session = Session::new(
+            date(),
+            settings,
+            2,
+            GameMode::Male,
+            ShuffleType::KingAndQueen,
+        )
+        .unwrap();
 
         let err = session.set_game_mode(GameMode::Mixed).unwrap_err();
 
@@ -182,8 +219,14 @@ mod tests {
 
     #[test]
     fn test_set_settings_rejects_odd_players_per_team_when_mode_is_mixed() {
-        let mut session =
-            Session::new(date(), SessionSettings::default(), 2, GameMode::Mixed).unwrap();
+        let mut session = Session::new(
+            date(),
+            SessionSettings::default(),
+            2,
+            GameMode::Mixed,
+            ShuffleType::KingAndQueen,
+        )
+        .unwrap();
         let mut odd_settings = SessionSettings::default();
         odd_settings.players_per_team = 3;
 

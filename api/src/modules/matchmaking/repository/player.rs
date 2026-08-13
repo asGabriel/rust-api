@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use http_error::HttpResult;
 use uuid::Uuid;
 
-use crate::modules::matchmaking::domain::player::Player;
+use crate::modules::matchmaking::domain::player::{Gender, Player};
 
 #[async_trait]
 pub trait PlayerRepository {
@@ -26,9 +26,38 @@ pub struct InMemoryPlayerRepository {
     players: Mutex<HashMap<Uuid, Player>>,
 }
 
+const DEFAULT_PLAYERS: [(&str, Gender); 16] = [
+    ("Gabriel", Gender::Male),
+    ("Bru Varella", Gender::Female),
+    ("Luan", Gender::Male),
+    ("Jully", Gender::Female),
+    ("Brenda", Gender::Female),
+    ("Flavia", Gender::Female),
+    ("Marcos", Gender::Male),
+    ("Roberta", Gender::Female),
+    ("Serginho", Gender::Male),
+    ("Valdeta", Gender::Female),
+    ("Alessandra", Gender::Female),
+    ("Andre", Gender::Male),
+    ("Angela", Gender::Female),
+    ("Douglas", Gender::Male),
+    ("Gabe", Gender::Male),
+    ("Valdenia", Gender::Female),
+];
+
 impl InMemoryPlayerRepository {
     pub fn new() -> Self {
-        Self::default()
+        let players = DEFAULT_PLAYERS
+            .into_iter()
+            .map(|(name, gender)| {
+                let player = Player::new(name.to_string(), gender);
+                (*player.id(), player)
+            })
+            .collect();
+
+        Self {
+            players: Mutex::new(players),
+        }
     }
 }
 

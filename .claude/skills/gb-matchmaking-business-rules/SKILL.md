@@ -43,6 +43,12 @@ habilidade, histórico de parceria, aleatoriedade controlada, etc.
 
 ### Fila e rotação de quadra
 
+- Toda `Session` tem um `ShuffleType`, que escolhe a estratégia de rotação
+  usada conforme as partidas terminam. Hoje só existe a estratégia
+  `KingAndQueen` (a fila contínua com rotação por vitórias descrita abaixo),
+  mas o campo já é explícito e obrigatório na `Session` (mesmo padrão do
+  `GameMode`) para permitir uma estratégia diferente no futuro sem que
+  nenhuma `Session` mude de comportamento silenciosamente.
 - Uma `Team` tem um `status`: `Waiting` (na fila, disponível pra entrar em
   quadra), `Holding` (venceu e está segurando a quadra aguardando o próximo
   desafiante) ou `Disbanded` (perdeu, ou girou pra fora por ter batido o
@@ -156,6 +162,10 @@ removido de uma Session após os times já terem sido sorteados, etc.
 
 ## Histórico de mudanças
 
+- 2026-08-12 — adicionado `ShuffleType` (hoje só `KingAndQueen`) como campo
+  obrigatório de `Session`. Formaliza como estratégia nomeada e selecionável
+  a rotação de fila contínua por vitórias que já existia (2026-08-07),
+  sem mudar seu comportamento — deixa de ser implícita/hardcoded.
 - 2026-08-07 — Fila contínua de duplas com rotação por vitórias: `Team`
   ganha `status` (`Waiting`/`Holding`/`Disbanded`) e `consecutive_wins`.
   Perdedor de um `Match` sempre é desfeito; vencedor segura a quadra até 2
