@@ -14,6 +14,7 @@ pub fn configure_routes() -> Router<AppState> {
         "/teams",
         Router::new()
             .route("/", post(create_team))
+            .route("/priority", post(create_priority_team))
             .route("/{session_id}", get(list_teams_by_session))
             .route("/{session_id}/draw", post(draw_teams)),
     )
@@ -27,6 +28,19 @@ async fn create_team(
         .matchmaking_state
         .team_handler
         .create_team(request)
+        .await?;
+
+    Ok(Json(team))
+}
+
+async fn create_priority_team(
+    state: State<AppState>,
+    Json(request): Json<CreateTeamRequest>,
+) -> HttpResult<impl IntoResponse> {
+    let team = state
+        .matchmaking_state
+        .team_handler
+        .create_priority_team(request)
         .await?;
 
     Ok(Json(team))

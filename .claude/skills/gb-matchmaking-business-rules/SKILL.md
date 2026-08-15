@@ -98,6 +98,21 @@ habilidade, histórico de parceria, aleatoriedade controlada, etc.
   (`api/src/modules/matchmaking/handler/team.rs`), chamado por
   `MatchHandlerImpl::report_match_result`
   (`api/src/modules/matchmaking/handler/matches.rs`).
+- **Entrada prioritária manual:** `POST /matchmaking/teams/priority`
+  (`TeamHandlerImpl::create_priority_team`) monta uma `Team` a partir dos
+  jogadores informados e a marca com `Team::with_priority`, o que a coloca
+  na frente de toda `Team` não-prioritária em
+  `TeamQueueManager::next_complete_teams` — é o próximo desafiante
+  garantido assim que uma quadra ficar livre (não necessariamente *essa*
+  quadra específica, se mais de uma abrir ao mesmo tempo). Diferente de
+  `create_team`, essa via aceita puxar um jogador que já está em outra
+  `Team` `Waiting` (contanto que ela não esteja disputando um `Match` em
+  andamento): a `Team` de origem é desfeita e o(s) parceiro(s) que sobrou(aram)
+  sem dupla volta(m) pra fila normalmente, via
+  `TeamQueueManager::release_players` — o mesmo caminho usado para
+  jogadores liberados por resultado de partida. Um jogador numa `Team`
+  `Holding` (segurando quadra) ou já ocupada num `Match` não pode ser
+  puxado. Validado por `TeamValidator::validate_priority_team`.
 
 ## Restrições
 
@@ -160,7 +175,12 @@ ser excedidas, etc.
 
 ## Prioridades
 
-_A definir._
+- Uma `Team` marcada `priority` (via `POST /matchmaking/teams/priority`)
+  sempre entra em quadra antes de qualquer `Team` não-prioritária, mesmo
+  que essa última esteja esperando há mais tempo — a ordem por
+  `created_at` (FIFO) só decide empate dentro do mesmo grupo (entre
+  prioritárias, ou entre não-prioritárias). Ver
+  `TeamQueueManager::next_complete_teams`.
 
 <!--
 Quando múltiplos critérios de pareamento entram em conflito, qual prevalece.
@@ -204,6 +224,18 @@ removido de uma Session após os times já terem sido sorteados, etc.
 
 ## Histórico de mudanças
 
+- 2026-08-15 — nova rota `POST /matchmaking/teams/priority`
+  (`TeamHandlerImpl::create_priority_team`) para o operador informar
+  manualmente qual dupla joga a seguir, ignorando a fila FIFO normal —
+  caso de uso: uma quadra está rodando e o operador quer garantir quem
+  entra assim que ela liberar, sem depender do sorteio/fila automáticos.
+  `Team` ganha o campo `priority` (`Team::with_priority`), que
+  `TeamQueueManager::next_complete_teams` passa a priorizar sobre a ordem
+  por `created_at`. Diferente de `create_team`, essa via pode puxar um
+  jogador de outra `Team` `Waiting` não ocupada em partida — a `Team` de
+  origem é desfeita e o parceiro que sobra é re-inserido na fila via
+  `TeamQueueManager::release_players`, igual a um jogador liberado por
+  resultado de partida.
 - 2026-08-15 — `create_team` (entrada manual de `Team`) passa a validar que
   todo `player_id` está confirmado em `Session::player_ids`
   (`HttpError::bad_request` caso contrário), e o check de "já está em outro
