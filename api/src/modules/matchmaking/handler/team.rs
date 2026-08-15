@@ -20,6 +20,14 @@ use crate::modules::matchmaking::{
 
 #[async_trait]
 pub trait TeamHandler {
+    /// Manually forms a team from players confirmed in the session, entering
+    /// it into the queue as `Waiting` — the contingency path for an operator
+    /// to force a team in (e.g. the automated draw/rotation got stuck or
+    /// needs a manual correction), regardless of the session's `GameMode` or
+    /// `ShuffleType`: those only constrain the automated draw and queue
+    /// rotation, never a manually assembled team. Still enforces that every
+    /// player is confirmed in the session and not currently in another
+    /// active (non-disbanded) team of it.
     async fn create_team(&self, request: CreateTeamRequest) -> HttpResult<Team>;
 
     async fn list_teams_by_session(&self, session_id: Uuid) -> HttpResult<Vec<Team>>;
@@ -56,12 +64,18 @@ pub struct TeamHandlerImpl {
 #[async_trait]
 impl TeamHandler for TeamHandlerImpl {
     async fn create_team(&self, request: CreateTeamRequest) -> HttpResult<Team> {
+        let session = self
+            .session_repository
+            .get(&request.session_id)
+            .await?
+            .ok_or_else(|| Box::new(HttpError::not_found("Session", request.session_id)))?;
+
         let existing_teams = self
             .team_repository
             .list_by_session(&request.session_id)
             .await?;
 
-        TeamValidator::new(request.session_id)
+        TeamValidator::new(request.session_id, session.player_ids().clone())
             .validate_new_team(&existing_teams, &request.player_ids)?;
 
         let team = Team::new(request.session_id, request.player_ids);
@@ -105,7 +119,7 @@ impl TeamHandler for TeamHandlerImpl {
             )));
         }
 
-        let validator = TeamValidator::new(session_id);
+        let validator = TeamValidator::new(session_id, session.player_ids().clone());
         let mut created_teams = Vec::with_capacity(drawn_teams.len());
 
         for player_ids in drawn_teams {

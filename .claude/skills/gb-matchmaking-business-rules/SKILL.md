@@ -137,7 +137,17 @@ Validado por `Match::new`/`Match::finish`/`MatchStartValidator`
 `MatchHandlerImpl::create_match`/`report_match_result` via `POST
 /matchmaking/matches/` e `POST /matchmaking/matches/{match_id}/result`.
 
-Restrições de duplicidade de jogador validadas por
+- `POST /matchmaking/teams/` (`create_team`) é a via manual de entrada de
+  `Team`: independente do `GameMode`/`ShuffleType` da `Session` (esses só
+  restringem o sorteio automático e a rotação da fila, nunca a montagem
+  manual), permite montar um time escolhendo jogadores específicos — usado
+  como contingência quando o sorteio/fila automáticos precisam de correção
+  manual. Ainda assim exige que todo `player_id` esteja confirmado em
+  `Session::player_ids` e que nenhum já esteja em outra `Team` **ativa**
+  (`Waiting`/`Holding`) da mesma `Session`; jogadores de uma `Team`
+  `Disbanded` já estão livres de novo e não bloqueiam.
+
+Restrições de duplicidade/elegibilidade de jogador validadas por
 `TeamValidator::validate_new_team` (`api/src/modules/matchmaking/domain/team.rs`),
 chamado tanto por `TeamHandlerImpl::create_team` quanto por
 `TeamHandlerImpl::draw_teams`.
@@ -194,6 +204,15 @@ removido de uma Session após os times já terem sido sorteados, etc.
 
 ## Histórico de mudanças
 
+- 2026-08-15 — `create_team` (entrada manual de `Team`) passa a validar que
+  todo `player_id` está confirmado em `Session::player_ids`
+  (`HttpError::bad_request` caso contrário), e o check de "já está em outro
+  time" passa a ignorar `Team`s `Disbanded` (antes bloqueava indevidamente
+  a reentrada manual de um jogador cujo time anterior já havia se desfeito
+  — exatamente o cenário de contingência que essa rota existe pra cobrir).
+  Confirma que a rota continua deliberadamente sem checagem de `GameMode`/
+  `ShuffleType`: a montagem manual é independente da configuração da
+  `Session`.
 - 2026-08-14 — adicionado `GameMode::Open` (ignora gênero na formação de
   times) e `ShuffleType::RoundRobin` (mesma mecânica de fila/quadra do
   `KingAndQueen`, mas a fila prioriza fortemente duplas inéditas ao
