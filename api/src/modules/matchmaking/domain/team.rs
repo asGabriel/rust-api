@@ -28,6 +28,9 @@ pub struct Team {
     player_ids: Vec<Uuid>,
     status: TeamStatus,
     consecutive_wins: u8,
+    /// Set by `Team::with_priority` — jumps this team ahead of every
+    /// non-priority team in `TeamQueueManager::next_complete_teams`.
+    priority: bool,
     created_at: DateTime<Utc>,
 }
 
@@ -43,8 +46,18 @@ impl Team {
             player_ids,
             status: TeamStatus::Waiting,
             consecutive_wins: 0,
+            priority: false,
             created_at: Utc::now(),
         }
+    }
+
+    /// Marks this team to jump the queue: the manual "who plays next"
+    /// override for when an operator needs to put a specific pairing on
+    /// court next, regardless of how long everyone else has been waiting.
+    /// See `TeamQueueManager::next_complete_teams`.
+    pub fn with_priority(mut self) -> Self {
+        self.priority = true;
+        self
     }
 
     pub fn is_waiting(&self) -> bool {
@@ -57,6 +70,10 @@ impl Team {
 
     pub fn is_disbanded(&self) -> bool {
         self.status == TeamStatus::Disbanded
+    }
+
+    pub fn is_priority(&self) -> bool {
+        self.priority
     }
 
     /// Whether this team has as many players as a full team needs.
@@ -137,6 +154,71 @@ impl TeamValidator {
         self.reject_players_already_in_active_team(existing_teams, player_ids)?;
 
         Ok(())
+    }
+
+    /// Validates a manual "priority" team — the operator override to put a
+    /// specific pairing on court next (see `Team::with_priority`). Same
+    /// duplicate/session-membership checks as `validate_new_team`, but here
+    /// a player already in another `Waiting` team is allowed *if* that team
+    /// isn't tied up in an in-progress match: pulling them out to jump this
+    /// pairing to the front of the queue is exactly what this path is for.
+    /// A player in a `Holding` team, or one that's playing right now, can't
+    /// be pulled — that would strand a court still being defended or an
+    /// in-progress match.
+    ///
+    /// Returns, for each distinct origin team a player was pulled from, that
+    /// team paired with the ids of its now partner-less remaining players —
+    /// the caller must disband the origin team and re-slot those remaining
+    /// players back into the queue (see `TeamQueueManager::release_players`).
+    pub fn validate_priority_team(
+        &self,
+        existing_teams: &[Team],
+        busy_team_ids: &HashSet<Uuid>,
+        player_ids: &[Uuid],
+    ) -> HttpResult<Vec<(Team, Vec<Uuid>)>> {
+        Self::reject_duplicate_players_in_team(player_ids)?;
+        self.reject_players_not_confirmed_in_session(player_ids)?;
+        self.collect_broken_origin_teams(existing_teams, busy_team_ids, player_ids)
+    }
+
+    fn collect_broken_origin_teams(
+        &self,
+        existing_teams: &[Team],
+        busy_team_ids: &HashSet<Uuid>,
+        player_ids: &[Uuid],
+    ) -> HttpResult<Vec<(Team, Vec<Uuid>)>> {
+        let mut broken: Vec<(Team, Vec<Uuid>)> = Vec::new();
+
+        for player_id in player_ids {
+            let Some(owner) = existing_teams.iter().find(|team| {
+                team.session_id() == &self.session_id
+                    && !team.is_disbanded()
+                    && team.player_ids().contains(player_id)
+            }) else {
+                continue;
+            };
+
+            if !owner.is_waiting() || busy_team_ids.contains(owner.id()) {
+                return Err(Box::new(HttpError::conflict(format!(
+                    "Player {player_id} is in a team that can't be broken up right now"
+                ))));
+            }
+
+            match broken.iter_mut().find(|(team, _)| team.id() == owner.id()) {
+                Some((_, remaining)) => remaining.retain(|id| id != player_id),
+                None => {
+                    let remaining = owner
+                        .player_ids()
+                        .iter()
+                        .copied()
+                        .filter(|id| id != player_id)
+                        .collect();
+                    broken.push((owner.clone(), remaining));
+                }
+            }
+        }
+
+        Ok(broken)
     }
 
     fn reject_duplicate_players_in_team(player_ids: &[Uuid]) -> HttpResult<()> {
@@ -391,5 +473,136 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(err.kind, HttpErrorKind::Conflict);
+    }
+
+    #[test]
+    fn test_with_priority_marks_the_team_as_priority() {
+        let team = Team::new(Uuid::new_v4(), vec![Uuid::new_v4(), Uuid::new_v4()]).with_priority();
+
+        assert!(team.is_priority());
+    }
+
+    #[test]
+    fn test_validate_priority_team_allows_a_player_free_in_the_session() {
+        let session_id = Uuid::new_v4();
+        let player_ids = vec![Uuid::new_v4(), Uuid::new_v4()];
+        let validator = TeamValidator::new(session_id, player_ids.clone());
+
+        let broken = validator
+            .validate_priority_team(&[], &HashSet::new(), &player_ids)
+            .unwrap();
+
+        assert!(broken.is_empty());
+    }
+
+    /// The whole point of the priority path: pulling one player out of a
+    /// `Waiting` team that isn't mid-match must report that team so the
+    /// caller can disband it and re-slot its now partner-less teammate.
+    #[test]
+    fn test_validate_priority_team_reports_the_origin_team_of_a_stolen_player() {
+        let session_id = Uuid::new_v4();
+        let stolen_player = Uuid::new_v4();
+        let stranded_partner = Uuid::new_v4();
+        let new_partner = Uuid::new_v4();
+
+        let origin_team = Team::new(session_id, vec![stolen_player, stranded_partner]);
+        let origin_team_id = *origin_team.id();
+        let validator = TeamValidator::new(
+            session_id,
+            vec![stolen_player, stranded_partner, new_partner],
+        );
+        let player_ids = vec![stolen_player, new_partner];
+
+        let broken = validator
+            .validate_priority_team(std::slice::from_ref(&origin_team), &HashSet::new(), &player_ids)
+            .unwrap();
+
+        assert_eq!(broken.len(), 1);
+        let (reported_team, remaining) = &broken[0];
+        assert_eq!(reported_team.id(), &origin_team_id);
+        assert_eq!(remaining, &vec![stranded_partner]);
+    }
+
+    /// Stealing both members of a pair must report that origin team with no
+    /// remaining players — nothing left to re-slot, just disband it.
+    #[test]
+    fn test_validate_priority_team_reports_empty_remaining_when_both_players_are_stolen() {
+        let session_id = Uuid::new_v4();
+        let player_a = Uuid::new_v4();
+        let player_b = Uuid::new_v4();
+
+        let origin_team = Team::new(session_id, vec![player_a, player_b]);
+        let validator = TeamValidator::new(session_id, vec![player_a, player_b]);
+
+        let broken = validator
+            .validate_priority_team(
+                std::slice::from_ref(&origin_team),
+                &HashSet::new(),
+                &[player_a, player_b],
+            )
+            .unwrap();
+
+        assert_eq!(broken.len(), 1);
+        assert!(broken[0].1.is_empty());
+    }
+
+    #[test]
+    fn test_validate_priority_team_rejects_a_player_from_a_holding_team() {
+        let session_id = Uuid::new_v4();
+        let player_id = Uuid::new_v4();
+        let new_partner = Uuid::new_v4();
+        let mut holding_team = Team::new(session_id, vec![player_id, Uuid::new_v4()]);
+        holding_team.register_win();
+        let validator = TeamValidator::new(session_id, vec![player_id, new_partner]);
+
+        let err = validator
+            .validate_priority_team(
+                std::slice::from_ref(&holding_team),
+                &HashSet::new(),
+                &[player_id, new_partner],
+            )
+            .unwrap_err();
+
+        assert_eq!(err.kind, HttpErrorKind::Conflict);
+    }
+
+    #[test]
+    fn test_validate_priority_team_rejects_a_player_from_a_busy_team() {
+        let session_id = Uuid::new_v4();
+        let player_id = Uuid::new_v4();
+        let new_partner = Uuid::new_v4();
+        let busy_team = Team::new(session_id, vec![player_id, Uuid::new_v4()]);
+        let busy_team_id = *busy_team.id();
+        let validator = TeamValidator::new(session_id, vec![player_id, new_partner]);
+
+        let err = validator
+            .validate_priority_team(
+                std::slice::from_ref(&busy_team),
+                &HashSet::from([busy_team_id]),
+                &[player_id, new_partner],
+            )
+            .unwrap_err();
+
+        assert_eq!(err.kind, HttpErrorKind::Conflict);
+    }
+
+    #[test]
+    fn test_validate_priority_team_ignores_a_disbanded_teammate() {
+        let session_id = Uuid::new_v4();
+        let player_id = Uuid::new_v4();
+        let new_partner = Uuid::new_v4();
+        let mut disbanded_team = Team::new(session_id, vec![player_id, Uuid::new_v4()]);
+        disbanded_team.disband();
+        let validator = TeamValidator::new(session_id, vec![player_id, new_partner]);
+
+        let broken = validator
+            .validate_priority_team(
+                std::slice::from_ref(&disbanded_team),
+                &HashSet::new(),
+                &[player_id, new_partner],
+            )
+            .unwrap();
+
+        assert!(broken.is_empty());
     }
 }

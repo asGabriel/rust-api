@@ -99,8 +99,10 @@ impl TeamQueueManager {
             .collect()
     }
 
-    /// The next `count` complete teams in the queue, oldest first — the
-    /// ones that should auto-fill a court that just freed up.
+    /// The next `count` complete teams in the queue — priority teams
+    /// (`Team::with_priority`, the manual "who plays next" override) always
+    /// come first, oldest-priority-first; then everyone else, oldest first.
+    /// These are the ones that should auto-fill a court that just freed up.
     pub fn next_complete_teams<'a>(
         &self,
         waiting_teams: &'a [Team],
@@ -110,7 +112,7 @@ impl TeamQueueManager {
             .iter()
             .filter(|team| team.is_waiting() && team.is_complete(self.players_per_team))
             .collect();
-        complete.sort_by_key(|team| *team.created_at());
+        complete.sort_by_key(|team| (!team.is_priority(), *team.created_at()));
 
         complete.into_iter().take(count).collect()
     }
@@ -357,5 +359,24 @@ mod tests {
         let next = manager.next_complete_teams(&waiting_teams, 1);
 
         assert!(next.is_empty());
+    }
+
+    /// A priority team jumps every non-priority team, even ones that have
+    /// been waiting longer.
+    #[test]
+    fn test_next_complete_teams_puts_priority_teams_first() {
+        let session_id = Uuid::new_v4();
+        let manager = TeamQueueManager::new(session_id, GameMode::Male, 2);
+
+        let long_waiting = Team::new(session_id, vec![Uuid::new_v4(), Uuid::new_v4()]);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let priority = Team::new(session_id, vec![Uuid::new_v4(), Uuid::new_v4()]).with_priority();
+
+        let waiting_teams = vec![long_waiting.clone(), priority.clone()];
+
+        let next = manager.next_complete_teams(&waiting_teams, 2);
+
+        assert_eq!(*next[0].id(), *priority.id());
+        assert_eq!(*next[1].id(), *long_waiting.id());
     }
 }

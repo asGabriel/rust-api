@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use async_trait::async_trait;
 use http_error::{HttpError, HttpResult};
@@ -29,6 +29,16 @@ pub trait TeamHandler {
     /// player is confirmed in the session and not currently in another
     /// active (non-disbanded) team of it.
     async fn create_team(&self, request: CreateTeamRequest) -> HttpResult<Team>;
+
+    /// Manual "who plays next" override: forms a team from the given
+    /// players and jumps it to the front of the waiting queue
+    /// (`Team::with_priority`), so it's the next one an idle court pulls
+    /// in — ahead of everyone who's been waiting longer. Unlike
+    /// `create_team`, a player already in another `Waiting` team (not
+    /// mid-match) can be pulled into this one: that team is disbanded and
+    /// its now partner-less remaining player(s) are re-slotted back into
+    /// the queue, exactly like a freed player after a match result.
+    async fn create_priority_team(&self, request: CreateTeamRequest) -> HttpResult<Team>;
 
     async fn list_teams_by_session(&self, session_id: Uuid) -> HttpResult<Vec<Team>>;
 
@@ -79,6 +89,84 @@ impl TeamHandler for TeamHandlerImpl {
             .validate_new_team(&existing_teams, &request.player_ids)?;
 
         let team = Team::new(request.session_id, request.player_ids);
+
+        self.team_repository.insert(team).await
+    }
+
+    async fn create_priority_team(&self, request: CreateTeamRequest) -> HttpResult<Team> {
+        let session = self
+            .session_repository
+            .get(&request.session_id)
+            .await?
+            .ok_or_else(|| Box::new(HttpError::not_found("Session", request.session_id)))?;
+
+        let existing_teams = self
+            .team_repository
+            .list_by_session(&request.session_id)
+            .await?;
+        let session_matches = self
+            .match_repository
+            .list_by_session(&request.session_id)
+            .await?;
+        let busy_team_ids = Match::busy_team_ids(&session_matches);
+
+        let broken_origin_teams =
+            TeamValidator::new(request.session_id, session.player_ids().clone())
+                .validate_priority_team(&existing_teams, &busy_team_ids, &request.player_ids)?;
+
+        let history = PartnerHistory::from_matches(&existing_teams, &session_matches);
+        let queue_manager = TeamQueueManager::new(
+            request.session_id,
+            *session.game_mode(),
+            *session.settings().players_per_team(),
+        );
+
+        let session_players: Vec<_> = self
+            .player_repository
+            .list()
+            .await?
+            .into_iter()
+            .filter(|player| session.player_ids().contains(player.id()))
+            .collect();
+
+        let broken_ids: HashSet<Uuid> = broken_origin_teams
+            .iter()
+            .map(|(team, _)| *team.id())
+            .collect();
+        let mut remaining_waiting_teams: Vec<Team> = existing_teams
+            .into_iter()
+            .filter(|team| team.is_waiting() && !broken_ids.contains(team.id()))
+            .collect();
+
+        for (mut origin, leftover_player_ids) in broken_origin_teams {
+            origin.disband();
+            self.team_repository.insert(origin).await?;
+
+            if leftover_player_ids.is_empty() {
+                continue;
+            }
+
+            let changed_teams = queue_manager.release_players(
+                &remaining_waiting_teams,
+                &leftover_player_ids,
+                &session_players,
+                &history,
+            );
+
+            for changed in changed_teams {
+                self.team_repository.insert(changed.clone()).await?;
+
+                match remaining_waiting_teams
+                    .iter_mut()
+                    .find(|team| team.id() == changed.id())
+                {
+                    Some(existing) => *existing = changed,
+                    None => remaining_waiting_teams.push(changed),
+                }
+            }
+        }
+
+        let team = Team::new(request.session_id, request.player_ids).with_priority();
 
         self.team_repository.insert(team).await
     }
