@@ -36,6 +36,10 @@ impl TeamQueueManager {
     /// versus starts a new one). Returns every team that was created or
     /// modified, for the caller to persist — teams left untouched are not
     /// included.
+    ///
+    /// When `game_mode` is `GameMode::Open`, a freed player only completes
+    /// an incomplete team when that pairing is brand new — it opens a new
+    /// team instead of repeating a pairing while a fresh alternative exists.
     pub fn release_players(
         &self,
         waiting_teams: &[Team],
@@ -60,6 +64,13 @@ impl TeamQueueManager {
                 .filter(|&index| {
                     !pending[index].is_complete(self.players_per_team)
                         && self.needs_gender(&pending[index], gender, players)
+                })
+                .filter(|&index| {
+                    !self.game_mode.requires_fresh_partner()
+                        || !pending[index]
+                            .player_ids()
+                            .iter()
+                            .any(|member| history.have_played_together(*member, player_id))
                 })
                 .min_by_key(|&index| {
                     pending[index]
@@ -135,6 +146,7 @@ impl TeamQueueManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::modules::matchmaking::domain::matches::Match;
 
     fn player(gender: Gender) -> Player {
         Player::new("Player".to_string(), gender)
@@ -227,6 +239,91 @@ mod tests {
             .find(|team| *team.id() != *incomplete_team.id())
             .expect("the freed male starts its own incomplete team");
         assert_eq!(new_incomplete.player_ids(), &vec![*freed_male.id()]);
+    }
+
+    #[test]
+    fn test_release_players_in_open_mode_opens_a_new_team_instead_of_repeating_a_pairing() {
+        let session_id = Uuid::new_v4();
+        let waiting_player = player(Gender::Male);
+        let already_played_with_waiting = player(Gender::Male);
+        let fresh_player = player(Gender::Female);
+        let players = vec![
+            waiting_player.clone(),
+            already_played_with_waiting.clone(),
+            fresh_player.clone(),
+        ];
+
+        let incomplete_team = Team::new(session_id, vec![*waiting_player.id()]);
+
+        let played_team = Team::new(
+            session_id,
+            vec![*waiting_player.id(), *already_played_with_waiting.id()],
+        );
+        let played_match = Match::new(session_id, 1, *played_team.id(), Uuid::new_v4()).unwrap();
+        let history = PartnerHistory::from_matches(&[played_team], &[played_match]);
+
+        let manager = TeamQueueManager::new(session_id, GameMode::Open, 2);
+
+        let changed = manager.release_players(
+            &[incomplete_team.clone()],
+            &[*already_played_with_waiting.id(), *fresh_player.id()],
+            &players,
+            &history,
+        );
+
+        let completed = changed
+            .iter()
+            .find(|team| *team.id() == *incomplete_team.id())
+            .expect("the waiting player should only be completed by a fresh partner");
+        assert!(completed.player_ids().contains(fresh_player.id()));
+        assert!(!completed
+            .player_ids()
+            .contains(already_played_with_waiting.id()));
+
+        let new_incomplete = changed
+            .iter()
+            .find(|team| *team.id() != *incomplete_team.id())
+            .expect(
+                "the player who already partnered with the waiting player should start a new team",
+            );
+        assert_eq!(
+            new_incomplete.player_ids(),
+            &vec![*already_played_with_waiting.id()]
+        );
+    }
+
+    #[test]
+    fn test_release_players_in_open_mode_starts_a_new_team_when_the_only_incomplete_team_would_repeat(
+    ) {
+        let session_id = Uuid::new_v4();
+        let waiting_player = player(Gender::Male);
+        let already_played_with_waiting = player(Gender::Male);
+        let players = vec![waiting_player.clone(), already_played_with_waiting.clone()];
+
+        let incomplete_team = Team::new(session_id, vec![*waiting_player.id()]);
+
+        let played_team = Team::new(
+            session_id,
+            vec![*waiting_player.id(), *already_played_with_waiting.id()],
+        );
+        let played_match = Match::new(session_id, 1, *played_team.id(), Uuid::new_v4()).unwrap();
+        let history = PartnerHistory::from_matches(&[played_team], &[played_match]);
+
+        let manager = TeamQueueManager::new(session_id, GameMode::Open, 2);
+
+        let changed = manager.release_players(
+            &[incomplete_team.clone()],
+            &[*already_played_with_waiting.id()],
+            &players,
+            &history,
+        );
+
+        assert_eq!(changed.len(), 1);
+        assert_ne!(*changed[0].id(), *incomplete_team.id());
+        assert_eq!(
+            changed[0].player_ids(),
+            &vec![*already_played_with_waiting.id()]
+        );
     }
 
     #[test]

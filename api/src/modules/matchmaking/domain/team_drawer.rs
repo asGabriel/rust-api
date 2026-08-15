@@ -102,6 +102,11 @@ impl TeamDrawer {
                 history,
             )),
             GameMode::Mixed => Ok(self.draw_mixed(players, history)),
+            GameMode::Open => Ok(Self::draw_pool_greedy(
+                Self::player_ids_all(players),
+                self.players_per_team.into(),
+                history,
+            )),
         }
     }
 
@@ -202,6 +207,10 @@ impl TeamDrawer {
             .filter(|player| *player.gender() == gender)
             .map(|player| *player.id())
             .collect()
+    }
+
+    fn player_ids_all(players: &[Player]) -> Vec<Uuid> {
+        players.iter().map(|player| *player.id()).collect()
     }
 }
 
@@ -373,6 +382,27 @@ mod tests {
             teams[0].iter().collect::<HashSet<_>>(),
             ids.iter().collect::<HashSet<_>>()
         );
+    }
+
+    #[test]
+    fn test_draw_open_mode_ignores_gender_and_pairs_everyone() {
+        let players = vec![
+            player(Gender::Male),
+            player(Gender::Male),
+            player(Gender::Female),
+            player(Gender::Female),
+        ];
+
+        let teams = TeamDrawer::new(GameMode::Open, 2)
+            .draw(&players, &PartnerHistory::empty())
+            .unwrap();
+
+        let total_players: usize = teams.iter().map(Vec::len).sum();
+        assert_eq!(total_players, 4);
+        assert_eq!(teams.len(), 2);
+        for team in teams {
+            assert_eq!(team.len(), 2);
+        }
     }
 
     #[test]

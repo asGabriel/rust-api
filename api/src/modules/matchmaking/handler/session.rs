@@ -68,12 +68,10 @@ impl SessionHandler for SessionHandlerImpl {
             session.set_available_courts(available_courts);
         }
 
-        if let Some(game_mode) = request.game_mode {
-            session.set_game_mode(game_mode)?;
-        }
-
-        if let Some(shuffle_type) = request.shuffle_type {
-            session.set_shuffle_type(shuffle_type);
+        if request.game_mode.is_some() || request.shuffle_type.is_some() {
+            let game_mode = request.game_mode.unwrap_or(*session.game_mode());
+            let shuffle_type = request.shuffle_type.unwrap_or(*session.shuffle_type());
+            session.set_game_mode_and_shuffle_type(game_mode, shuffle_type)?;
         }
 
         if let Some(player_ids) = request.player_ids {
