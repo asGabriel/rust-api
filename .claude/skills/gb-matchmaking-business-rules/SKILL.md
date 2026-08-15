@@ -13,11 +13,14 @@ description: Regras de negócio do módulo de matchmaking — critérios de pare
 
 ## Critérios de pareamento
 
-- Toda `Session` tem um `GameMode` (`Male`, `Female` ou `Mixed`), que filtra
-  quem pode formar dupla junto: `Male`/`Female` só pareiam jogadores do
-  mesmo gênero; `Mixed` forma cada `Team` com metade dos jogadores homens e
-  metade mulheres (com `players_per_team = 2`, na prática 1 homem + 1
-  mulher).
+- Toda `Session` tem um `GameMode` (`Male`, `Female`, `Mixed` ou `Open`), que
+  filtra quem pode formar dupla junto: `Male`/`Female` só pareiam jogadores
+  do mesmo gênero; `Mixed` forma cada `Team` com metade dos jogadores homens
+  e metade mulheres (com `players_per_team = 2`, na prática 1 homem + 1
+  mulher); `Open` ignora gênero totalmente — qualquer jogador pode formar
+  dupla com qualquer outro. `Open` só é válido combinado com
+  `ShuffleType::RoundRobin` (ver seção seguinte); qualquer outra combinação
+  é rejeitada por `GameMode::validate_shuffle_type`.
 - O sorteio (tanto o inicial quanto os que acontecem conforme partidas
   terminam) evita, best-effort, formar uma `Team` com dois jogadores que já
   jogaram juntos como parceiros na mesma `Session` — mas aceita repetir se
@@ -44,11 +47,19 @@ habilidade, histórico de parceria, aleatoriedade controlada, etc.
 ### Fila e rotação de quadra
 
 - Toda `Session` tem um `ShuffleType`, que escolhe a estratégia de rotação
-  usada conforme as partidas terminam. Hoje só existe a estratégia
-  `KingAndQueen` (a fila contínua com rotação por vitórias descrita abaixo),
-  mas o campo já é explícito e obrigatório na `Session` (mesmo padrão do
-  `GameMode`) para permitir uma estratégia diferente no futuro sem que
-  nenhuma `Session` mude de comportamento silenciosamente.
+  usada conforme as partidas terminam: `KingAndQueen` (fila contínua com
+  rotação por vitórias, descrita abaixo) ou `RoundRobin` (só válido com
+  `GameMode::Open` — mesma mecânica de vitória/derrota do `KingAndQueen`,
+  mas a fila prioriza fortemente formar duplas inéditas: um jogador liberado
+  só completa um time incompleto da fila se essa dupla nunca jogou junta na
+  `Session`; se todos os times incompletos esperando já jogaram com ele,
+  abre um time novo em vez de repetir a dupla — nunca força a repetição
+  enquanto existir alternativa. O sorteio *inicial* nesse modo continua
+  puramente aleatório, sem gênero, igual aos outros modos — a garantia de
+  "duplas inéditas" só entra em ação na fila, conforme as partidas
+  terminam). O campo é explícito e obrigatório na `Session` (mesmo padrão do
+  `GameMode`) para que nenhuma `Session` mude de comportamento
+  silenciosamente.
 - Uma `Team` tem um `status`: `Waiting` (na fila, disponível pra entrar em
   quadra), `Holding` (venceu e está segurando a quadra aguardando o próximo
   desafiante) ou `Disbanded` (perdeu, ou girou pra fora por ter batido o
@@ -66,7 +77,12 @@ habilidade, histórico de parceria, aleatoriedade controlada, etc.
   completar uma `Team` incompleta compatível (mesmo gênero necessário, no
   caso `Mixed`) já esperando na fila; se não achar, inicia uma nova `Team`
   incompleta. Sem regra especial de "qual dos jogadores liberados" completa
-  a sobra existente. Implementado por `TeamQueueManager::release_players`
+  a sobra existente. Em `RoundRobin` (`GameMode::Open`), a compatibilidade
+  também exige zero conflito de histórico com o jogador liberado
+  (`GameMode::requires_fresh_partner`) — só entra num time incompleto que
+  ainda não jogou com ele; caso contrário abre time novo, mesmo que isso
+  signifique acumular mais de uma `Team` incompleta em paralelo. Implementado
+  por `TeamQueueManager::release_players`
   (`api/src/modules/matchmaking/domain/team_queue.rs`).
 - **Continuação automática da quadra:** ao reportar o resultado de um
   `Match` (`POST /matchmaking/matches/{match_id}/result`), o sistema já
@@ -93,6 +109,13 @@ habilidade, histórico de parceria, aleatoriedade controlada, etc.
   `Session::new`/`set_settings`/`set_game_mode`) quanto no sorteio
   (`TeamDrawer::draw`), para que uma `Session` nunca fique salva numa
   configuração que o sorteio não consegue honrar.
+- `GameMode::Open` só pode ser combinado com `ShuffleType::RoundRobin`, e
+  vice-versa — qualquer outra combinação retorna `HttpError::bad_request`
+  (`GameMode::validate_shuffle_type`). Validado em `Session::new`,
+  `set_game_mode`, `set_shuffle_type` e `set_game_mode_and_shuffle_type`
+  (esse último usado quando os dois campos mudam na mesma atualização, pra
+  validar o par final em vez de passar por um estado intermediário
+  inválido — ver `SessionHandlerImpl::update_session`).
 - `draw_teams` só pode ser chamado uma vez por `Session` (é o sorteio de
   *inicialização*): se a `Session` já tiver alguma `Team`, retorna
   `HttpError::conflict`. Não existe hoje endpoint para resetar/re-sortear
@@ -153,6 +176,15 @@ Ex: balanceamento de nível tem prioridade sobre variar parceiros.
   (`TeamQueueManager::needs_gender`) — se o desbalanceamento de gênero for
   grande, podem se acumular várias `Team`s incompletas em paralelo (uma por
   gênero em falta), não só uma. Comportamento aceito, não é bug.
+- Em `RoundRobin`, pelo mesmo motivo (recusa ativamente completar um time
+  que repetiria uma dupla), grupos pequenos com histórico de parceria muito
+  concentrado podem acumular várias `Team`s incompletas simultâneas em vez
+  de uma só. A decisão de quem completa qual time é local por jogador
+  liberado (não um rebalanceamento global da fila), então não há garantia
+  de que o resultado seja o arranjo com o mínimo global de duplas repetidas
+  possível — só que nenhum jogador é forçado a repetir parceiro enquanto
+  ele, individualmente, tiver uma alternativa disponível no momento em que
+  é liberado. Comportamento aceito, não é bug.
 
 <!--
 Situações especiais já discutidas/decididas. Ex: número ímpar de jogadores,
@@ -162,6 +194,15 @@ removido de uma Session após os times já terem sido sorteados, etc.
 
 ## Histórico de mudanças
 
+- 2026-08-14 — adicionado `GameMode::Open` (ignora gênero na formação de
+  times) e `ShuffleType::RoundRobin` (mesma mecânica de fila/quadra do
+  `KingAndQueen`, mas a fila prioriza fortemente duplas inéditas ao
+  completar times incompletos, abrindo time novo em vez de repetir parceiro
+  quando há alternativa). Os dois só são válidos combinados entre si
+  (`GameMode::validate_shuffle_type`). O sorteio inicial nesse modo continua
+  aleatório sem garantia especial (histórico sempre vazio nesse ponto); a
+  garantia de "duplas inéditas" vale só pra fila, conforme partidas
+  terminam (`TeamQueueManager::release_players`).
 - 2026-08-12 — adicionado `ShuffleType` (hoje só `KingAndQueen`) como campo
   obrigatório de `Session`. Formaliza como estratégia nomeada e selecionável
   a rotação de fila contínua por vitórias que já existia (2026-08-07),
