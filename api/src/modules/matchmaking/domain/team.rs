@@ -101,28 +101,40 @@ getters! {
     }
 }
 
-/// Centralizes the validation rules for forming a `Team` within a `Session`.
-/// Bound to a `session_id` at construction so it always scopes the
-/// "player already in another team" check to that session, regardless of
-/// what `existing_teams` the caller passes in.
+/// Centralizes the validation rules for forming a `Team` within a `Session`,
+/// including the manual (contingency) path: an operator picking specific
+/// players to force a team into the queue, regardless of the session's
+/// `GameMode`/`ShuffleType` — those only constrain the automated draw and
+/// queue rotation, never a manually assembled team.
+/// Bound to a `session_id` and that session's confirmed `player_ids` at
+/// construction so it always scopes its checks to that session, regardless
+/// of what `existing_teams` the caller passes in.
 pub struct TeamValidator {
     session_id: Uuid,
+    session_player_ids: Vec<Uuid>,
 }
 
 impl TeamValidator {
-    pub fn new(session_id: Uuid) -> Self {
-        Self { session_id }
+    pub fn new(session_id: Uuid, session_player_ids: Vec<Uuid>) -> Self {
+        Self {
+            session_id,
+            session_player_ids,
+        }
     }
 
-    /// A player cannot repeat within the same team, nor be in two teams of
-    /// the same session at the same time.
+    /// A player cannot repeat within the same team, must be a player
+    /// confirmed for the session, and cannot be in another active
+    /// (non-disbanded) team of the same session at the same time. A
+    /// disbanded team's players are free again, so they never block a new
+    /// team here.
     pub fn validate_new_team(
         &self,
         existing_teams: &[Team],
         player_ids: &[Uuid],
     ) -> HttpResult<()> {
         Self::reject_duplicate_players_in_team(player_ids)?;
-        self.reject_players_already_in_session(existing_teams, player_ids)?;
+        self.reject_players_not_confirmed_in_session(player_ids)?;
+        self.reject_players_already_in_active_team(existing_teams, player_ids)?;
 
         Ok(())
     }
@@ -141,14 +153,27 @@ impl TeamValidator {
         Ok(())
     }
 
-    fn reject_players_already_in_session(
+    fn reject_players_not_confirmed_in_session(&self, player_ids: &[Uuid]) -> HttpResult<()> {
+        if let Some(player_id) = player_ids
+            .iter()
+            .find(|player_id| !self.session_player_ids.contains(player_id))
+        {
+            return Err(Box::new(HttpError::bad_request(format!(
+                "Player {player_id} is not a confirmed player of this session"
+            ))));
+        }
+
+        Ok(())
+    }
+
+    fn reject_players_already_in_active_team(
         &self,
         existing_teams: &[Team],
         player_ids: &[Uuid],
     ) -> HttpResult<()> {
         let players_in_session: HashSet<&Uuid> = existing_teams
             .iter()
-            .filter(|team| team.session_id() == &self.session_id)
+            .filter(|team| team.session_id() == &self.session_id && !team.is_disbanded())
             .flat_map(|team| team.player_ids())
             .collect();
 
@@ -234,25 +259,39 @@ mod tests {
 
     #[test]
     fn test_validate_new_team_with_no_existing_teams() {
-        let validator = TeamValidator::new(Uuid::new_v4());
         let player_ids = vec![Uuid::new_v4(), Uuid::new_v4()];
+        let validator = TeamValidator::new(Uuid::new_v4(), player_ids.clone());
 
         assert!(validator.validate_new_team(&[], &player_ids).is_ok());
     }
 
     #[test]
     fn test_validate_new_team_with_single_player() {
-        let validator = TeamValidator::new(Uuid::new_v4());
         let player_ids = vec![Uuid::new_v4()];
+        let validator = TeamValidator::new(Uuid::new_v4(), player_ids.clone());
 
         assert!(validator.validate_new_team(&[], &player_ids).is_ok());
     }
 
     #[test]
     fn test_validate_new_team_rejects_duplicated_player_in_same_team() {
-        let validator = TeamValidator::new(Uuid::new_v4());
         let player_id = Uuid::new_v4();
         let player_ids = vec![player_id, player_id];
+        let validator = TeamValidator::new(Uuid::new_v4(), player_ids.clone());
+
+        let err = validator.validate_new_team(&[], &player_ids).unwrap_err();
+
+        assert_eq!(err.kind, HttpErrorKind::BadRequest);
+    }
+
+    #[test]
+    fn test_validate_new_team_rejects_player_not_confirmed_in_session() {
+        let session_id = Uuid::new_v4();
+        let confirmed_player = Uuid::new_v4();
+        let outsider_player = Uuid::new_v4();
+
+        let validator = TeamValidator::new(session_id, vec![confirmed_player]);
+        let player_ids = vec![confirmed_player, outsider_player];
 
         let err = validator.validate_new_team(&[], &player_ids).unwrap_err();
 
@@ -263,10 +302,14 @@ mod tests {
     fn test_validate_new_team_rejects_player_already_in_another_team_of_same_session() {
         let session_id = Uuid::new_v4();
         let repeated_player = Uuid::new_v4();
+        let new_player = Uuid::new_v4();
 
-        let validator = TeamValidator::new(session_id);
+        let validator = TeamValidator::new(
+            session_id,
+            vec![repeated_player, Uuid::new_v4(), new_player],
+        );
         let existing_team = Team::new(session_id, vec![repeated_player, Uuid::new_v4()]);
-        let player_ids = vec![repeated_player, Uuid::new_v4()];
+        let player_ids = vec![repeated_player, new_player];
 
         let err = validator
             .validate_new_team(std::slice::from_ref(&existing_team), &player_ids)
@@ -275,12 +318,33 @@ mod tests {
         assert_eq!(err.kind, HttpErrorKind::Conflict);
     }
 
+    /// A disbanded team's players are free again — they must not block a
+    /// manually created team, which is exactly the contingency scenario a
+    /// manual team is meant to unblock (e.g. re-forming a team right after
+    /// its previous one lost and was disbanded).
+    #[test]
+    fn test_validate_new_team_ignores_players_from_a_disbanded_team() {
+        let session_id = Uuid::new_v4();
+        let freed_player = Uuid::new_v4();
+        let partner = Uuid::new_v4();
+
+        let validator = TeamValidator::new(session_id, vec![freed_player, partner]);
+        let mut disbanded_team = Team::new(session_id, vec![freed_player, Uuid::new_v4()]);
+        disbanded_team.disband();
+        let player_ids = vec![freed_player, partner];
+
+        let result =
+            validator.validate_new_team(std::slice::from_ref(&disbanded_team), &player_ids);
+
+        assert!(result.is_ok());
+    }
+
     #[test]
     fn test_validate_new_team_allows_when_no_players_overlap_with_existing_team() {
         let session_id = Uuid::new_v4();
-        let validator = TeamValidator::new(session_id);
-        let existing_team = Team::new(session_id, vec![Uuid::new_v4(), Uuid::new_v4()]);
         let player_ids = vec![Uuid::new_v4(), Uuid::new_v4()];
+        let existing_team = Team::new(session_id, vec![Uuid::new_v4(), Uuid::new_v4()]);
+        let validator = TeamValidator::new(session_id, player_ids.clone());
 
         let result = validator.validate_new_team(std::slice::from_ref(&existing_team), &player_ids);
 
@@ -295,11 +359,11 @@ mod tests {
         let session_id = Uuid::new_v4();
         let other_session_id = Uuid::new_v4();
         let shared_player = Uuid::new_v4();
+        let player_ids = vec![shared_player, Uuid::new_v4()];
 
-        let validator = TeamValidator::new(session_id);
+        let validator = TeamValidator::new(session_id, player_ids.clone());
         let team_from_other_session =
             Team::new(other_session_id, vec![shared_player, Uuid::new_v4()]);
-        let player_ids = vec![shared_player, Uuid::new_v4()];
 
         let result = validator
             .validate_new_team(std::slice::from_ref(&team_from_other_session), &player_ids);
@@ -314,12 +378,13 @@ mod tests {
         let session_id = Uuid::new_v4();
         let other_session_id = Uuid::new_v4();
         let repeated_player = Uuid::new_v4();
+        let new_player = Uuid::new_v4();
 
-        let validator = TeamValidator::new(session_id);
+        let validator = TeamValidator::new(session_id, vec![repeated_player, new_player]);
         let team_in_same_session = Team::new(session_id, vec![repeated_player, Uuid::new_v4()]);
         let team_in_other_session =
             Team::new(other_session_id, vec![repeated_player, Uuid::new_v4()]);
-        let player_ids = vec![repeated_player, Uuid::new_v4()];
+        let player_ids = vec![repeated_player, new_player];
 
         let err = validator
             .validate_new_team(&[team_in_same_session, team_in_other_session], &player_ids)
