@@ -38,16 +38,17 @@ impl SessionRepository for SessionRepositoryImpl {
         let row = sqlx::query(
             r#"
             INSERT INTO matchmaking.session (
-                id, date, players_per_team, sets_to_win, points_per_set,
+                id, date, description, players_per_team, sets_to_win, points_per_set,
                 available_courts, game_mode, shuffle_type, player_ids,
                 created_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             RETURNING *
             "#,
         )
         .bind(*session.id())
         .bind(*session.date())
+        .bind(session.description().clone())
         .bind(*session.settings().players_per_team() as i16)
         .bind(*session.settings().sets_to_win() as i16)
         .bind(*session.settings().points_per_set() as i16)
@@ -89,20 +90,22 @@ impl SessionRepository for SessionRepositoryImpl {
             r#"
             UPDATE matchmaking.session SET
                 date = $2,
-                players_per_team = $3,
-                sets_to_win = $4,
-                points_per_set = $5,
-                available_courts = $6,
-                game_mode = $7,
-                shuffle_type = $8,
-                player_ids = $9,
-                updated_at = $10
+                description = $3,
+                players_per_team = $4,
+                sets_to_win = $5,
+                points_per_set = $6,
+                available_courts = $7,
+                game_mode = $8,
+                shuffle_type = $9,
+                player_ids = $10,
+                updated_at = $11
             WHERE id = $1
             RETURNING *
             "#,
         )
         .bind(*session.id())
         .bind(*session.date())
+        .bind(session.description().clone())
         .bind(*session.settings().players_per_team() as i16)
         .bind(*session.settings().sets_to_win() as i16)
         .bind(*session.settings().points_per_set() as i16)

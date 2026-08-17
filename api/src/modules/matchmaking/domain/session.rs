@@ -155,6 +155,9 @@ getters! {
 pub struct Session {
     id: Uuid,
     date: NaiveDate,
+    /// Free-text title so the session can be told apart at a glance beyond
+    /// its date (e.g. distinguishing two sessions on the same day).
+    description: Option<String>,
     settings: SessionSettings,
     available_courts: u8,
     game_mode: GameMode,
@@ -167,6 +170,7 @@ pub struct Session {
 impl Session {
     pub fn new(
         date: NaiveDate,
+        description: Option<String>,
         settings: SessionSettings,
         available_courts: u8,
         game_mode: GameMode,
@@ -178,6 +182,7 @@ impl Session {
         Ok(Self {
             id: Uuid::new_v4(),
             date,
+            description,
             settings,
             available_courts,
             game_mode,
@@ -190,6 +195,11 @@ impl Session {
 
     pub fn set_date(&mut self, date: NaiveDate) {
         self.date = date;
+        self.updated_at = Some(Utc::now());
+    }
+
+    pub fn set_description(&mut self, description: Option<String>) {
+        self.description = description;
         self.updated_at = Some(Utc::now());
     }
 
@@ -254,6 +264,7 @@ getters! {
     Session {
         id: Uuid,
         date: NaiveDate,
+        description: Option<String>,
         settings: SessionSettings,
         available_courts: u8,
         game_mode: GameMode,
@@ -277,6 +288,7 @@ impl From<&sqlx::postgres::PgRow> for Session {
         Self {
             id: row.get("id"),
             date: row.get("date"),
+            description: row.get("description"),
             settings,
             available_courts: row.get::<i16, _>("available_courts") as u8,
             game_mode: row.get::<String, _>("game_mode").into(),
@@ -305,6 +317,7 @@ mod tests {
 
         let err = Session::new(
             date(),
+            None,
             settings,
             2,
             GameMode::Mixed,
@@ -319,6 +332,7 @@ mod tests {
     fn test_new_session_allows_mixed_mode_with_even_players_per_team() {
         let session = Session::new(
             date(),
+            None,
             SessionSettings::default(),
             2,
             GameMode::Mixed,
@@ -334,6 +348,7 @@ mod tests {
         settings.players_per_team = 3;
         let mut session = Session::new(
             date(),
+            None,
             settings,
             2,
             GameMode::Male,
@@ -350,6 +365,7 @@ mod tests {
     fn test_set_settings_rejects_odd_players_per_team_when_mode_is_mixed() {
         let mut session = Session::new(
             date(),
+            None,
             SessionSettings::default(),
             2,
             GameMode::Mixed,
@@ -368,6 +384,7 @@ mod tests {
     fn test_new_session_rejects_open_mode_with_king_and_queen_shuffle() {
         let err = Session::new(
             date(),
+            None,
             SessionSettings::default(),
             2,
             GameMode::Open,
@@ -382,6 +399,7 @@ mod tests {
     fn test_new_session_rejects_round_robin_shuffle_with_non_open_mode() {
         let err = Session::new(
             date(),
+            None,
             SessionSettings::default(),
             2,
             GameMode::Male,
@@ -396,6 +414,7 @@ mod tests {
     fn test_new_session_allows_open_mode_with_round_robin_shuffle() {
         let session = Session::new(
             date(),
+            None,
             SessionSettings::default(),
             2,
             GameMode::Open,
@@ -409,6 +428,7 @@ mod tests {
     fn test_set_game_mode_rejects_open_when_current_shuffle_is_king_and_queen() {
         let mut session = Session::new(
             date(),
+            None,
             SessionSettings::default(),
             2,
             GameMode::Male,
@@ -425,6 +445,7 @@ mod tests {
     fn test_set_shuffle_type_rejects_round_robin_when_current_mode_is_not_open() {
         let mut session = Session::new(
             date(),
+            None,
             SessionSettings::default(),
             2,
             GameMode::Male,
@@ -443,6 +464,7 @@ mod tests {
     fn test_set_game_mode_and_shuffle_type_together_allows_swapping_to_open_round_robin() {
         let mut session = Session::new(
             date(),
+            None,
             SessionSettings::default(),
             2,
             GameMode::Male,
@@ -462,6 +484,7 @@ mod tests {
     fn test_set_game_mode_and_shuffle_type_rejects_mismatched_pair() {
         let mut session = Session::new(
             date(),
+            None,
             SessionSettings::default(),
             2,
             GameMode::Male,
