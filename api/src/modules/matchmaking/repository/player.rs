@@ -1,10 +1,9 @@
-use std::{collections::HashMap, sync::Mutex};
-
 use async_trait::async_trait;
 use http_error::HttpResult;
+use sqlx::{Pool, Postgres};
 use uuid::Uuid;
 
-use crate::modules::matchmaking::domain::player::{Gender, Player};
+use crate::modules::matchmaking::domain::player::Player;
 
 #[async_trait]
 pub trait PlayerRepository {
@@ -19,85 +18,76 @@ pub trait PlayerRepository {
 
 pub type DynPlayerRepository = dyn PlayerRepository + Send + Sync;
 
-/// Process-memory cache repository, no database persistence.
-/// Lets the pairing logic be tested before a migration exists.
-#[derive(Default)]
-pub struct InMemoryPlayerRepository {
-    players: Mutex<HashMap<Uuid, Player>>,
+pub struct PlayerRepositoryImpl {
+    pool: Pool<Postgres>,
 }
 
-const DEFAULT_PLAYERS: [(&str, Gender); 16] = [
-    ("Gabriel", Gender::Male),
-    ("Bru Varella", Gender::Female),
-    ("Luan", Gender::Male),
-    ("Jully", Gender::Female),
-    ("Brenda", Gender::Female),
-    ("Flavia", Gender::Female),
-    ("Marcos", Gender::Male),
-    ("Roberta", Gender::Female),
-    ("Serginho", Gender::Male),
-    ("Valdeta", Gender::Female),
-    ("Alessandra", Gender::Female),
-    ("Andre", Gender::Male),
-    ("Angela", Gender::Female),
-    ("Douglas", Gender::Male),
-    ("Gabe", Gender::Male),
-    ("Valdenia", Gender::Female),
-];
-
-impl InMemoryPlayerRepository {
-    pub fn new() -> Self {
-        let players = DEFAULT_PLAYERS
-            .into_iter()
-            .map(|(name, gender)| {
-                let player = Player::new(name.to_string(), gender);
-                (*player.id(), player)
-            })
-            .collect();
-
-        Self {
-            players: Mutex::new(players),
-        }
+impl PlayerRepositoryImpl {
+    pub fn new(pool: &Pool<Postgres>) -> Self {
+        Self { pool: pool.clone() }
     }
 }
 
 #[async_trait]
-impl PlayerRepository for InMemoryPlayerRepository {
+impl PlayerRepository for PlayerRepositoryImpl {
     async fn insert(&self, player: Player) -> HttpResult<Player> {
-        let mut players = self
-            .players
-            .lock()
-            .expect("player repository lock poisoned");
-        players.insert(*player.id(), player.clone());
+        let gender: String = (*player.gender()).into();
 
-        Ok(player)
+        let row = sqlx::query(
+            r#"
+            INSERT INTO matchmaking.player (id, name, gender, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING *
+            "#,
+        )
+        .bind(*player.id())
+        .bind(player.name())
+        .bind(gender)
+        .bind(*player.created_at())
+        .bind(*player.updated_at())
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(Player::from(&row))
     }
 
     async fn list(&self) -> HttpResult<Vec<Player>> {
-        let players = self
-            .players
-            .lock()
-            .expect("player repository lock poisoned");
+        let rows = sqlx::query("SELECT * FROM matchmaking.player")
+            .fetch_all(&self.pool)
+            .await?;
 
-        Ok(players.values().cloned().collect())
+        Ok(rows.iter().map(Player::from).collect())
     }
 
     async fn get(&self, id: &Uuid) -> HttpResult<Option<Player>> {
-        let players = self
-            .players
-            .lock()
-            .expect("player repository lock poisoned");
+        let row = sqlx::query("SELECT * FROM matchmaking.player WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
 
-        Ok(players.get(id).cloned())
+        Ok(row.as_ref().map(Player::from))
     }
 
     async fn update(&self, player: Player) -> HttpResult<Player> {
-        let mut players = self
-            .players
-            .lock()
-            .expect("player repository lock poisoned");
-        players.insert(*player.id(), player.clone());
+        let gender: String = (*player.gender()).into();
 
-        Ok(player)
+        let row = sqlx::query(
+            r#"
+            UPDATE matchmaking.player SET
+                name = $2,
+                gender = $3,
+                updated_at = $4
+            WHERE id = $1
+            RETURNING *
+            "#,
+        )
+        .bind(*player.id())
+        .bind(player.name())
+        .bind(gender)
+        .bind(*player.updated_at())
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(Player::from(&row))
     }
 }

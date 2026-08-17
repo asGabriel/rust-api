@@ -18,6 +18,26 @@ pub enum TeamStatus {
     Disbanded,
 }
 
+impl From<String> for TeamStatus {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "HOLDING" => TeamStatus::Holding,
+            "DISBANDED" => TeamStatus::Disbanded,
+            _ => TeamStatus::Waiting,
+        }
+    }
+}
+
+impl From<TeamStatus> for String {
+    fn from(status: TeamStatus) -> Self {
+        match status {
+            TeamStatus::Waiting => "WAITING".to_string(),
+            TeamStatus::Holding => "HOLDING".to_string(),
+            TeamStatus::Disbanded => "DISBANDED".to_string(),
+        }
+    }
+}
+
 /// A pair/team formed from the players confirmed in a `Session`,
 /// used to compose that day's matches.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,6 +135,22 @@ getters! {
         status: TeamStatus,
         consecutive_wins: u8,
         created_at: DateTime<Utc>,
+    }
+}
+
+impl From<&sqlx::postgres::PgRow> for Team {
+    fn from(row: &sqlx::postgres::PgRow) -> Self {
+        use sqlx::Row;
+
+        Self {
+            id: row.get("id"),
+            session_id: row.get("session_id"),
+            player_ids: row.get("player_ids"),
+            status: row.get::<String, _>("status").into(),
+            consecutive_wins: row.get::<i16, _>("consecutive_wins") as u8,
+            priority: row.get("priority"),
+            created_at: row.get("created_at"),
+        }
     }
 }
 
@@ -514,7 +550,11 @@ mod tests {
         let player_ids = vec![stolen_player, new_partner];
 
         let broken = validator
-            .validate_priority_team(std::slice::from_ref(&origin_team), &HashSet::new(), &player_ids)
+            .validate_priority_team(
+                std::slice::from_ref(&origin_team),
+                &HashSet::new(),
+                &player_ids,
+            )
             .unwrap();
 
         assert_eq!(broken.len(), 1);
