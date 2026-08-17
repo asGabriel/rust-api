@@ -8,13 +8,24 @@ use uuid::Uuid;
 
 /// A team's place in the session's rotation: `Waiting` in the queue to be
 /// called up to a court, `Holding` a court after a win (until it either
-/// loses or hits the consecutive-win cap), or `Disbanded` once it's done,
-/// freeing its players back into the queue.
+/// loses or hits the consecutive-win cap), `Playing` while it has an
+/// in-progress match, or `Disbanded` once it's done, freeing its players
+/// back into the queue.
+///
+/// `Playing` is never set by this domain layer — no method here constructs
+/// it. It's written exclusively by the `trg_match_marks_teams_playing`
+/// trigger (`migrations/matchmaking/20260817130000_team-playing-status.sql`)
+/// the instant a `Match` row with no `winner_team_id` yet is inserted, so it
+/// can never drift from whether the team actually has an open match: there's
+/// no second write for application code to forget. If you're tempted to set
+/// `TeamStatus::Playing` from Rust, that's a sign the write belongs in
+/// `Match::new`/`create_match` at the SQL level instead — see the migration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TeamStatus {
     Waiting,
     Holding,
+    Playing,
     Disbanded,
 }
 
@@ -22,6 +33,7 @@ impl From<String> for TeamStatus {
     fn from(s: String) -> Self {
         match s.as_str() {
             "HOLDING" => TeamStatus::Holding,
+            "PLAYING" => TeamStatus::Playing,
             "DISBANDED" => TeamStatus::Disbanded,
             _ => TeamStatus::Waiting,
         }
@@ -33,6 +45,7 @@ impl From<TeamStatus> for String {
         match status {
             TeamStatus::Waiting => "WAITING".to_string(),
             TeamStatus::Holding => "HOLDING".to_string(),
+            TeamStatus::Playing => "PLAYING".to_string(),
             TeamStatus::Disbanded => "DISBANDED".to_string(),
         }
     }
@@ -86,6 +99,10 @@ impl Team {
 
     pub fn is_holding(&self) -> bool {
         self.status == TeamStatus::Holding
+    }
+
+    pub fn is_playing(&self) -> bool {
+        self.status == TeamStatus::Playing
     }
 
     pub fn is_disbanded(&self) -> bool {
@@ -313,6 +330,18 @@ mod tests {
     use http_error::HttpErrorKind;
 
     use super::*;
+
+    /// `TeamStatus::Playing` is only ever written by the database trigger
+    /// (see the doc comment on `TeamStatus`), so the round trip through the
+    /// DB row string is exactly the surface where a typo would silently
+    /// break the invariant the trigger exists to guarantee.
+    #[test]
+    fn test_team_status_playing_round_trips_through_its_db_string() {
+        let status: TeamStatus = "PLAYING".to_string().into();
+
+        assert_eq!(status, TeamStatus::Playing);
+        assert_eq!(String::from(TeamStatus::Playing), "PLAYING");
+    }
 
     #[test]
     fn test_new_team_starts_waiting_with_no_wins() {
