@@ -33,6 +33,7 @@ impl SessionHandler for SessionHandlerImpl {
     async fn create_session(&self, request: CreateSessionRequest) -> HttpResult<Session> {
         let session = Session::new(
             request.date,
+            request.description,
             request.settings.unwrap_or_default(),
             request.available_courts,
             request.game_mode,
@@ -58,6 +59,10 @@ impl SessionHandler for SessionHandlerImpl {
 
         if let Some(date) = request.date {
             session.set_date(date);
+        }
+
+        if let Some(description) = request.description {
+            session.set_description(Some(description));
         }
 
         if let Some(settings) = request.settings {
@@ -93,6 +98,7 @@ pub mod use_cases {
     #[serde(rename_all = "camelCase")]
     pub struct CreateSessionRequest {
         pub date: NaiveDate,
+        pub description: Option<String>,
         pub available_courts: u8,
         pub game_mode: GameMode,
         pub shuffle_type: ShuffleType,
@@ -103,6 +109,7 @@ pub mod use_cases {
     #[serde(rename_all = "camelCase")]
     pub struct UpdateSessionRequest {
         pub date: Option<NaiveDate>,
+        pub description: Option<String>,
         pub available_courts: Option<u8>,
         pub game_mode: Option<GameMode>,
         pub shuffle_type: Option<ShuffleType>,
