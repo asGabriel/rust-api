@@ -47,9 +47,12 @@ cargo test --all-features
 cargo fmt
 cargo clippy --all-features
 
-# migrations: uma pasta por domínio em migrations/<domínio>, todas contra o mesmo DATABASE_URL
-sqlx migrate run --source migrations/<domínio>
-sqlx migrate revert --source migrations/<domínio>
+# migrations: uma pasta por domínio em migrations/<domínio>, todas contra o mesmo DATABASE_URL.
+# --ignore-missing é necessário em run/revert: o sqlx-cli guarda o histórico de todos os domínios
+# numa única tabela `_sqlx_migrations` (não há flag para isolar a tabela por --source nessa versão),
+# então rodar um domínio sem essa flag falha ao ver migrations de outro domínio "missing".
+sqlx migrate run --source migrations/<domínio> --ignore-missing
+sqlx migrate revert --source migrations/<domínio> --ignore-missing
 sqlx migrate add --source migrations/<domínio> nome_da_migration
 ```
 
