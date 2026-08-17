@@ -28,8 +28,8 @@ use api::modules::{
             team::TeamHandlerImpl,
         },
         repository::{
-            matches::InMemoryMatchRepository, player::InMemoryPlayerRepository,
-            session::InMemorySessionRepository, team::InMemoryTeamRepository,
+            matches::MatchRepositoryImpl, player::PlayerRepositoryImpl,
+            session::SessionRepositoryImpl, team::TeamRepositoryImpl,
         },
         MatchmakingState,
     },
@@ -67,7 +67,7 @@ async fn main() {
         auth_handler: Arc::new(auth_handler),
     };
 
-    let matchmaking_state = build_matchmaking_state();
+    let matchmaking_state = build_matchmaking_state(pool);
 
     let app_state = AppState {
         finance_manager_state: Arc::new(finance_manager_state),
@@ -128,11 +128,11 @@ fn build_income_handler(pool: &Pool<Postgres>) -> IncomeHandlerImpl {
     }
 }
 
-fn build_matchmaking_state() -> MatchmakingState {
-    let player_repository = Arc::new(InMemoryPlayerRepository::new());
-    let session_repository = Arc::new(InMemorySessionRepository::new());
-    let team_repository = Arc::new(InMemoryTeamRepository::new());
-    let match_repository = Arc::new(InMemoryMatchRepository::new());
+fn build_matchmaking_state(pool: &Pool<Postgres>) -> MatchmakingState {
+    let player_repository = Arc::new(PlayerRepositoryImpl::new(pool));
+    let session_repository = Arc::new(SessionRepositoryImpl::new(pool));
+    let team_repository = Arc::new(TeamRepositoryImpl::new(pool));
+    let match_repository = Arc::new(MatchRepositoryImpl::new(pool));
 
     let team_handler = Arc::new(TeamHandlerImpl {
         team_repository,

@@ -68,6 +68,28 @@ impl GameMode {
     }
 }
 
+impl From<String> for GameMode {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "FEMALE" => GameMode::Female,
+            "MIXED" => GameMode::Mixed,
+            "OPEN" => GameMode::Open,
+            _ => GameMode::Male,
+        }
+    }
+}
+
+impl From<GameMode> for String {
+    fn from(game_mode: GameMode) -> Self {
+        match game_mode {
+            GameMode::Male => "MALE".to_string(),
+            GameMode::Female => "FEMALE".to_string(),
+            GameMode::Mixed => "MIXED".to_string(),
+            GameMode::Open => "OPEN".to_string(),
+        }
+    }
+}
+
 /// The strategy governing how a session's team queue evolves as matches
 /// finish.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,6 +102,24 @@ pub enum ShuffleType {
     /// pairing while a fresh alternative exists. Only valid with
     /// `GameMode::Open`.
     RoundRobin,
+}
+
+impl From<String> for ShuffleType {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "ROUND_ROBIN" => ShuffleType::RoundRobin,
+            _ => ShuffleType::KingAndQueen,
+        }
+    }
+}
+
+impl From<ShuffleType> for String {
+    fn from(shuffle_type: ShuffleType) -> Self {
+        match shuffle_type {
+            ShuffleType::KingAndQueen => "KING_AND_QUEEN".to_string(),
+            ShuffleType::RoundRobin => "ROUND_ROBIN".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -221,6 +261,30 @@ getters! {
         player_ids: Vec<Uuid>,
         created_at: DateTime<Utc>,
         updated_at: Option<DateTime<Utc>>,
+    }
+}
+
+impl From<&sqlx::postgres::PgRow> for Session {
+    fn from(row: &sqlx::postgres::PgRow) -> Self {
+        use sqlx::Row;
+
+        let settings = SessionSettings {
+            players_per_team: row.get::<i16, _>("players_per_team") as u8,
+            sets_to_win: row.get::<i16, _>("sets_to_win") as u8,
+            points_per_set: row.get::<i16, _>("points_per_set") as u8,
+        };
+
+        Self {
+            id: row.get("id"),
+            date: row.get("date"),
+            settings,
+            available_courts: row.get::<i16, _>("available_courts") as u8,
+            game_mode: row.get::<String, _>("game_mode").into(),
+            shuffle_type: row.get::<String, _>("shuffle_type").into(),
+            player_ids: row.get("player_ids"),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+        }
     }
 }
 

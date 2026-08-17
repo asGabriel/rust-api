@@ -167,6 +167,23 @@ getters! {
     }
 }
 
+impl From<&sqlx::postgres::PgRow> for Match {
+    fn from(row: &sqlx::postgres::PgRow) -> Self {
+        use sqlx::Row;
+
+        Self {
+            id: row.get("id"),
+            session_id: row.get("session_id"),
+            court: row.get::<i16, _>("court") as u8,
+            team_a_id: row.get("team_a_id"),
+            team_b_id: row.get("team_b_id"),
+            winner_team_id: row.get("winner_team_id"),
+            started_at: row.get("started_at"),
+            played_at: row.get("played_at"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use http_error::HttpErrorKind;
