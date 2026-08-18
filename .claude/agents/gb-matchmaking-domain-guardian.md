@@ -31,7 +31,9 @@ reporta.
 
 1. Carregue a skill `gb-matchmaking-business-rules` e releia as regras
    atualmente documentadas (Critérios de pareamento, Restrições,
-   Prioridades, Casos-limite conhecidos, Histórico de mudanças).
+   Prioridades, Casos-limite conhecidos). O `CHANGELOG.md` do skill (motivo/
+   data de cada decisão) não faz parte dessa releitura padrão — só abra se
+   precisar entender o contexto histórico de uma regra específica.
 2. Consulte a memória de projeto relevante a matchmaking antes de começar a
    análise, para saber de exceções/decisões já registradas.
 3. Rode `git diff` (ou `git diff --staged` se for o caso) restrito a

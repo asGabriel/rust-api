@@ -94,6 +94,28 @@ habilidade, histórico de parceria, aleatoriedade controlada, etc.
   endpoint só serve pra abrir uma quadra pela primeira vez. Se a fila ainda
   não tiver `Team`s completas suficientes, a quadra fica ociosa até ter
   (não é tratado como erro).
+- **Toda quadra ociosa da `Session` é reconsiderada a cada resultado, não só
+  a que acabou de liberar** — essencial em `Session`s com mais de uma
+  quadra: a cada `POST /matchmaking/matches/{match_id}/result`,
+  `resolve_match_result` varre todas as quadras que a `Session` já abriu
+  alguma vez (via `Match.court` no histórico) e refaz a tentativa de
+  preenchimento em qualquer uma cuja última partida já tenha resultado —
+  não só a quadra do `Match` recém-reportado. Sem isso, uma quadra que
+  ficou ociosa porque a fila estava rasa no momento em que *ela* tentou
+  puxar um desafiante nunca seria revisitada depois, mesmo que a fila
+  enchesse via resultados de *outras* quadras — ficaria travada
+  indefinidamente. As quadras ociosas são preenchidas em ordem de "ociosa
+  há mais tempo primeiro" (mesmo princípio FIFO da fila de jogadores),
+  cada uma consumindo da mesma fila compartilhada sem repetir `Team`; uma
+  quadra que a fila ainda não consegue preencher só é pulada (sem
+  consumir nada), não trava as demais. **Trade-off aceito:** esse
+  preenchimento guloso por ordem de espera não maximiza necessariamente o
+  número de quadras ativas no fim da chamada — uma quadra antiga
+  precisando de 2 `Team`s novas pode consumir as duas últimas `Team`s
+  completas da fila e deixar uma quadra mais nova (precisando de só 1
+  desafiante) ociosa, quando preenchê-la primeiro colocaria mais uma
+  quadra em jogo agora. Prioriza justiça por tempo de espera sobre
+  utilização total das quadras.
 - Orquestrado por `TeamHandlerImpl::resolve_match_result`
   (`api/src/modules/matchmaking/handler/team.rs`), chamado por
   `MatchHandlerImpl::report_match_result`
@@ -192,10 +214,18 @@ Ex: balanceamento de nível tem prioridade sobre variar parceiros.
 - `draw_teams` faz o check de "sessão já tem times" e os inserts em
   chamadas separadas ao repositório — duas chamadas concorrentes para a
   mesma `Session` podem, em teoria, passar pelo check antes de qualquer
-  insert acontecer (TOCTOU). Não tratado ainda; aceitável hoje por ser
-  repositório em memória de processo único, sem carga concorrente real. O
-  mesmo vale, em tese, para `resolve_match_result`/`create_match`
-  concorrentes na mesma quadra.
+  insert acontecer (TOCTOU). Não tratado ainda (sem transação/lock em
+  nenhum repositório do módulo). O repositório já é Postgres real (desde o
+  PR #82 de `feat/matchmaking-sql-repository`), não mais em memória — a
+  ressalva antiga de "aceitável por não ter carga concorrente real" descreve
+  a ausência de operadores simultâneos de fato, não uma proteção técnica.
+  Desde que `resolve_match_result` passou a reconsiderar todas as quadras
+  ociosas da `Session` a cada resultado (não só a que acabou de liberar —
+  ver "Continuação automática da quadra"), essa janela de corrida ficou bem
+  mais larga: duas chamadas concorrentes de `report_match_result` para
+  quadras *diferentes* da mesma `Session` agora podem disputar a mesma
+  `Team` `Holding` ociosa antiga ou as mesmas `Team`s da fila, não só
+  colidir consigo mesma na mesma quadra como antes.
 - Resolvido nesta rodada (ver Histórico de mudanças): jogadores que
   sobravam no sorteio eram descartados silenciosamente; não havia checagem
   de `Team` pertencente à `Session` nem de partida simultânea na mesma
@@ -224,72 +254,7 @@ removido de uma Session após os times já terem sido sorteados, etc.
 
 ## Histórico de mudanças
 
-- 2026-08-15 — nova rota `POST /matchmaking/teams/priority`
-  (`TeamHandlerImpl::create_priority_team`) para o operador informar
-  manualmente qual dupla joga a seguir, ignorando a fila FIFO normal —
-  caso de uso: uma quadra está rodando e o operador quer garantir quem
-  entra assim que ela liberar, sem depender do sorteio/fila automáticos.
-  `Team` ganha o campo `priority` (`Team::with_priority`), que
-  `TeamQueueManager::next_complete_teams` passa a priorizar sobre a ordem
-  por `created_at`. Diferente de `create_team`, essa via pode puxar um
-  jogador de outra `Team` `Waiting` não ocupada em partida — a `Team` de
-  origem é desfeita e o parceiro que sobra é re-inserido na fila via
-  `TeamQueueManager::release_players`, igual a um jogador liberado por
-  resultado de partida.
-- 2026-08-15 — `create_team` (entrada manual de `Team`) passa a validar que
-  todo `player_id` está confirmado em `Session::player_ids`
-  (`HttpError::bad_request` caso contrário), e o check de "já está em outro
-  time" passa a ignorar `Team`s `Disbanded` (antes bloqueava indevidamente
-  a reentrada manual de um jogador cujo time anterior já havia se desfeito
-  — exatamente o cenário de contingência que essa rota existe pra cobrir).
-  Confirma que a rota continua deliberadamente sem checagem de `GameMode`/
-  `ShuffleType`: a montagem manual é independente da configuração da
-  `Session`.
-- 2026-08-14 — adicionado `GameMode::Open` (ignora gênero na formação de
-  times) e `ShuffleType::RoundRobin` (mesma mecânica de fila/quadra do
-  `KingAndQueen`, mas a fila prioriza fortemente duplas inéditas ao
-  completar times incompletos, abrindo time novo em vez de repetir parceiro
-  quando há alternativa). Os dois só são válidos combinados entre si
-  (`GameMode::validate_shuffle_type`). O sorteio inicial nesse modo continua
-  aleatório sem garantia especial (histórico sempre vazio nesse ponto); a
-  garantia de "duplas inéditas" vale só pra fila, conforme partidas
-  terminam (`TeamQueueManager::release_players`).
-- 2026-08-12 — adicionado `ShuffleType` (hoje só `KingAndQueen`) como campo
-  obrigatório de `Session`. Formaliza como estratégia nomeada e selecionável
-  a rotação de fila contínua por vitórias que já existia (2026-08-07),
-  sem mudar seu comportamento — deixa de ser implícita/hardcoded.
-- 2026-08-07 — Fila contínua de duplas com rotação por vitórias: `Team`
-  ganha `status` (`Waiting`/`Holding`/`Disbanded`) e `consecutive_wins`.
-  Perdedor de um `Match` sempre é desfeito; vencedor segura a quadra até 2
-  vitórias seguidas, depois também é desfeito. Jogadores liberados entram
-  numa fila FIFO (`TeamQueueManager`) que nunca descarta sobra (formam
-  `Team`s incompletas) e evita, best-effort, repetir parceiros que já
-  jogaram juntos na `Session` (`PartnerHistory`, olhando só `Team`s que de
-  fato jogaram). `report_match_result` passa a criar automaticamente o
-  próximo `Match` da quadra que ficou livre, sem precisar de nova chamada
-  manual a `create_match`. `create_match` (usado só pra abrir uma quadra
-  pela primeira vez) passa a validar via `MatchStartValidator` que as duas
-  `Team`s pertencem à `Session`, estão completas, não estão `Disbanded` e
-  não estão ocupadas em outro `Match` em andamento.
-- 2026-08-04 — `Match` passa a nascer sem resultado (`winner_team_id`/
-  `played_at` como `Option`, partida "em andamento" na quadra) via `POST
-  /matchmaking/matches/`; novo endpoint `POST
-  /matchmaking/matches/{match_id}/result` reporta o resultado
-  (`ReportMatchResultRequest { winner_team_id }`), validando que a partida
-  ainda não tem resultado e que o vencedor é uma das duas equipes do
-  `Match`. Primeira peça da estrutura de "regras de sorteio conforme os
-  jogos vão finalizando" — regras de qual será o próximo sorteio após um
-  resultado ainda serão decididas e adicionadas aqui.
-- 2026-08-04 — implementada validação em `create_team`: rejeita jogador
-  duplicado dentro da mesma `Team` (`HttpError::bad_request`) e jogador já
-  presente em outra `Team` da mesma `Session` (`HttpError::conflict`).
-- 2026-08-04 — adicionado `GameMode` (`Male`/`Female`/`Mixed`) como campo
-  obrigatório de `Session`, e rota `POST /matchmaking/teams/{session_id}/draw`
-  para o sorteio inicial (aleatório) de `Team`s a partir dos jogadores
-  confirmados na `Session`, respeitando o `GameMode`.
-
-<!--
-Registro cronológico de decisões de regra de negócio, com data e motivo.
-Ex: "2026-08-04 — decidido que sorteio de duplas é aleatório sem
-balanceamento de nível na v1, ver discussão em <link/PR>."
--->
+Movido para [`CHANGELOG.md`](./CHANGELOG.md) — não é recarregado por padrão
+junto com este arquivo; ler só quando for preciso o contexto histórico de
+uma regra específica (motivo/data de uma decisão já refletida nas seções
+acima).
