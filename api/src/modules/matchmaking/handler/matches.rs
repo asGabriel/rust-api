@@ -112,24 +112,18 @@ impl MatchHandler for MatchHandlerImpl {
             )
             .await?;
 
-        // The teams in `rotation.next_teams` were just computed straight off
-        // the queue (complete, waiting, not busy elsewhere), so there's
-        // nothing left for `MatchStartValidator` to catch here.
-        let next_match = match (
-            rotation.winner_still_holding,
-            rotation.next_teams.as_slice(),
-        ) {
-            (true, [challenger]) => Some((rotation.winner_team_id, *challenger.id())),
-            (false, [team_a, team_b]) => Some((*team_a.id(), *team_b.id())),
-            _ => None,
-        };
-
-        if let Some((team_a_id, team_b_id)) = next_match {
+        // Each assignment's teams were just computed straight off the queue
+        // (complete, waiting, not busy elsewhere), so there's nothing left
+        // for `MatchStartValidator` to catch here. This can start matches on
+        // courts other than `finished_match`'s own — any other court left
+        // idle by an earlier result that the now-larger queue can finally
+        // fill (see `TeamHandler::resolve_match_result`).
+        for assignment in rotation.court_assignments {
             let next = Match::new(
                 *finished_match.session_id(),
-                *finished_match.court(),
-                team_a_id,
-                team_b_id,
+                assignment.court,
+                assignment.team_a_id,
+                assignment.team_b_id,
             )?;
             self.match_repository.insert(next).await?;
         }
