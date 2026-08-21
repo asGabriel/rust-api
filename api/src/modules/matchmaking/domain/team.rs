@@ -130,6 +130,14 @@ impl Team {
         self.player_ids.push(player_id);
     }
 
+    /// Replaces this team's whole roster — the "editar time" contingency
+    /// path (see `TeamValidator::validate_team_update`), as opposed to
+    /// `add_player` completing an incomplete team one freed player at a
+    /// time.
+    pub fn set_player_ids(&mut self, player_ids: Vec<Uuid>) {
+        self.player_ids = player_ids;
+    }
+
     /// Records a win. A team keeps holding its court after a win, but only
     /// up to `MAX_CONSECUTIVE_WINS` in a row — past that, it's disbanded
     /// like a loss would be, so other waiting teams get a turn.
@@ -232,6 +240,39 @@ impl TeamValidator {
         Self::reject_duplicate_players_in_team(player_ids)?;
         self.reject_players_not_confirmed_in_session(player_ids)?;
         self.collect_broken_origin_teams(existing_teams, busy_team_ids, player_ids)
+    }
+
+    /// Validates replacing an existing team's whole roster with
+    /// `new_player_ids` — the "editar time" contingency path: an operator
+    /// correcting a team manually after the draw, which in practice usually
+    /// means pulling a player who's already in another team of the same
+    /// session. Only `entering_player_ids` (the players in `new_player_ids`
+    /// that aren't already on the team being edited) are checked against
+    /// other teams — a player staying on the team, or simply leaving it, is
+    /// never treated as being "stolen" from anywhere. The pull itself
+    /// follows the same rule as `validate_priority_team`: a player in a
+    /// `Waiting` team that isn't busy can be pulled, one in a `Holding` team
+    /// or mid-match can't. `other_teams` must exclude the team being edited,
+    /// so it's never mistaken for its own origin team.
+    ///
+    /// Returns the same broken-origin-team report as `validate_priority_team`,
+    /// for the caller to disband and re-slot.
+    pub fn validate_team_update(
+        &self,
+        other_teams: &[Team],
+        busy_team_ids: &HashSet<Uuid>,
+        new_player_ids: &[Uuid],
+        entering_player_ids: &[Uuid],
+    ) -> HttpResult<Vec<(Team, Vec<Uuid>)>> {
+        if new_player_ids.is_empty() {
+            return Err(Box::new(HttpError::bad_request(
+                "A team must keep at least one player — disband it instead of emptying its roster",
+            )));
+        }
+
+        Self::reject_duplicate_players_in_team(new_player_ids)?;
+        self.reject_players_not_confirmed_in_session(new_player_ids)?;
+        self.collect_broken_origin_teams(other_teams, busy_team_ids, entering_player_ids)
     }
 
     fn collect_broken_origin_teams(
@@ -535,6 +576,118 @@ mod tests {
 
         let err = validator
             .validate_new_team(&[team_in_same_session, team_in_other_session], &player_ids)
+            .unwrap_err();
+
+        assert_eq!(err.kind, HttpErrorKind::Conflict);
+    }
+
+    #[test]
+    fn test_set_player_ids_replaces_the_whole_roster() {
+        let mut team = Team::new(Uuid::new_v4(), vec![Uuid::new_v4(), Uuid::new_v4()]);
+        let new_roster = vec![Uuid::new_v4(), Uuid::new_v4()];
+
+        team.set_player_ids(new_roster.clone());
+
+        assert_eq!(team.player_ids(), &new_roster);
+    }
+
+    #[test]
+    fn test_validate_team_update_allows_a_player_free_in_the_session() {
+        let session_id = Uuid::new_v4();
+        let new_player_ids = vec![Uuid::new_v4(), Uuid::new_v4()];
+        let validator = TeamValidator::new(session_id, new_player_ids.clone());
+
+        let broken = validator
+            .validate_team_update(&[], &HashSet::new(), &new_player_ids, &new_player_ids)
+            .unwrap();
+
+        assert!(broken.is_empty());
+    }
+
+    /// The whole point of editing a team: pulling a player out of a
+    /// `Waiting` team that isn't mid-match must report that team so the
+    /// caller can disband it and re-slot its now partner-less teammate.
+    #[test]
+    fn test_validate_team_update_reports_the_origin_team_of_a_pulled_player() {
+        let session_id = Uuid::new_v4();
+        let pulled_player = Uuid::new_v4();
+        let stranded_partner = Uuid::new_v4();
+        let staying_player = Uuid::new_v4();
+
+        let origin_team = Team::new(session_id, vec![pulled_player, stranded_partner]);
+        let origin_team_id = *origin_team.id();
+        let validator = TeamValidator::new(
+            session_id,
+            vec![pulled_player, stranded_partner, staying_player],
+        );
+        let new_player_ids = vec![staying_player, pulled_player];
+        let entering_player_ids = vec![pulled_player];
+
+        let broken = validator
+            .validate_team_update(
+                std::slice::from_ref(&origin_team),
+                &HashSet::new(),
+                &new_player_ids,
+                &entering_player_ids,
+            )
+            .unwrap();
+
+        assert_eq!(broken.len(), 1);
+        let (reported_team, remaining) = &broken[0];
+        assert_eq!(reported_team.id(), &origin_team_id);
+        assert_eq!(remaining, &vec![stranded_partner]);
+    }
+
+    /// A player already on the team being edited must never be treated as
+    /// "stolen" from it — only genuinely new entrants are checked against
+    /// other teams.
+    #[test]
+    fn test_validate_team_update_ignores_players_already_on_the_edited_team() {
+        let session_id = Uuid::new_v4();
+        let staying_player = Uuid::new_v4();
+        let other_player = Uuid::new_v4();
+        let validator = TeamValidator::new(session_id, vec![staying_player, other_player]);
+
+        let broken = validator
+            .validate_team_update(
+                &[],
+                &HashSet::new(),
+                &[staying_player, other_player],
+                &[other_player],
+            )
+            .unwrap();
+
+        assert!(broken.is_empty());
+    }
+
+    #[test]
+    fn test_validate_team_update_rejects_emptying_the_roster() {
+        let session_id = Uuid::new_v4();
+        let validator = TeamValidator::new(session_id, vec![]);
+
+        let err = validator
+            .validate_team_update(&[], &HashSet::new(), &[], &[])
+            .unwrap_err();
+
+        assert_eq!(err.kind, HttpErrorKind::BadRequest);
+    }
+
+    #[test]
+    fn test_validate_team_update_rejects_pulling_a_player_from_a_holding_team() {
+        let session_id = Uuid::new_v4();
+        let player_id = Uuid::new_v4();
+        let new_partner = Uuid::new_v4();
+        let mut holding_team = Team::new(session_id, vec![player_id, Uuid::new_v4()]);
+        holding_team.register_win();
+        let validator = TeamValidator::new(session_id, vec![player_id, new_partner]);
+
+        let err = validator
+            .validate_team_update(
+                std::slice::from_ref(&holding_team),
+                &HashSet::new(),
+                &[player_id, new_partner],
+                &[player_id],
+            )
             .unwrap_err();
 
         assert_eq!(err.kind, HttpErrorKind::Conflict);

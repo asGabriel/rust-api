@@ -15,7 +15,9 @@ use crate::modules::matchmaking::{
         team_drawer::{PartnerHistory, TeamDrawer},
         team_queue::TeamQueueManager,
     },
-    handler::team::use_cases::{CourtAssignment, CreateTeamRequest, ResolvedRotation},
+    handler::team::use_cases::{
+        CourtAssignment, CreateTeamRequest, ResolvedRotation, UpdateTeamRequest,
+    },
     repository::{
         matches::DynMatchRepository, player::DynPlayerRepository, session::DynSessionRepository,
         team::DynTeamRepository,
@@ -45,6 +47,17 @@ pub trait TeamHandler {
     async fn create_priority_team(&self, request: CreateTeamRequest) -> HttpResult<Team>;
 
     async fn list_teams_by_session(&self, session_id: Uuid) -> HttpResult<Vec<Team>>;
+
+    /// Replaces an existing team's roster — the manual "editar time"
+    /// contingency path for correcting a team after the draw. Only a
+    /// `Waiting` team can be edited (a `Holding`/`Playing` team is actively
+    /// on court, and a `Disbanded` one is done). A player being added who's
+    /// already in another `Waiting`, non-busy team is pulled out of it
+    /// (same rule as `create_priority_team`); that origin team is disbanded
+    /// and its now partner-less remaining player(s) — together with
+    /// whoever this edit itself dropped from the team — are re-slotted
+    /// back into the queue.
+    async fn update_team(&self, team_id: Uuid, request: UpdateTeamRequest) -> HttpResult<Team>;
 
     /// First draw of teams for a session: random pairing of the session's
     /// confirmed players, honoring the session's `GameMode` filter. Fails if
@@ -182,6 +195,110 @@ impl TeamHandler for TeamHandlerImpl {
 
     async fn list_teams_by_session(&self, session_id: Uuid) -> HttpResult<Vec<Team>> {
         self.team_repository.list_by_session(&session_id).await
+    }
+
+    async fn update_team(&self, team_id: Uuid, request: UpdateTeamRequest) -> HttpResult<Team> {
+        let mut team = self
+            .team_repository
+            .get(&team_id)
+            .await?
+            .ok_or_else(|| Box::new(HttpError::not_found("Team", team_id)))?;
+
+        if !team.is_waiting() {
+            return Err(Box::new(HttpError::conflict(format!(
+                "Team {team_id} can't be edited while it isn't waiting"
+            ))));
+        }
+
+        let session = self
+            .session_repository
+            .get(team.session_id())
+            .await?
+            .ok_or_else(|| Box::new(HttpError::not_found("Session", *team.session_id())))?;
+
+        let existing_teams = self
+            .team_repository
+            .list_by_session(team.session_id())
+            .await?;
+        let session_matches = self.match_repository.list_by_session(team.session_id()).await?;
+        let busy_team_ids = Match::busy_team_ids(&session_matches);
+
+        let other_teams: Vec<Team> = existing_teams
+            .into_iter()
+            .filter(|other| other.id() != team.id())
+            .collect();
+
+        let entering_player_ids: Vec<Uuid> = request
+            .player_ids
+            .iter()
+            .copied()
+            .filter(|id| !team.player_ids().contains(id))
+            .collect();
+        let mut freed_player_ids: Vec<Uuid> = team
+            .player_ids()
+            .iter()
+            .copied()
+            .filter(|id| !request.player_ids.contains(id))
+            .collect();
+
+        let broken_origin_teams =
+            TeamValidator::new(*team.session_id(), session.player_ids().clone())
+                .validate_team_update(
+                    &other_teams,
+                    &busy_team_ids,
+                    &request.player_ids,
+                    &entering_player_ids,
+                )?;
+
+        team.set_player_ids(request.player_ids);
+        let updated_team = self.team_repository.insert(team).await?;
+
+        if broken_origin_teams.is_empty() {
+            return Ok(updated_team);
+        }
+
+        let history = PartnerHistory::from_matches(&other_teams, &session_matches);
+        let queue_manager = TeamQueueManager::new(
+            *updated_team.session_id(),
+            *session.game_mode(),
+            *session.settings().players_per_team(),
+        );
+
+        let session_players: Vec<_> = self
+            .player_repository
+            .list()
+            .await?
+            .into_iter()
+            .filter(|player| session.player_ids().contains(player.id()))
+            .collect();
+
+        let broken_ids: HashSet<Uuid> = broken_origin_teams
+            .iter()
+            .map(|(team, _)| *team.id())
+            .collect();
+        let remaining_waiting_teams: Vec<Team> = other_teams
+            .into_iter()
+            .filter(|other| other.is_waiting() && !broken_ids.contains(other.id()))
+            .collect();
+
+        for (mut origin, leftover_player_ids) in broken_origin_teams {
+            origin.disband();
+            self.team_repository.insert(origin).await?;
+            freed_player_ids.extend(leftover_player_ids);
+        }
+
+        let changed_teams = queue_manager.release_players(
+            &remaining_waiting_teams,
+            &freed_player_ids,
+            &session_players,
+            &history,
+        );
+
+        for changed in changed_teams {
+            self.team_repository.insert(changed).await?;
+        }
+
+        Ok(updated_team)
     }
 
     async fn draw_teams(&self, session_id: Uuid) -> HttpResult<Vec<Team>> {
@@ -437,6 +554,12 @@ pub mod use_cases {
     #[serde(rename_all = "camelCase")]
     pub struct CreateTeamRequest {
         pub session_id: Uuid,
+        pub player_ids: Vec<Uuid>,
+    }
+
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct UpdateTeamRequest {
         pub player_ids: Vec<Uuid>,
     }
 
