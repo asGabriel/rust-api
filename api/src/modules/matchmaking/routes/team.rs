@@ -2,12 +2,15 @@ use axum::{
     Json, Router,
     extract::{Path, State},
     response::IntoResponse,
-    routing::{get, post},
+    routing::{get, patch, post},
 };
 use http_error::HttpResult;
 use uuid::Uuid;
 
-use crate::modules::{matchmaking::handler::team::use_cases::CreateTeamRequest, routes::AppState};
+use crate::modules::{
+    matchmaking::handler::team::use_cases::{CreateTeamRequest, UpdateTeamRequest},
+    routes::AppState,
+};
 
 pub fn configure_routes() -> Router<AppState> {
     Router::new().nest(
@@ -16,7 +19,8 @@ pub fn configure_routes() -> Router<AppState> {
             .route("/", post(create_team))
             .route("/priority", post(create_priority_team))
             .route("/{session_id}", get(list_teams_by_session))
-            .route("/{session_id}/draw", post(draw_teams)),
+            .route("/{session_id}/draw", post(draw_teams))
+            .route("/{team_id}/players", patch(update_team)),
     )
 }
 
@@ -57,6 +61,20 @@ async fn list_teams_by_session(
         .await?;
 
     Ok(Json(teams))
+}
+
+async fn update_team(
+    state: State<AppState>,
+    Path(team_id): Path<Uuid>,
+    Json(request): Json<UpdateTeamRequest>,
+) -> HttpResult<impl IntoResponse> {
+    let team = state
+        .matchmaking_state
+        .team_handler
+        .update_team(team_id, request)
+        .await?;
+
+    Ok(Json(team))
 }
 
 async fn draw_teams(
