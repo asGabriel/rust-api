@@ -1,21 +1,21 @@
-use rand::{seq::SliceRandom, thread_rng};
+use std::collections::HashSet;
+
+use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::modules::matchmaking::domain::{
     player::{Gender, Player},
     session::GameMode,
     team::Team,
-    team_drawer::PartnerHistory,
+    team_drawer::{PartnerHistory, TeamDrawer},
 };
 
 /// Keeps the session's waiting queue moving: when players are freed (a team
-/// lost, or a team hit the consecutive-win cap), slots them into the queue —
-/// completing an incomplete team waiting for a partner if one is compatible,
-/// or starting a new incomplete team otherwise — and answers "who's next" so
-/// a freed-up court can be refilled automatically. Bound to a `session_id`,
-/// `game_mode` and `players_per_team`, the same values a `TeamDrawer` for
-/// this session would use, since the queue has to honor the same shape of
-/// team the initial draw formed.
+/// lost, or a team hit the consecutive-win cap), regroups the currently
+/// unteamed players and answers "who's next" so a freed-up court can be
+/// refilled automatically. Bound to a `session_id`, `game_mode` and
+/// `players_per_team`, the same values a `TeamDrawer` for this session
+/// would use, since the queue reuses that same drawer for its own grouping.
 pub struct TeamQueueManager {
     session_id: Uuid,
     game_mode: GameMode,
@@ -31,36 +31,32 @@ impl TeamQueueManager {
         }
     }
 
-    /// Slots freed players into the waiting queue, in random order (no rule
-    /// about which of several freed players completes an incomplete team
-    /// versus starts a new one). Returns every team that was created or
-    /// modified, for the caller to persist — teams left untouched are not
-    /// included.
+    /// Regroups every currently unteamed player — the members of
+    /// still-incomplete `Waiting` teams in `waiting_teams`, plus whoever
+    /// `freed_player_ids` just added — into as many complete teams as the
+    /// pool allows. Returns every team that was created, disbanded, or
+    /// otherwise changed, for the caller to persist; a pre-existing
+    /// incomplete team with no member selected this round is left
+    /// completely untouched (not included).
     ///
-    /// A freed player prefers completing an incomplete team with a pairing
-    /// that's brand new, opening a new single-player team to wait for one
-    /// otherwise (phase 1 below). It only gets one cycle's worth of that
-    /// patience (phase 2 below): once a team has already sat incomplete
-    /// since before this call and still finds no fresh partner, *or* the
-    /// rest of the queue has no complete team left to keep a court moving,
-    /// it gets merged with the best (fewest shared players, then
-    /// longest-waiting) other leftover team, repeat or not. `GameMode::Open`
-    /// (`ShuffleType::RoundRobin`) skips only the first of those two
-    /// triggers — its documented trade-off is tolerating several incomplete
-    /// teams at once in exchange for chasing novel pairings harder, but only
-    /// for as long as the rest of the queue still has slack to keep a court
-    /// moving without it. The second trigger (no complete team left
-    /// anywhere in the queue) applies in every mode without exception:
-    /// without it, a session that's played enough matches to exhaust every
-    /// remaining pairing — or one with just enough players to fill its
-    /// teams, exhausting them on the very first loss — would idle every
-    /// court forever, since no future match (and so no future
-    /// `release_players` call) would ever come along to give anyone a
-    /// second chance. Across enough matches this plays out as an escalating
-    /// cycle: each player gets a genuine shot at a fresh partner every time
-    /// they're freed, and only falls back to a repeat once that specific
-    /// shot comes up empty — not once, permanently, but every single time
-    /// it happens.
+    /// Two rules, in order:
+    /// 1. **Nobody returns immediately.** Whoever's been unteamed longest
+    ///    gets to fill a team slot first — a player freed by this very call
+    ///    only gets pulled in when there aren't enough longer-waiting
+    ///    players to fill the quota without them.
+    /// 2. **Mix as much as `game_mode` allows.** Whichever players do get
+    ///    selected are grouped by handing them straight to `TeamDrawer` —
+    ///    the exact same best-effort, gender-aware, forced-repeat-only-when-
+    ///    truly-necessary pairing already used (and tested) for the
+    ///    session's initial draw, so this never invents a second, subtly
+    ///    different notion of "avoid repeating a partner."
+    ///
+    /// This never leaves the queue permanently stuck: as long as the pool
+    /// has enough compatible players for one team, this call forms one —
+    /// unlike a design that keeps *some* teams waiting indefinitely for a
+    /// fresher partner, which can leave a session with no complete team
+    /// anywhere and no future match (and so no future call to this
+    /// function) to ever revisit them.
     pub fn release_players(
         &self,
         waiting_teams: &[Team],
@@ -68,130 +64,133 @@ impl TeamQueueManager {
         players: &[Player],
         history: &PartnerHistory,
     ) -> Vec<Team> {
-        let mut order = freed_player_ids.to_vec();
-        order.shuffle(&mut thread_rng());
+        let now = Utc::now();
 
-        let mut pending: Vec<Team> = waiting_teams
+        let old_incomplete: Vec<&Team> = waiting_teams
             .iter()
             .filter(|team| team.is_waiting() && !team.is_complete(self.players_per_team))
+            .collect();
+
+        let mut pool: Vec<(Uuid, DateTime<Utc>)> = old_incomplete
+            .iter()
+            .flat_map(|team| {
+                team.player_ids()
+                    .iter()
+                    .map(|player_id| (*player_id, *team.created_at()))
+            })
+            .collect();
+        pool.extend(freed_player_ids.iter().map(|player_id| (*player_id, now)));
+
+        let selected: HashSet<Uuid> = self.select_playable(&pool, players).into_iter().collect();
+
+        // A priority team that was incomplete keeps that flag when it gets
+        // completed here — otherwise it would silently lose its guaranteed
+        // "next up" spot the instant a partner freed up for it.
+        let priority_player_ids: HashSet<Uuid> = old_incomplete
+            .iter()
+            .filter(|team| team.is_priority())
+            .flat_map(|team| team.player_ids().iter().copied())
+            .collect();
+
+        let selected_players: Vec<Player> = players
+            .iter()
+            .filter(|player| selected.contains(player.id()))
             .cloned()
             .collect();
-        let already_waiting_ids: std::collections::HashSet<Uuid> =
-            pending.iter().map(|team| *team.id()).collect();
-        let queue_has_slack = waiting_teams
-            .iter()
-            .any(|team| team.is_waiting() && team.is_complete(self.players_per_team));
-        let mut touched_ids = std::collections::HashSet::new();
 
-        // Phase 1: give every freed player a shot at a fresh (never
-        // partnered) pairing, one at a time. A team opened here stays
-        // visible to players processed later in this same pass, so two
-        // freed players who haven't partnered before still find each other
-        // within this phase, regardless of processing order.
-        for &player_id in &order {
-            let gender = Self::gender_of(players, player_id);
+        let groups = TeamDrawer::new(self.game_mode, self.players_per_team)
+            .draw(&selected_players, history)
+            .unwrap_or_default();
 
-            let fresh_candidate = (0..pending.len())
-                .filter(|&index| {
-                    !pending[index].is_complete(self.players_per_team)
-                        && self.needs_gender(&pending[index], gender, players)
-                })
-                .filter(|&index| {
-                    !pending[index]
-                        .player_ids()
-                        .iter()
-                        .any(|member| history.have_played_together(*member, player_id))
-                })
-                .min_by_key(|&index| *pending[index].created_at());
-
-            match fresh_candidate {
-                Some(index) => {
-                    pending[index].add_player(player_id);
-                    touched_ids.insert(*pending[index].id());
-                }
-                None => {
-                    let new_team = Team::new(self.session_id, vec![player_id]);
-                    touched_ids.insert(*new_team.id());
-                    pending.push(new_team);
-                }
-            }
-        }
-
-        let mut disbanded = Vec::new();
-
-        // Phase 2: force-complete whoever's still incomplete after phase 1.
-        // `already_waiting_ids` alone (a team that had a full cycle and came
-        // up empty) never qualifies for `GameMode::Open` — that mode's
-        // whole point is to keep chasing novel pairings, so it tolerates
-        // accumulating several incomplete teams for as long as the rest of
-        // the queue has slack to keep a court moving. But `!queue_has_slack`
-        // always qualifies, in every mode without exception: once the
-        // *entire* queue has no complete team left, patience has to give,
-        // or the session stalls forever the instant every remaining pairing
-        // has already been played — a real session with enough matches
-        // eventually reaches exactly that state, so this fallback can't be
-        // Open-exempt entirely, only its `already_waiting_ids` half can.
-        loop {
-            let acceptor_index = (0..pending.len()).find(|&index| {
-                !pending[index].is_complete(self.players_per_team)
-                    && ((already_waiting_ids.contains(pending[index].id())
-                        && !self.game_mode.is_open())
-                        || !queue_has_slack)
-            });
-            let Some(acceptor_index) = acceptor_index else {
-                break;
-            };
-
-            let partner_index = (0..pending.len())
-                .filter(|&index| {
-                    index != acceptor_index && !pending[index].is_complete(self.players_per_team)
-                })
-                .filter(|&index| {
-                    pending[index].player_ids().iter().all(|donor_player_id| {
-                        self.needs_gender(
-                            &pending[acceptor_index],
-                            Self::gender_of(players, *donor_player_id),
-                            players,
-                        )
-                    })
-                })
-                .filter(|&index| {
-                    pending[acceptor_index].player_ids().len() + pending[index].player_ids().len()
-                        <= self.players_per_team.into()
-                })
-                .min_by_key(|&index| {
-                    let conflicts = pending[index]
-                        .player_ids()
-                        .iter()
-                        .filter(|donor_member| {
-                            pending[acceptor_index].player_ids().iter().any(|member| {
-                                history.have_played_together(*member, **donor_member)
-                            })
-                        })
-                        .count();
-                    (conflicts, *pending[index].created_at())
-                });
-
-            let Some(partner_index) = partner_index else {
-                break;
-            };
-
-            let partner_players = pending[partner_index].player_ids().clone();
-            for donor_player_id in partner_players {
-                pending[acceptor_index].add_player(donor_player_id);
-            }
-            touched_ids.insert(*pending[acceptor_index].id());
-
-            let mut partner = pending.remove(partner_index);
-            partner.disband();
-            disbanded.push(partner);
-        }
-
-        pending
+        let mut result: Vec<Team> = groups
             .into_iter()
-            .filter(|team| touched_ids.contains(team.id()))
-            .chain(disbanded)
-            .collect()
+            .map(|group| {
+                let team = Team::new(self.session_id, group.clone());
+                if group
+                    .iter()
+                    .any(|player_id| priority_player_ids.contains(player_id))
+                {
+                    team.with_priority()
+                } else {
+                    team
+                }
+            })
+            .collect();
+
+        // A pre-existing incomplete team loses one of its members to a new
+        // team above — disband it so the DB stops showing it as Waiting.
+        // Untouched ones (nobody of theirs got selected) are left alone.
+        let mut already_represented = HashSet::new();
+        for team in &old_incomplete {
+            if team
+                .player_ids()
+                .iter()
+                .any(|player_id| selected.contains(player_id))
+            {
+                let mut disbanded = (*team).clone();
+                disbanded.disband();
+                result.push(disbanded);
+            } else {
+                already_represented.extend(team.player_ids().iter().copied());
+            }
+        }
+
+        // Everyone left over — not selected this round, and not already
+        // represented by an untouched pre-existing incomplete team — waits
+        // as their own new single-player team.
+        for (player_id, _) in pool {
+            if !selected.contains(&player_id) && !already_represented.contains(&player_id) {
+                result.push(Team::new(self.session_id, vec![player_id]));
+            }
+        }
+
+        result
+    }
+
+    /// Picks exactly enough players from `pool` — oldest-waiting first — to
+    /// form as many complete teams as `game_mode`'s gender rules currently
+    /// allow, never more. In `Mixed` mode the two genders are queued and
+    /// capped independently, since a team needs an even split of both.
+    fn select_playable(&self, pool: &[(Uuid, DateTime<Utc>)], players: &[Player]) -> Vec<Uuid> {
+        let players_per_team: usize = self.players_per_team.into();
+        if players_per_team == 0 {
+            return Vec::new();
+        }
+
+        if self.game_mode.is_mixed() {
+            let target_per_gender = players_per_team / 2;
+
+            let mut males: Vec<&(Uuid, DateTime<Utc>)> = pool
+                .iter()
+                .filter(|(player_id, _)| Self::gender_of(players, *player_id) == Gender::Male)
+                .collect();
+            let mut females: Vec<&(Uuid, DateTime<Utc>)> = pool
+                .iter()
+                .filter(|(player_id, _)| Self::gender_of(players, *player_id) == Gender::Female)
+                .collect();
+            males.sort_by_key(|(_, queued_since)| *queued_since);
+            females.sort_by_key(|(_, queued_since)| *queued_since);
+
+            let team_count = (males.len() / target_per_gender).min(females.len() / target_per_gender);
+
+            males
+                .into_iter()
+                .take(team_count * target_per_gender)
+                .chain(females.into_iter().take(team_count * target_per_gender))
+                .map(|(player_id, _)| *player_id)
+                .collect()
+        } else {
+            let mut ordered: Vec<&(Uuid, DateTime<Utc>)> = pool.iter().collect();
+            ordered.sort_by_key(|(_, queued_since)| *queued_since);
+
+            let team_count = ordered.len() / players_per_team;
+
+            ordered
+                .into_iter()
+                .take(team_count * players_per_team)
+                .map(|(player_id, _)| *player_id)
+                .collect()
+        }
     }
 
     /// The next `count` complete teams in the queue — priority teams
@@ -210,25 +209,6 @@ impl TeamQueueManager {
         complete.sort_by_key(|team| (!team.is_priority(), *team.created_at()));
 
         complete.into_iter().take(count).collect()
-    }
-
-    /// Whether `team` still needs another player of `gender` to be complete.
-    /// Any incomplete team is compatible in a single-gender mode; in `Mixed`
-    /// mode, a team only accepts a gender it hasn't already filled its half
-    /// of `players_per_team` with.
-    fn needs_gender(&self, team: &Team, gender: Gender, players: &[Player]) -> bool {
-        if !self.game_mode.is_mixed() {
-            return true;
-        }
-
-        let target_per_gender: usize = (self.players_per_team / 2).into();
-        let current = team
-            .player_ids()
-            .iter()
-            .filter(|player_id| Self::gender_of(players, **player_id) == gender)
-            .count();
-
-        current < target_per_gender
     }
 
     fn gender_of(players: &[Player], player_id: Uuid) -> Gender {
@@ -250,14 +230,15 @@ mod tests {
     }
 
     #[test]
-    fn test_release_players_completes_the_waiting_incomplete_team_and_starts_a_new_one() {
+    fn test_release_players_completes_the_waiting_incomplete_team_and_disbands_the_old_row() {
         let session_id = Uuid::new_v4();
-        let waiting_alone = Player::new("15".to_string(), Gender::Male);
-        let freed_a = Player::new("1".to_string(), Gender::Male);
-        let freed_b = Player::new("2".to_string(), Gender::Male);
+        let waiting_alone = player(Gender::Male);
+        let freed_a = player(Gender::Male);
+        let freed_b = player(Gender::Male);
         let players = vec![waiting_alone.clone(), freed_a.clone(), freed_b.clone()];
 
         let incomplete_team = Team::new(session_id, vec![*waiting_alone.id()]);
+        std::thread::sleep(std::time::Duration::from_millis(2));
         let manager = TeamQueueManager::new(session_id, GameMode::Male, 2);
 
         let changed = manager.release_players(
@@ -267,19 +248,66 @@ mod tests {
             &PartnerHistory::empty(),
         );
 
-        assert_eq!(changed.len(), 2);
-        let completed = changed
+        // The old incomplete row is disbanded rather than reused, a new
+        // complete team is created for `waiting_alone` plus whichever freed
+        // player it paired with, and the other freed player waits alone.
+        assert_eq!(changed.len(), 3);
+
+        let disbanded_old_row = changed
             .iter()
             .find(|team| *team.id() == *incomplete_team.id())
-            .expect("the original incomplete team should have been completed");
-        assert!(completed.is_complete(2));
-        assert!(completed.player_ids().contains(waiting_alone.id()));
+            .expect("the old incomplete row should still be reported so its status updates");
+        assert!(!disbanded_old_row.is_waiting());
 
+        let completed = changed
+            .iter()
+            .find(|team| team.is_complete(2) && team.player_ids().contains(waiting_alone.id()))
+            .expect("waiting_alone should have been completed into a new team");
+        assert!(
+            completed.player_ids().contains(freed_a.id())
+                || completed.player_ids().contains(freed_b.id())
+        );
+
+        let leftover_id = if completed.player_ids().contains(freed_a.id()) {
+            freed_b.id()
+        } else {
+            freed_a.id()
+        };
         let new_incomplete = changed
             .iter()
-            .find(|team| *team.id() != *incomplete_team.id())
+            .find(|team| team.player_ids() == &vec![*leftover_id])
             .expect("the other freed player should start a new incomplete team");
-        assert_eq!(new_incomplete.player_ids().len(), 1);
+        assert!(!new_incomplete.is_complete(2));
+    }
+
+    /// A priority incomplete team (e.g. left partner-less by
+    /// `create_priority_team` stealing its other member) must keep its
+    /// `priority` flag once completed here — the old design preserved it by
+    /// mutating the row in place; this design always disbands and recreates,
+    /// so priority has to be carried over explicitly or it's silently lost.
+    #[test]
+    fn test_release_players_preserves_priority_when_completing_an_incomplete_priority_team() {
+        let session_id = Uuid::new_v4();
+        let waiting_alone = player(Gender::Male);
+        let freed_player = player(Gender::Male);
+        let players = vec![waiting_alone.clone(), freed_player.clone()];
+
+        let priority_incomplete_team =
+            Team::new(session_id, vec![*waiting_alone.id()]).with_priority();
+        let manager = TeamQueueManager::new(session_id, GameMode::Male, 2);
+
+        let changed = manager.release_players(
+            &[priority_incomplete_team],
+            &[*freed_player.id()],
+            &players,
+            &PartnerHistory::empty(),
+        );
+
+        let completed = changed
+            .iter()
+            .find(|team| team.is_complete(2))
+            .expect("the incomplete team should have been completed");
+        assert!(completed.is_priority());
     }
 
     #[test]
@@ -300,6 +328,8 @@ mod tests {
 
         assert_eq!(changed.len(), 1);
         assert!(changed[0].is_complete(2));
+        assert!(changed[0].player_ids().contains(freed_a.id()));
+        assert!(changed[0].player_ids().contains(freed_b.id()));
     }
 
     #[test]
@@ -315,6 +345,7 @@ mod tests {
         ];
 
         let incomplete_team = Team::new(session_id, vec![*waiting_male.id()]);
+        std::thread::sleep(std::time::Duration::from_millis(2));
         let manager = TeamQueueManager::new(session_id, GameMode::Mixed, 2);
 
         let changed = manager.release_players(
@@ -326,27 +357,82 @@ mod tests {
 
         let completed = changed
             .iter()
-            .find(|team| *team.id() == *incomplete_team.id())
+            .find(|team| team.is_complete(2))
             .expect("the waiting male should only be completed by the freed female");
+        assert!(completed.player_ids().contains(waiting_male.id()));
         assert!(completed.player_ids().contains(freed_female.id()));
         assert!(!completed.player_ids().contains(freed_male.id()));
 
         let new_incomplete = changed
             .iter()
-            .find(|team| *team.id() != *incomplete_team.id())
+            .find(|team| team.player_ids() == &vec![*freed_male.id()])
             .expect("the freed male starts its own incomplete team");
-        assert_eq!(new_incomplete.player_ids(), &vec![*freed_male.id()]);
+        assert!(!new_incomplete.is_complete(2));
     }
 
-    /// Regression test: with `players_per_team == 2`, a losing team's two
-    /// players are freed together with no other candidate between them —
-    /// this used to force them straight back together as the same pairing,
-    /// in every `game_mode` except `Open`, because the fresh-partner check
-    /// only applied there. It must now hold for every mode, as long as the
-    /// rest of the queue has slack (some other complete team) to keep a
-    /// court moving while these two wait for a real alternative.
+    /// Rule 2 ("a player who just left the court can't return immediately"):
+    /// with more longer-waiting players available than a single freed
+    /// player, the longer-waiting ones fill the team(s) that can be formed
+    /// right now and the freshly freed player is left waiting instead.
     #[test]
-    fn test_release_players_avoids_repeating_a_pairing_when_the_queue_has_slack_elsewhere() {
+    fn test_release_players_prefers_longer_waiting_players_over_a_freshly_freed_one() {
+        let session_id = Uuid::new_v4();
+        let a = player(Gender::Male);
+        let b = player(Gender::Male);
+        let c = player(Gender::Male);
+        let d = player(Gender::Male);
+        let just_freed = player(Gender::Male);
+        let players = vec![
+            a.clone(),
+            b.clone(),
+            c.clone(),
+            d.clone(),
+            just_freed.clone(),
+        ];
+
+        let waiting_teams = vec![
+            Team::new(session_id, vec![*a.id()]),
+            Team::new(session_id, vec![*b.id()]),
+            Team::new(session_id, vec![*c.id()]),
+            Team::new(session_id, vec![*d.id()]),
+        ];
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let manager = TeamQueueManager::new(session_id, GameMode::Male, 2);
+
+        let changed = manager.release_players(
+            &waiting_teams,
+            &[*just_freed.id()],
+            &players,
+            &PartnerHistory::empty(),
+        );
+
+        let complete_teams: Vec<&Team> = changed.iter().filter(|team| team.is_complete(2)).collect();
+        assert_eq!(complete_teams.len(), 2);
+        assert!(complete_teams
+            .iter()
+            .all(|team| !team.player_ids().contains(just_freed.id())));
+
+        let mut seated: Vec<Uuid> = complete_teams
+            .iter()
+            .flat_map(|team| team.player_ids().clone())
+            .collect();
+        seated.sort();
+        let mut expected = vec![*a.id(), *b.id(), *c.id(), *d.id()];
+        expected.sort();
+        assert_eq!(seated, expected);
+
+        let still_waiting = changed
+            .iter()
+            .find(|team| team.player_ids() == &vec![*just_freed.id()]);
+        assert!(still_waiting.is_none() || !still_waiting.unwrap().is_complete(2));
+    }
+
+    /// With exactly two players in the pool and no one else to mix with,
+    /// they have to form a team together even though they already played —
+    /// best-effort mixing (rule 3) never blocks the court from opening.
+    #[test]
+    fn test_release_players_forms_a_team_from_exactly_two_players_even_if_they_already_played_together(
+    ) {
         let session_id = Uuid::new_v4();
         let player_a = player(Gender::Male);
         let player_b = player(Gender::Male);
@@ -357,50 +443,10 @@ mod tests {
             Match::new(session_id, 1, *just_disbanded_team.id(), Uuid::new_v4()).unwrap();
         let history = PartnerHistory::from_matches(&[just_disbanded_team], &[played_match]);
 
-        let other_complete_team =
-            Team::new(session_id, vec![Uuid::new_v4(), Uuid::new_v4()]);
-
         let manager = TeamQueueManager::new(session_id, GameMode::Male, 2);
 
-        let changed = manager.release_players(
-            &[other_complete_team],
-            &[*player_a.id(), *player_b.id()],
-            &players,
-            &history,
-        );
-
-        assert_eq!(changed.len(), 2);
-        for team in &changed {
-            assert_eq!(team.player_ids().len(), 1);
-        }
-    }
-
-    /// Without slack (no other complete team left in the queue), forcing a
-    /// repeat is the only way to avoid stalling the session forever: no
-    /// future match on the only court means no future `release_players`
-    /// call would ever come along to give this pair a second, fresher
-    /// chance. This is the minimal-session deadlock the "wait a cycle"
-    /// design would otherwise fall into.
-    #[test]
-    fn test_release_players_forces_a_repeat_when_the_queue_has_no_complete_team_left() {
-        let session_id = Uuid::new_v4();
-        let player_a = player(Gender::Male);
-        let player_b = player(Gender::Male);
-        let players = vec![player_a.clone(), player_b.clone()];
-
-        let just_disbanded_team = Team::new(session_id, vec![*player_a.id(), *player_b.id()]);
-        let played_match =
-            Match::new(session_id, 1, *just_disbanded_team.id(), Uuid::new_v4()).unwrap();
-        let history = PartnerHistory::from_matches(&[just_disbanded_team], &[played_match]);
-
-        let manager = TeamQueueManager::new(session_id, GameMode::Male, 2);
-
-        let changed = manager.release_players(
-            &[],
-            &[*player_a.id(), *player_b.id()],
-            &players,
-            &history,
-        );
+        let changed =
+            manager.release_players(&[], &[*player_a.id(), *player_b.id()], &players, &history);
 
         let reformed = changed
             .iter()
@@ -410,144 +456,11 @@ mod tests {
         assert!(reformed.player_ids().contains(player_b.id()));
     }
 
-    /// An incomplete team already sitting in the queue before this call
-    /// already had its chance at a fresh partner — the next freed player
-    /// should complete it (even with a repeat) rather than leaving it
-    /// waiting indefinitely while opening yet another incomplete team.
+    /// Same scenario in `GameMode::Open` — it no longer has a special "hold
+    /// out forever" behavior, so it forms the team just like every other
+    /// mode instead of leaving both players stuck as incomplete teams.
     #[test]
-    fn test_release_players_completes_an_already_waiting_team_with_a_repeat_before_opening_a_new_one(
-    ) {
-        let session_id = Uuid::new_v4();
-        let waiting_player = player(Gender::Male);
-        let freed_player = player(Gender::Male);
-        let players = vec![waiting_player.clone(), freed_player.clone()];
-
-        let already_waiting_incomplete = Team::new(session_id, vec![*waiting_player.id()]);
-        let other_complete_team = Team::new(session_id, vec![Uuid::new_v4(), Uuid::new_v4()]);
-
-        let played_team = Team::new(
-            session_id,
-            vec![*waiting_player.id(), *freed_player.id()],
-        );
-        let played_match = Match::new(session_id, 1, *played_team.id(), Uuid::new_v4()).unwrap();
-        let history = PartnerHistory::from_matches(&[played_team], &[played_match]);
-
-        let manager = TeamQueueManager::new(session_id, GameMode::Male, 2);
-
-        let changed = manager.release_players(
-            &[already_waiting_incomplete.clone(), other_complete_team],
-            &[*freed_player.id()],
-            &players,
-            &history,
-        );
-
-        let completed = changed
-            .iter()
-            .find(|team| *team.id() == *already_waiting_incomplete.id())
-            .expect("the already-waiting team should be completed, repeat or not");
-        assert!(completed.is_complete(2));
-        assert!(completed.player_ids().contains(freed_player.id()));
-    }
-
-    #[test]
-    fn test_release_players_in_open_mode_opens_a_new_team_instead_of_repeating_a_pairing() {
-        let session_id = Uuid::new_v4();
-        let waiting_player = player(Gender::Male);
-        let already_played_with_waiting = player(Gender::Male);
-        let fresh_player = player(Gender::Female);
-        let players = vec![
-            waiting_player.clone(),
-            already_played_with_waiting.clone(),
-            fresh_player.clone(),
-        ];
-
-        let incomplete_team = Team::new(session_id, vec![*waiting_player.id()]);
-
-        let played_team = Team::new(
-            session_id,
-            vec![*waiting_player.id(), *already_played_with_waiting.id()],
-        );
-        let played_match = Match::new(session_id, 1, *played_team.id(), Uuid::new_v4()).unwrap();
-        let history = PartnerHistory::from_matches(&[played_team], &[played_match]);
-
-        let manager = TeamQueueManager::new(session_id, GameMode::Open, 2);
-
-        let changed = manager.release_players(
-            &[incomplete_team.clone()],
-            &[*already_played_with_waiting.id(), *fresh_player.id()],
-            &players,
-            &history,
-        );
-
-        let completed = changed
-            .iter()
-            .find(|team| *team.id() == *incomplete_team.id())
-            .expect("the waiting player should only be completed by a fresh partner");
-        assert!(completed.player_ids().contains(fresh_player.id()));
-        assert!(!completed
-            .player_ids()
-            .contains(already_played_with_waiting.id()));
-
-        let new_incomplete = changed
-            .iter()
-            .find(|team| *team.id() != *incomplete_team.id())
-            .expect(
-                "the player who already partnered with the waiting player should start a new team",
-            );
-        assert_eq!(
-            new_incomplete.player_ids(),
-            &vec![*already_played_with_waiting.id()]
-        );
-    }
-
-    /// With slack elsewhere in the queue (another complete team can keep a
-    /// court moving), `Open` never forces a repeat even for a team that's
-    /// already been waiting since before this call — it just opens another
-    /// incomplete team and keeps holding out, its documented trade-off.
-    #[test]
-    fn test_release_players_in_open_mode_starts_a_new_team_when_the_only_incomplete_team_would_repeat_and_slack_exists(
-    ) {
-        let session_id = Uuid::new_v4();
-        let waiting_player = player(Gender::Male);
-        let already_played_with_waiting = player(Gender::Male);
-        let players = vec![waiting_player.clone(), already_played_with_waiting.clone()];
-
-        let incomplete_team = Team::new(session_id, vec![*waiting_player.id()]);
-        let other_complete_team = Team::new(session_id, vec![Uuid::new_v4(), Uuid::new_v4()]);
-
-        let played_team = Team::new(
-            session_id,
-            vec![*waiting_player.id(), *already_played_with_waiting.id()],
-        );
-        let played_match = Match::new(session_id, 1, *played_team.id(), Uuid::new_v4()).unwrap();
-        let history = PartnerHistory::from_matches(&[played_team], &[played_match]);
-
-        let manager = TeamQueueManager::new(session_id, GameMode::Open, 2);
-
-        let changed = manager.release_players(
-            &[incomplete_team.clone(), other_complete_team],
-            &[*already_played_with_waiting.id()],
-            &players,
-            &history,
-        );
-
-        assert_eq!(changed.len(), 1);
-        assert_ne!(*changed[0].id(), *incomplete_team.id());
-        assert_eq!(
-            changed[0].player_ids(),
-            &vec![*already_played_with_waiting.id()]
-        );
-    }
-
-    /// Without slack anywhere in the queue, even `Open` must force a repeat
-    /// — this is the deadlock actually observed in production: a session
-    /// that had played enough matches to exhaust every pairing among its 10
-    /// players ended up with 8 players stuck as solo incomplete teams and
-    /// zero complete teams anywhere, so its only court could never open
-    /// another match again.
-    #[test]
-    fn test_release_players_in_open_mode_still_forces_a_repeat_when_the_queue_has_no_complete_team_left(
-    ) {
+    fn test_release_players_in_open_mode_forms_a_team_even_with_no_fresh_alternative() {
         let session_id = Uuid::new_v4();
         let player_a = player(Gender::Male);
         let player_b = player(Gender::Male);
@@ -560,19 +473,61 @@ mod tests {
 
         let manager = TeamQueueManager::new(session_id, GameMode::Open, 2);
 
-        let changed = manager.release_players(
-            &[],
-            &[*player_a.id(), *player_b.id()],
-            &players,
-            &history,
-        );
+        let changed =
+            manager.release_players(&[], &[*player_a.id(), *player_b.id()], &players, &history);
 
         let reformed = changed
             .iter()
             .find(|team| team.is_complete(2))
-            .expect("even Open must reform the pair to avoid stalling the only court forever");
+            .expect("Open must still form a team to avoid stalling the only court forever");
         assert!(reformed.player_ids().contains(player_a.id()));
         assert!(reformed.player_ids().contains(player_b.id()));
+    }
+
+    /// Regression test for the real production deadlock: a session that had
+    /// played enough matches to exhaust every possible pairing ended up
+    /// with most players stuck as solo incomplete teams and zero complete
+    /// teams anywhere, so its only court could never open a match again.
+    /// Here every pair among 4 players already shares history (simulated by
+    /// a single 4-player team having "played" together) — even so, the
+    /// queue must still group everyone into complete teams instead of
+    /// leaving anyone stuck.
+    #[test]
+    fn test_release_players_never_leaves_players_stuck_even_when_every_pairing_is_already_exhausted(
+    ) {
+        let session_id = Uuid::new_v4();
+        let a = player(Gender::Male);
+        let b = player(Gender::Male);
+        let c = player(Gender::Male);
+        let d = player(Gender::Male);
+        let players = vec![a.clone(), b.clone(), c.clone(), d.clone()];
+
+        let saturated_team = Team::new(session_id, vec![*a.id(), *b.id(), *c.id(), *d.id()]);
+        let played_match =
+            Match::new(session_id, 1, *saturated_team.id(), Uuid::new_v4()).unwrap();
+        let history = PartnerHistory::from_matches(&[saturated_team], &[played_match]);
+
+        let manager = TeamQueueManager::new(session_id, GameMode::Open, 2);
+
+        let changed = manager.release_players(
+            &[],
+            &[*a.id(), *b.id(), *c.id(), *d.id()],
+            &players,
+            &history,
+        );
+
+        let complete_teams: Vec<&Team> = changed.iter().filter(|team| team.is_complete(2)).collect();
+        assert_eq!(complete_teams.len(), 2);
+        assert!(changed.iter().all(|team| team.is_complete(2)));
+
+        let mut seated: Vec<Uuid> = complete_teams
+            .iter()
+            .flat_map(|team| team.player_ids().clone())
+            .collect();
+        seated.sort();
+        let mut expected = vec![*a.id(), *b.id(), *c.id(), *d.id()];
+        expected.sort();
+        assert_eq!(seated, expected);
     }
 
     #[test]
