@@ -39,23 +39,28 @@ impl TeamQueueManager {
     ///
     /// A freed player prefers completing an incomplete team with a pairing
     /// that's brand new, opening a new single-player team to wait for one
-    /// otherwise (phase 1 below). For `GameMode::Open` (`ShuffleType::
-    /// RoundRobin`), that patience is unconditional and permanent — its
-    /// documented trade-off: the queue may accumulate several incomplete
-    /// teams rather than ever repeat a pairing. Every other mode instead
-    /// only gets one cycle's worth of patience (phase 2 below): once a team
-    /// has already sat incomplete since before this call and still finds no
-    /// fresh partner, or the rest of the queue has no complete team left to
-    /// keep a court moving, it gets merged with the best (fewest shared
-    /// players, then longest-waiting) other leftover team, repeat or not.
-    /// Without that second phase, a session with just enough players to
-    /// fill its teams would idle its only court forever the moment two
-    /// partners lose together, since no future match — and so no future
-    /// `release_players` call — would ever come along to give them a second
-    /// chance. Across enough matches this plays out as an escalating cycle:
-    /// each player gets a genuine shot at a fresh partner every time they're
-    /// freed, and only falls back to a repeat once that specific shot comes
-    /// up empty — not once, permanently, but every single time it happens.
+    /// otherwise (phase 1 below). It only gets one cycle's worth of that
+    /// patience (phase 2 below): once a team has already sat incomplete
+    /// since before this call and still finds no fresh partner, *or* the
+    /// rest of the queue has no complete team left to keep a court moving,
+    /// it gets merged with the best (fewest shared players, then
+    /// longest-waiting) other leftover team, repeat or not. `GameMode::Open`
+    /// (`ShuffleType::RoundRobin`) skips only the first of those two
+    /// triggers — its documented trade-off is tolerating several incomplete
+    /// teams at once in exchange for chasing novel pairings harder, but only
+    /// for as long as the rest of the queue still has slack to keep a court
+    /// moving without it. The second trigger (no complete team left
+    /// anywhere in the queue) applies in every mode without exception:
+    /// without it, a session that's played enough matches to exhaust every
+    /// remaining pairing — or one with just enough players to fill its
+    /// teams, exhausting them on the very first loss — would idle every
+    /// court forever, since no future match (and so no future
+    /// `release_players` call) would ever come along to give anyone a
+    /// second chance. Across enough matches this plays out as an escalating
+    /// cycle: each player gets a genuine shot at a fresh partner every time
+    /// they're freed, and only falls back to a repeat once that specific
+    /// shot comes up empty — not once, permanently, but every single time
+    /// it happens.
     pub fn release_players(
         &self,
         waiting_teams: &[Team],
@@ -114,62 +119,72 @@ impl TeamQueueManager {
 
         let mut disbanded = Vec::new();
 
-        // Phase 2: force-complete whoever's still incomplete after phase 1,
-        // for every mode except Open/RoundRobin (see doc comment above).
-        if !self.game_mode.is_open() {
-            loop {
-                let acceptor_index = (0..pending.len()).find(|&index| {
-                    !pending[index].is_complete(self.players_per_team)
-                        && (already_waiting_ids.contains(pending[index].id()) || !queue_has_slack)
-                });
-                let Some(acceptor_index) = acceptor_index else {
-                    break;
-                };
+        // Phase 2: force-complete whoever's still incomplete after phase 1.
+        // `already_waiting_ids` alone (a team that had a full cycle and came
+        // up empty) never qualifies for `GameMode::Open` — that mode's
+        // whole point is to keep chasing novel pairings, so it tolerates
+        // accumulating several incomplete teams for as long as the rest of
+        // the queue has slack to keep a court moving. But `!queue_has_slack`
+        // always qualifies, in every mode without exception: once the
+        // *entire* queue has no complete team left, patience has to give,
+        // or the session stalls forever the instant every remaining pairing
+        // has already been played — a real session with enough matches
+        // eventually reaches exactly that state, so this fallback can't be
+        // Open-exempt entirely, only its `already_waiting_ids` half can.
+        loop {
+            let acceptor_index = (0..pending.len()).find(|&index| {
+                !pending[index].is_complete(self.players_per_team)
+                    && ((already_waiting_ids.contains(pending[index].id())
+                        && !self.game_mode.is_open())
+                        || !queue_has_slack)
+            });
+            let Some(acceptor_index) = acceptor_index else {
+                break;
+            };
 
-                let partner_index = (0..pending.len())
-                    .filter(|&index| {
-                        index != acceptor_index && !pending[index].is_complete(self.players_per_team)
+            let partner_index = (0..pending.len())
+                .filter(|&index| {
+                    index != acceptor_index && !pending[index].is_complete(self.players_per_team)
+                })
+                .filter(|&index| {
+                    pending[index].player_ids().iter().all(|donor_player_id| {
+                        self.needs_gender(
+                            &pending[acceptor_index],
+                            Self::gender_of(players, *donor_player_id),
+                            players,
+                        )
                     })
-                    .filter(|&index| {
-                        pending[index].player_ids().iter().all(|donor_player_id| {
-                            self.needs_gender(
-                                &pending[acceptor_index],
-                                Self::gender_of(players, *donor_player_id),
-                                players,
-                            )
-                        })
-                    })
-                    .filter(|&index| {
-                        pending[acceptor_index].player_ids().len() + pending[index].player_ids().len()
-                            <= self.players_per_team.into()
-                    })
-                    .min_by_key(|&index| {
-                        let conflicts = pending[index]
-                            .player_ids()
-                            .iter()
-                            .filter(|donor_member| {
-                                pending[acceptor_index].player_ids().iter().any(|member| {
-                                    history.have_played_together(*member, **donor_member)
-                                })
+                })
+                .filter(|&index| {
+                    pending[acceptor_index].player_ids().len() + pending[index].player_ids().len()
+                        <= self.players_per_team.into()
+                })
+                .min_by_key(|&index| {
+                    let conflicts = pending[index]
+                        .player_ids()
+                        .iter()
+                        .filter(|donor_member| {
+                            pending[acceptor_index].player_ids().iter().any(|member| {
+                                history.have_played_together(*member, **donor_member)
                             })
-                            .count();
-                        (conflicts, *pending[index].created_at())
-                    });
+                        })
+                        .count();
+                    (conflicts, *pending[index].created_at())
+                });
 
-                let Some(partner_index) = partner_index else {
-                    break;
-                };
+            let Some(partner_index) = partner_index else {
+                break;
+            };
 
-                let partner_players = pending[partner_index].player_ids().clone();
-                for donor_player_id in partner_players {
-                    pending[acceptor_index].add_player(donor_player_id);
-                }
-                touched_ids.insert(*pending[acceptor_index].id());
-
-                let mut partner = pending.remove(partner_index);
-                partner.disband();
-                disbanded.push(partner);
+            let partner_players = pending[partner_index].player_ids().clone();
+            for donor_player_id in partner_players {
+                pending[acceptor_index].add_player(donor_player_id);
             }
+            touched_ids.insert(*pending[acceptor_index].id());
+
+            let mut partner = pending.remove(partner_index);
+            partner.disband();
+            disbanded.push(partner);
         }
 
         pending
@@ -485,8 +500,12 @@ mod tests {
         );
     }
 
+    /// With slack elsewhere in the queue (another complete team can keep a
+    /// court moving), `Open` never forces a repeat even for a team that's
+    /// already been waiting since before this call — it just opens another
+    /// incomplete team and keeps holding out, its documented trade-off.
     #[test]
-    fn test_release_players_in_open_mode_starts_a_new_team_when_the_only_incomplete_team_would_repeat(
+    fn test_release_players_in_open_mode_starts_a_new_team_when_the_only_incomplete_team_would_repeat_and_slack_exists(
     ) {
         let session_id = Uuid::new_v4();
         let waiting_player = player(Gender::Male);
@@ -494,6 +513,7 @@ mod tests {
         let players = vec![waiting_player.clone(), already_played_with_waiting.clone()];
 
         let incomplete_team = Team::new(session_id, vec![*waiting_player.id()]);
+        let other_complete_team = Team::new(session_id, vec![Uuid::new_v4(), Uuid::new_v4()]);
 
         let played_team = Team::new(
             session_id,
@@ -505,7 +525,7 @@ mod tests {
         let manager = TeamQueueManager::new(session_id, GameMode::Open, 2);
 
         let changed = manager.release_players(
-            &[incomplete_team.clone()],
+            &[incomplete_team.clone(), other_complete_team],
             &[*already_played_with_waiting.id()],
             &players,
             &history,
@@ -517,6 +537,42 @@ mod tests {
             changed[0].player_ids(),
             &vec![*already_played_with_waiting.id()]
         );
+    }
+
+    /// Without slack anywhere in the queue, even `Open` must force a repeat
+    /// — this is the deadlock actually observed in production: a session
+    /// that had played enough matches to exhaust every pairing among its 10
+    /// players ended up with 8 players stuck as solo incomplete teams and
+    /// zero complete teams anywhere, so its only court could never open
+    /// another match again.
+    #[test]
+    fn test_release_players_in_open_mode_still_forces_a_repeat_when_the_queue_has_no_complete_team_left(
+    ) {
+        let session_id = Uuid::new_v4();
+        let player_a = player(Gender::Male);
+        let player_b = player(Gender::Male);
+        let players = vec![player_a.clone(), player_b.clone()];
+
+        let just_played_team = Team::new(session_id, vec![*player_a.id(), *player_b.id()]);
+        let played_match =
+            Match::new(session_id, 1, *just_played_team.id(), Uuid::new_v4()).unwrap();
+        let history = PartnerHistory::from_matches(&[just_played_team], &[played_match]);
+
+        let manager = TeamQueueManager::new(session_id, GameMode::Open, 2);
+
+        let changed = manager.release_players(
+            &[],
+            &[*player_a.id(), *player_b.id()],
+            &players,
+            &history,
+        );
+
+        let reformed = changed
+            .iter()
+            .find(|team| team.is_complete(2))
+            .expect("even Open must reform the pair to avoid stalling the only court forever");
+        assert!(reformed.player_ids().contains(player_a.id()));
+        assert!(reformed.player_ids().contains(player_b.id()));
     }
 
     #[test]

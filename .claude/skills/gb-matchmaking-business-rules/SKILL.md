@@ -84,29 +84,37 @@ habilidade, histórico de parceria, aleatoriedade controlada, etc.
   de um time perdedor quase sempre são liberados juntos sem mais ninguém
   por perto, então sem essa fase eles voltariam pra fila como a mesma
   dupla quase toda vez.
-- **Fila, fase 2 — fallback de repetição (todo modo exceto `RoundRobin`/
-  `GameMode::Open`):** em `RoundRobin`, a fase 1 é a regra inteira — a fila
-  nunca força uma repetição, mesmo sem alternativa nenhuma, mesmo que isso
-  signifique acumular várias `Team`s incompletas em paralelo indefinidamente
-  (trade-off deliberado desse modo: prioriza variedade de parceiro acima de
-  utilização de quadra). Todo outro modo, depois da fase 1, força a
+- **Fila, fase 2 — fallback de repetição:** depois da fase 1, força a
   completar quem ainda ficou incompleto — juntando com a melhor `Team`
   incompleta candidata disponível (menos jogadores em comum e, empatado, a
   que espera há mais tempo), repetição ou não — quando: (a) essa `Team` já
   estava esperando na fila **antes** desta chamada (já teve uma chance de
   achar parceiro inédito e não achou), ou (b) a fila inteira da `Session`
   não tem nenhuma outra `Team` completa disponível pra manter alguma quadra
-  girando enquanto se espera. A condição (b) é o que evita travar de vez:
-  numa `Session` com só o mínimo de jogadores pra fechar os times
-  (`N == 2 * players_per_team`), sem ela, a dupla perdedora do primeiro
-  ponto ficaria incompleta pra sempre — nenhuma partida futura aconteceria
-  pra essa quadra (e portanto nenhuma chamada futura de `release_players`)
-  pra dar a eles uma segunda chance. Em sessões com folga (outra `Team`
-  completa esperando), a condição (a) ainda entra em ação nas chamadas
-  seguintes assim que uma `Team` incompleta específica não conseguir achar
-  parceiro inédito — o processo se repete a cada liberação, e cada jogador
-  tem uma chance genuína de parceiro inédito toda vez que é liberado, não
-  só uma vez na Session inteira. Implementado por
+  girando enquanto se espera. `GameMode::Open`/`ShuffleType::RoundRobin`
+  pula só a condição (a) — seu trade-off deliberado é tolerar acumular
+  várias `Team`s incompletas em paralelo, priorizando variedade de parceiro
+  acima de utilização de quadra, mas só **enquanto** a fila ainda tiver
+  outra `Team` completa em algum lugar pra manter alguma quadra girando; a
+  condição (b) vale pra `RoundRobin` também, sem exceção. Sem essa exceção
+  a `Session` trava de vez assim que a fila inteira ficar sem `Team`
+  completa nenhuma — o que acontece cedo ou tarde em qualquer `Session` que
+  jogue partidas suficientes pra esgotar as combinações de dupla possíveis
+  entre seus jogadores, não só nas pequenas: foi exatamente isso que
+  aconteceu em produção numa `Session` de 10 jogadores em `RoundRobin`, que
+  ficou com 8 jogadores presos em `Team`s incompletas e nenhuma `Team`
+  completa disponível, travando a única quadra pra sempre. A condição (b) é
+  o que evita travar de vez em qualquer modo: numa `Session` com só o
+  mínimo de jogadores pra fechar os times (`N == 2 * players_per_team`),
+  sem ela, a dupla perdedora do primeiro ponto ficaria incompleta pra
+  sempre — nenhuma partida futura aconteceria pra essa quadra (e portanto
+  nenhuma chamada futura de `release_players`) pra dar a eles uma segunda
+  chance. Em sessões com folga (outra `Team` completa esperando), a
+  condição (a) ainda entra em ação nas chamadas seguintes (fora de
+  `RoundRobin`) assim que uma `Team` incompleta específica não conseguir
+  achar parceiro inédito — o processo se repete a cada liberação, e cada
+  jogador tem uma chance genuína de parceiro inédito toda vez que é
+  liberado, não só uma vez na Session inteira. Implementado por
   `TeamQueueManager::release_players`
   (`api/src/modules/matchmaking/domain/team_queue.rs`); usado tanto por
   `resolve_match_result` quanto por `create_priority_team`/`update_team`
@@ -265,11 +273,15 @@ Ex: balanceamento de nível tem prioridade sobre variar parceiros.
   grande, podem se acumular várias `Team`s incompletas em paralelo (uma por
   gênero em falta), não só uma. Comportamento aceito, não é bug.
 - Em `RoundRobin`, por recusar ativamente completar um time que repetiria
-  uma dupla (e nunca ter o fallback de repetição da fase 2), grupos
-  pequenos com histórico de parceria muito concentrado podem acumular
-  várias `Team`s incompletas simultâneas em vez de uma só, inclusive de
-  forma permanente numa `Session` pequena o bastante — comportamento aceito
-  pra esse modo, não é bug (ver "Fila e rotação de quadra").
+  uma dupla enquanto a fila tiver folga (condição (a) da fase 2 desligada
+  pra esse modo), grupos pequenos com histórico de parceria muito
+  concentrado podem acumular várias `Team`s incompletas simultâneas em vez
+  de uma só — mas **não indefinidamente**: assim que a fila inteira ficar
+  sem nenhuma `Team` completa (condição (b), que vale pra `RoundRobin`
+  também), a fase 2 força a completar o suficiente pra destravar pelo menos
+  uma quadra. Acumular várias incompletas em paralelo é comportamento
+  aceito pra esse modo; travar a `Session` de vez não é (ver "Fila e
+  rotação de quadra").
 - A decisão de quem completa qual `Team` na fila (fase 1) é local por
   jogador liberado (não um rebalanceamento global da fila inteira), então
   não há garantia de que o resultado seja o arranjo com o mínimo global de
@@ -277,14 +289,16 @@ Ex: balanceamento de nível tem prioridade sobre variar parceiros.
   parceiro nessa fase enquanto ele, individualmente, tiver uma alternativa
   inédita disponível no momento em que é liberado. Comportamento aceito,
   não é bug.
-- Fora do `RoundRobin`, uma `Session` com o número mínimo de jogadores pra
-  fechar os times (`N == 2 * players_per_team`, ex. 4 jogadores com
-  `players_per_team = 2`) pode reformar a mesma dupla logo na primeira
-  liberação — não porque a fila não tenta evitar (ela tenta, na fase 1),
-  mas porque a fase 2 força a repetição quando é a única forma de manter a
-  quadra girando (ver condição (b) acima). Esperado: sessões maiores dão
-  mais folga pra fase 1 encontrar parceiro inédito antes de a fase 2 entrar
-  em ação.
+- Uma `Session` com o número mínimo de jogadores pra fechar os times
+  (`N == 2 * players_per_team`, ex. 4 jogadores com `players_per_team = 2`)
+  pode reformar a mesma dupla logo na primeira liberação, em qualquer
+  `GameMode` incluindo `RoundRobin` — não porque a fila não tenta evitar
+  (ela tenta, na fase 1), mas porque a fase 2 força a repetição quando é a
+  única forma de manter a quadra girando (condição (b)). Esperado: sessões
+  maiores dão mais folga pra fase 1 encontrar parceiro inédito antes de a
+  fase 2 entrar em ação, e em sessões grandes o bastante a condição (b)
+  ainda pode ser atingida mais tarde, depois de partidas suficientes pra
+  esgotar as combinações de dupla possíveis entre os jogadores restantes.
 
 <!--
 Situações especiais já discutidas/decididas. Ex: número ímpar de jogadores,
