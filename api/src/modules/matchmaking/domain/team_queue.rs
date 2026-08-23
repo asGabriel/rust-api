@@ -37,9 +37,25 @@ impl TeamQueueManager {
     /// modified, for the caller to persist — teams left untouched are not
     /// included.
     ///
-    /// When `game_mode` is `GameMode::Open`, a freed player only completes
-    /// an incomplete team when that pairing is brand new — it opens a new
-    /// team instead of repeating a pairing while a fresh alternative exists.
+    /// A freed player prefers completing an incomplete team with a pairing
+    /// that's brand new, opening a new single-player team to wait for one
+    /// otherwise (phase 1 below). For `GameMode::Open` (`ShuffleType::
+    /// RoundRobin`), that patience is unconditional and permanent — its
+    /// documented trade-off: the queue may accumulate several incomplete
+    /// teams rather than ever repeat a pairing. Every other mode instead
+    /// only gets one cycle's worth of patience (phase 2 below): once a team
+    /// has already sat incomplete since before this call and still finds no
+    /// fresh partner, or the rest of the queue has no complete team left to
+    /// keep a court moving, it gets merged with the best (fewest shared
+    /// players, then longest-waiting) other leftover team, repeat or not.
+    /// Without that second phase, a session with just enough players to
+    /// fill its teams would idle its only court forever the moment two
+    /// partners lose together, since no future match — and so no future
+    /// `release_players` call — would ever come along to give them a second
+    /// chance. Across enough matches this plays out as an escalating cycle:
+    /// each player gets a genuine shot at a fresh partner every time they're
+    /// freed, and only falls back to a repeat once that specific shot comes
+    /// up empty — not once, permanently, but every single time it happens.
     pub fn release_players(
         &self,
         waiting_teams: &[Team],
@@ -55,32 +71,35 @@ impl TeamQueueManager {
             .filter(|team| team.is_waiting() && !team.is_complete(self.players_per_team))
             .cloned()
             .collect();
+        let already_waiting_ids: std::collections::HashSet<Uuid> =
+            pending.iter().map(|team| *team.id()).collect();
+        let queue_has_slack = waiting_teams
+            .iter()
+            .any(|team| team.is_waiting() && team.is_complete(self.players_per_team));
         let mut touched_ids = std::collections::HashSet::new();
 
-        for player_id in order {
+        // Phase 1: give every freed player a shot at a fresh (never
+        // partnered) pairing, one at a time. A team opened here stays
+        // visible to players processed later in this same pass, so two
+        // freed players who haven't partnered before still find each other
+        // within this phase, regardless of processing order.
+        for &player_id in &order {
             let gender = Self::gender_of(players, player_id);
 
-            let candidate_index = (0..pending.len())
+            let fresh_candidate = (0..pending.len())
                 .filter(|&index| {
                     !pending[index].is_complete(self.players_per_team)
                         && self.needs_gender(&pending[index], gender, players)
                 })
                 .filter(|&index| {
-                    !self.game_mode.requires_fresh_partner()
-                        || !pending[index]
-                            .player_ids()
-                            .iter()
-                            .any(|member| history.have_played_together(*member, player_id))
-                })
-                .min_by_key(|&index| {
-                    pending[index]
+                    !pending[index]
                         .player_ids()
                         .iter()
-                        .filter(|member| history.have_played_together(**member, player_id))
-                        .count()
-                });
+                        .any(|member| history.have_played_together(*member, player_id))
+                })
+                .min_by_key(|&index| *pending[index].created_at());
 
-            match candidate_index {
+            match fresh_candidate {
                 Some(index) => {
                     pending[index].add_player(player_id);
                     touched_ids.insert(*pending[index].id());
@@ -93,9 +112,70 @@ impl TeamQueueManager {
             }
         }
 
+        let mut disbanded = Vec::new();
+
+        // Phase 2: force-complete whoever's still incomplete after phase 1,
+        // for every mode except Open/RoundRobin (see doc comment above).
+        if !self.game_mode.is_open() {
+            loop {
+                let acceptor_index = (0..pending.len()).find(|&index| {
+                    !pending[index].is_complete(self.players_per_team)
+                        && (already_waiting_ids.contains(pending[index].id()) || !queue_has_slack)
+                });
+                let Some(acceptor_index) = acceptor_index else {
+                    break;
+                };
+
+                let partner_index = (0..pending.len())
+                    .filter(|&index| {
+                        index != acceptor_index && !pending[index].is_complete(self.players_per_team)
+                    })
+                    .filter(|&index| {
+                        pending[index].player_ids().iter().all(|donor_player_id| {
+                            self.needs_gender(
+                                &pending[acceptor_index],
+                                Self::gender_of(players, *donor_player_id),
+                                players,
+                            )
+                        })
+                    })
+                    .filter(|&index| {
+                        pending[acceptor_index].player_ids().len() + pending[index].player_ids().len()
+                            <= self.players_per_team.into()
+                    })
+                    .min_by_key(|&index| {
+                        let conflicts = pending[index]
+                            .player_ids()
+                            .iter()
+                            .filter(|donor_member| {
+                                pending[acceptor_index].player_ids().iter().any(|member| {
+                                    history.have_played_together(*member, **donor_member)
+                                })
+                            })
+                            .count();
+                        (conflicts, *pending[index].created_at())
+                    });
+
+                let Some(partner_index) = partner_index else {
+                    break;
+                };
+
+                let partner_players = pending[partner_index].player_ids().clone();
+                for donor_player_id in partner_players {
+                    pending[acceptor_index].add_player(donor_player_id);
+                }
+                touched_ids.insert(*pending[acceptor_index].id());
+
+                let mut partner = pending.remove(partner_index);
+                partner.disband();
+                disbanded.push(partner);
+            }
+        }
+
         pending
             .into_iter()
             .filter(|team| touched_ids.contains(team.id()))
+            .chain(disbanded)
             .collect()
     }
 
@@ -241,6 +321,117 @@ mod tests {
             .find(|team| *team.id() != *incomplete_team.id())
             .expect("the freed male starts its own incomplete team");
         assert_eq!(new_incomplete.player_ids(), &vec![*freed_male.id()]);
+    }
+
+    /// Regression test: with `players_per_team == 2`, a losing team's two
+    /// players are freed together with no other candidate between them —
+    /// this used to force them straight back together as the same pairing,
+    /// in every `game_mode` except `Open`, because the fresh-partner check
+    /// only applied there. It must now hold for every mode, as long as the
+    /// rest of the queue has slack (some other complete team) to keep a
+    /// court moving while these two wait for a real alternative.
+    #[test]
+    fn test_release_players_avoids_repeating_a_pairing_when_the_queue_has_slack_elsewhere() {
+        let session_id = Uuid::new_v4();
+        let player_a = player(Gender::Male);
+        let player_b = player(Gender::Male);
+        let players = vec![player_a.clone(), player_b.clone()];
+
+        let just_disbanded_team = Team::new(session_id, vec![*player_a.id(), *player_b.id()]);
+        let played_match =
+            Match::new(session_id, 1, *just_disbanded_team.id(), Uuid::new_v4()).unwrap();
+        let history = PartnerHistory::from_matches(&[just_disbanded_team], &[played_match]);
+
+        let other_complete_team =
+            Team::new(session_id, vec![Uuid::new_v4(), Uuid::new_v4()]);
+
+        let manager = TeamQueueManager::new(session_id, GameMode::Male, 2);
+
+        let changed = manager.release_players(
+            &[other_complete_team],
+            &[*player_a.id(), *player_b.id()],
+            &players,
+            &history,
+        );
+
+        assert_eq!(changed.len(), 2);
+        for team in &changed {
+            assert_eq!(team.player_ids().len(), 1);
+        }
+    }
+
+    /// Without slack (no other complete team left in the queue), forcing a
+    /// repeat is the only way to avoid stalling the session forever: no
+    /// future match on the only court means no future `release_players`
+    /// call would ever come along to give this pair a second, fresher
+    /// chance. This is the minimal-session deadlock the "wait a cycle"
+    /// design would otherwise fall into.
+    #[test]
+    fn test_release_players_forces_a_repeat_when_the_queue_has_no_complete_team_left() {
+        let session_id = Uuid::new_v4();
+        let player_a = player(Gender::Male);
+        let player_b = player(Gender::Male);
+        let players = vec![player_a.clone(), player_b.clone()];
+
+        let just_disbanded_team = Team::new(session_id, vec![*player_a.id(), *player_b.id()]);
+        let played_match =
+            Match::new(session_id, 1, *just_disbanded_team.id(), Uuid::new_v4()).unwrap();
+        let history = PartnerHistory::from_matches(&[just_disbanded_team], &[played_match]);
+
+        let manager = TeamQueueManager::new(session_id, GameMode::Male, 2);
+
+        let changed = manager.release_players(
+            &[],
+            &[*player_a.id(), *player_b.id()],
+            &players,
+            &history,
+        );
+
+        let reformed = changed
+            .iter()
+            .find(|team| team.is_complete(2))
+            .expect("the pair must be reformed to avoid stalling the only court forever");
+        assert!(reformed.player_ids().contains(player_a.id()));
+        assert!(reformed.player_ids().contains(player_b.id()));
+    }
+
+    /// An incomplete team already sitting in the queue before this call
+    /// already had its chance at a fresh partner — the next freed player
+    /// should complete it (even with a repeat) rather than leaving it
+    /// waiting indefinitely while opening yet another incomplete team.
+    #[test]
+    fn test_release_players_completes_an_already_waiting_team_with_a_repeat_before_opening_a_new_one(
+    ) {
+        let session_id = Uuid::new_v4();
+        let waiting_player = player(Gender::Male);
+        let freed_player = player(Gender::Male);
+        let players = vec![waiting_player.clone(), freed_player.clone()];
+
+        let already_waiting_incomplete = Team::new(session_id, vec![*waiting_player.id()]);
+        let other_complete_team = Team::new(session_id, vec![Uuid::new_v4(), Uuid::new_v4()]);
+
+        let played_team = Team::new(
+            session_id,
+            vec![*waiting_player.id(), *freed_player.id()],
+        );
+        let played_match = Match::new(session_id, 1, *played_team.id(), Uuid::new_v4()).unwrap();
+        let history = PartnerHistory::from_matches(&[played_team], &[played_match]);
+
+        let manager = TeamQueueManager::new(session_id, GameMode::Male, 2);
+
+        let changed = manager.release_players(
+            &[already_waiting_incomplete.clone(), other_complete_team],
+            &[*freed_player.id()],
+            &players,
+            &history,
+        );
+
+        let completed = changed
+            .iter()
+            .find(|team| *team.id() == *already_waiting_incomplete.id())
+            .expect("the already-waiting team should be completed, repeat or not");
+        assert!(completed.is_complete(2));
+        assert!(completed.player_ids().contains(freed_player.id()));
     }
 
     #[test]

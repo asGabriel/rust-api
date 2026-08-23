@@ -26,13 +26,6 @@ impl GameMode {
         *self == GameMode::Open
     }
 
-    /// Whether the queue must never pair up two players who already played
-    /// together while a fresh pairing is available. Only `Open` demands
-    /// this — the other modes keep the best-effort pairing they've always had.
-    pub fn requires_fresh_partner(&self) -> bool {
-        self.is_open()
-    }
-
     /// `Mixed` needs to split `players_per_team` evenly between men and
     /// women, so it only makes sense for an even count. Checked here, at the
     /// Session boundary, so a Session can never be saved in a configuration
@@ -96,11 +89,10 @@ impl From<GameMode> for String {
 #[serde(rename_all = "camelCase")]
 pub enum ShuffleType {
     KingAndQueen,
-    /// Same win/loss court-holding mechanic as `KingAndQueen`, but the queue
-    /// only completes an incomplete team with a freed player when that
-    /// pairing is brand new — it opens a new team instead of repeating a
-    /// pairing while a fresh alternative exists. Only valid with
-    /// `GameMode::Open`.
+    /// Same win/loss court-holding and fresh-partner queue mechanic as
+    /// `KingAndQueen` (see `TeamQueueManager::release_players`) — the only
+    /// difference is `GameMode::Open`, which `RoundRobin` is exclusively
+    /// paired with, ignoring gender entirely when matching players up.
     RoundRobin,
 }
 

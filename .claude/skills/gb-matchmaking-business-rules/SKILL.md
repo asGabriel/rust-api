@@ -21,15 +21,16 @@ description: Regras de negócio do módulo de matchmaking — critérios de pare
   dupla com qualquer outro. `Open` só é válido combinado com
   `ShuffleType::RoundRobin` (ver seção seguinte); qualquer outra combinação
   é rejeitada por `GameMode::validate_shuffle_type`.
-- O sorteio (tanto o inicial quanto os que acontecem conforme partidas
-  terminam) evita, best-effort, formar uma `Team` com dois jogadores que já
-  jogaram juntos como parceiros na mesma `Session` — mas aceita repetir se
-  não houver alternativa (nunca trava o sorteio por causa disso). O
-  histórico usado é só de `Team`s que de fato entraram em algum `Match`;
-  uma dupla que só passou pela fila sem chegar a jogar não conta.
-  Implementado por `PartnerHistory` + o algoritmo greedy
+- O sorteio *inicial* evita, best-effort, formar uma `Team` com dois
+  jogadores que já jogaram juntos como parceiros na mesma `Session` — mas
+  aceita repetir se não houver alternativa (nunca trava o sorteio por causa
+  disso). Implementado por `PartnerHistory` + o algoritmo greedy
   most-constrained-first de `TeamDrawer::draw`
-  (`api/src/modules/matchmaking/domain/team_drawer.rs`).
+  (`api/src/modules/matchmaking/domain/team_drawer.rs`). O histórico usado é
+  só de `Team`s que de fato entraram em algum `Match`; uma dupla que só
+  passou pela fila sem chegar a jogar não conta. A fila (conforme partidas
+  terminam) segue essa mesma intenção mas com uma regra diferente, descrita
+  na próxima seção — não é a mesma implementação nem o mesmo trade-off.
 - Jogadores que sobram (não fecham um time cheio, ou, no modo `Mixed`, são
   do gênero já esgotado) nunca são descartados: formam uma `Team`
   incompleta, visível via `GET /matchmaking/teams/{session_id}`, esperando
@@ -49,17 +50,14 @@ habilidade, histórico de parceria, aleatoriedade controlada, etc.
 - Toda `Session` tem um `ShuffleType`, que escolhe a estratégia de rotação
   usada conforme as partidas terminam: `KingAndQueen` (fila contínua com
   rotação por vitórias, descrita abaixo) ou `RoundRobin` (só válido com
-  `GameMode::Open` — mesma mecânica de vitória/derrota do `KingAndQueen`,
-  mas a fila prioriza fortemente formar duplas inéditas: um jogador liberado
-  só completa um time incompleto da fila se essa dupla nunca jogou junta na
-  `Session`; se todos os times incompletos esperando já jogaram com ele,
-  abre um time novo em vez de repetir a dupla — nunca força a repetição
-  enquanto existir alternativa. O sorteio *inicial* nesse modo continua
-  puramente aleatório, sem gênero, igual aos outros modos — a garantia de
-  "duplas inéditas" só entra em ação na fila, conforme as partidas
-  terminam). O campo é explícito e obrigatório na `Session` (mesmo padrão do
-  `GameMode`) para que nenhuma `Session` mude de comportamento
-  silenciosamente.
+  `GameMode::Open` — mesma mecânica de vitória/derrota do `KingAndQueen`; a
+  diferença de comportamento entre os dois é só a exceção do "fallback de
+  repetição" descrita no bullet de fila abaixo). O sorteio *inicial* em
+  `RoundRobin` continua puramente aleatório, sem gênero, igual aos outros
+  modos — a garantia de "duplas inéditas" só entra em ação na fila,
+  conforme as partidas terminam. O campo é explícito e obrigatório na
+  `Session` (mesmo padrão do `GameMode`) para que nenhuma `Session` mude de
+  comportamento silenciosamente.
 - Uma `Team` tem um `status`: `Waiting` (na fila, disponível pra entrar em
   quadra), `Holding` (venceu e está segurando a quadra aguardando o próximo
   desafiante) ou `Disbanded` (perdeu, ou girou pra fora por ter batido o
@@ -72,18 +70,48 @@ habilidade, histórico de parceria, aleatoriedade controlada, etc.
   quadra precisa de duas `Team`s novas da fila.
 - **Perdedor:** sempre se desfaz (`Team::disband`); seus jogadores voltam
   pra fila.
-- **Fila (FIFO):** jogadores liberados (do perdedor, e do vencedor quando
-  bate o cap) são inseridos na fila em ordem aleatória — cada um tenta
-  completar uma `Team` incompleta compatível (mesmo gênero necessário, no
-  caso `Mixed`) já esperando na fila; se não achar, inicia uma nova `Team`
-  incompleta. Sem regra especial de "qual dos jogadores liberados" completa
-  a sobra existente. Em `RoundRobin` (`GameMode::Open`), a compatibilidade
-  também exige zero conflito de histórico com o jogador liberado
-  (`GameMode::requires_fresh_partner`) — só entra num time incompleto que
-  ainda não jogou com ele; caso contrário abre time novo, mesmo que isso
-  signifique acumular mais de uma `Team` incompleta em paralelo. Implementado
-  por `TeamQueueManager::release_players`
-  (`api/src/modules/matchmaking/domain/team_queue.rs`).
+- **Fila (FIFO), fase 1 — parceiro inédito:** jogadores liberados (do
+  perdedor, e do vencedor quando bate o cap) são processados em ordem
+  aleatória — cada um tenta completar, com **zero conflito de histórico**,
+  uma `Team` incompleta compatível (mesmo gênero necessário, no caso
+  `Mixed`) já esperando na fila (incluindo `Team`s incompletas abertas
+  pelos próprios jogadores liberados nesta mesma chamada, então dois
+  jogadores liberados juntos que nunca jogaram entre si ainda se encontram
+  aqui); se não achar nenhum candidato inédito, abre uma nova `Team`
+  incompleta e espera. Sem regra especial de "qual dos jogadores liberados"
+  completa a sobra existente — só a preferência por parceiro inédito.
+  Válido pra todo `GameMode`: com `players_per_team = 2` os dois jogadores
+  de um time perdedor quase sempre são liberados juntos sem mais ninguém
+  por perto, então sem essa fase eles voltariam pra fila como a mesma
+  dupla quase toda vez.
+- **Fila, fase 2 — fallback de repetição (todo modo exceto `RoundRobin`/
+  `GameMode::Open`):** em `RoundRobin`, a fase 1 é a regra inteira — a fila
+  nunca força uma repetição, mesmo sem alternativa nenhuma, mesmo que isso
+  signifique acumular várias `Team`s incompletas em paralelo indefinidamente
+  (trade-off deliberado desse modo: prioriza variedade de parceiro acima de
+  utilização de quadra). Todo outro modo, depois da fase 1, força a
+  completar quem ainda ficou incompleto — juntando com a melhor `Team`
+  incompleta candidata disponível (menos jogadores em comum e, empatado, a
+  que espera há mais tempo), repetição ou não — quando: (a) essa `Team` já
+  estava esperando na fila **antes** desta chamada (já teve uma chance de
+  achar parceiro inédito e não achou), ou (b) a fila inteira da `Session`
+  não tem nenhuma outra `Team` completa disponível pra manter alguma quadra
+  girando enquanto se espera. A condição (b) é o que evita travar de vez:
+  numa `Session` com só o mínimo de jogadores pra fechar os times
+  (`N == 2 * players_per_team`), sem ela, a dupla perdedora do primeiro
+  ponto ficaria incompleta pra sempre — nenhuma partida futura aconteceria
+  pra essa quadra (e portanto nenhuma chamada futura de `release_players`)
+  pra dar a eles uma segunda chance. Em sessões com folga (outra `Team`
+  completa esperando), a condição (a) ainda entra em ação nas chamadas
+  seguintes assim que uma `Team` incompleta específica não conseguir achar
+  parceiro inédito — o processo se repete a cada liberação, e cada jogador
+  tem uma chance genuína de parceiro inédito toda vez que é liberado, não
+  só uma vez na Session inteira. Implementado por
+  `TeamQueueManager::release_players`
+  (`api/src/modules/matchmaking/domain/team_queue.rs`); usado tanto por
+  `resolve_match_result` quanto por `create_priority_team`/`update_team`
+  (ver "Entrada prioritária manual" abaixo) — a mesma regra de fallback vale
+  nesses dois fluxos manuais também.
 - **Continuação automática da quadra:** ao reportar o resultado de um
   `Match` (`POST /matchmaking/matches/{match_id}/result`), o sistema já
   cria automaticamente o próximo `Match` daquela quadra — vencedor (se
@@ -236,15 +264,27 @@ Ex: balanceamento de nível tem prioridade sobre variar parceiros.
   (`TeamQueueManager::needs_gender`) — se o desbalanceamento de gênero for
   grande, podem se acumular várias `Team`s incompletas em paralelo (uma por
   gênero em falta), não só uma. Comportamento aceito, não é bug.
-- Em `RoundRobin`, pelo mesmo motivo (recusa ativamente completar um time
-  que repetiria uma dupla), grupos pequenos com histórico de parceria muito
-  concentrado podem acumular várias `Team`s incompletas simultâneas em vez
-  de uma só. A decisão de quem completa qual time é local por jogador
-  liberado (não um rebalanceamento global da fila), então não há garantia
-  de que o resultado seja o arranjo com o mínimo global de duplas repetidas
-  possível — só que nenhum jogador é forçado a repetir parceiro enquanto
-  ele, individualmente, tiver uma alternativa disponível no momento em que
-  é liberado. Comportamento aceito, não é bug.
+- Em `RoundRobin`, por recusar ativamente completar um time que repetiria
+  uma dupla (e nunca ter o fallback de repetição da fase 2), grupos
+  pequenos com histórico de parceria muito concentrado podem acumular
+  várias `Team`s incompletas simultâneas em vez de uma só, inclusive de
+  forma permanente numa `Session` pequena o bastante — comportamento aceito
+  pra esse modo, não é bug (ver "Fila e rotação de quadra").
+- A decisão de quem completa qual `Team` na fila (fase 1) é local por
+  jogador liberado (não um rebalanceamento global da fila inteira), então
+  não há garantia de que o resultado seja o arranjo com o mínimo global de
+  duplas repetidas possível — só que nenhum jogador é forçado a repetir
+  parceiro nessa fase enquanto ele, individualmente, tiver uma alternativa
+  inédita disponível no momento em que é liberado. Comportamento aceito,
+  não é bug.
+- Fora do `RoundRobin`, uma `Session` com o número mínimo de jogadores pra
+  fechar os times (`N == 2 * players_per_team`, ex. 4 jogadores com
+  `players_per_team = 2`) pode reformar a mesma dupla logo na primeira
+  liberação — não porque a fila não tenta evitar (ela tenta, na fase 1),
+  mas porque a fase 2 força a repetição quando é a única forma de manter a
+  quadra girando (ver condição (b) acima). Esperado: sessões maiores dão
+  mais folga pra fase 1 encontrar parceiro inédito antes de a fase 2 entrar
+  em ação.
 
 <!--
 Situações especiais já discutidas/decididas. Ex: número ímpar de jogadores,
