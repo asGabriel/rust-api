@@ -4,6 +4,36 @@
 > Não é recarregado automaticamente com o `SKILL.md` — só ler quando for
 > preciso entender o motivo/contexto histórico de uma regra específica.
 
+- 2026-08-23 — reescrito `TeamQueueManager::release_players` do zero. O
+  design anterior (jogadores liberados tentando completar `Team`s
+  incompletas uma a uma, com `PartnerHistory` bloqueando repetição) passou
+  por duas rodadas de patch no mesmo dia tentando corrigir "duplas
+  repetindo demais" e depois "a fila trava de vez" (`already_waiting_ids`/
+  `queue_has_slack`/fases 1 e 2, com `GameMode::Open` tratado à parte) — o
+  último patch ainda travou de vez numa `Session` real de 9-10 jogadores em
+  `Open`/`RoundRobin` (a exceção de `Open` na fase 2 significava que, uma
+  vez esgotadas as combinações de dupla possíveis, a fila parava de formar
+  qualquer `Team` completa, e sem `Team` completa nenhuma não há partida
+  futura pra disparar uma nova chamada de `release_players` que desse uma
+  segunda chance). Trocado por um algoritmo bem mais simples, sem fases
+  nem `GameMode::Open` tratado à parte: a cada liberação, junta todo mundo
+  sem `Team` completa (liberados agora + quem já esperava numa `Team`
+  incompleta) num único grupo, seleciona dali o suficiente pra formar
+  `Team`s completas — sempre os que esperam há mais tempo primeiro, pra
+  ninguém "voltar imediatamente" — e entrega esse grupo pro mesmo
+  `TeamDrawer::draw` do sorteio inicial, reaproveitando sua lógica de
+  mistura já testada em vez de reimplementá-la. Remove
+  `GameMode::requires_fresh_partner` (ficou sem uso) e deixa
+  `ShuffleType::RoundRobin` sem nenhum efeito de comportamento próprio na
+  fila (única diferença remanescente de `Open` é ignorar gênero, que já
+  vinha do `GameMode`). Ver "Fila e rotação de quadra" no `SKILL.md` pro
+  algoritmo atual. Revisão pelo `gb-matchmaking-domain-guardian` encontrou
+  uma regressão real dessa reescrita antes de mergear: como a nova versão
+  sempre desfaz e recria a `Team` (em vez de mutar in-place como antes), uma
+  `Team` `priority` que estivesse incompleta perdia o flag `priority` ao
+  ser completada — corrigido propagando `priority` de qualquer `Team`
+  incompleta antiga que perca membro pra um grupo novo. Ver "Prioridades"
+  no `SKILL.md`.
 - 2026-08-18 — corrigido bug relatado em `Session`s com mais de uma quadra:
   `resolve_match_result` só recalculava a fila para a quadra do `Match`
   recém-reportado, então uma quadra que ficava ociosa por falta de `Team`s
