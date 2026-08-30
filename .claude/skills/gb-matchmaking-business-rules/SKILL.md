@@ -19,14 +19,15 @@ description: Regras de negócio do módulo de matchmaking — critérios de pare
   e metade mulheres (com `players_per_team = 2`, na prática 1 homem + 1
   mulher); `Open` ignora gênero totalmente — qualquer jogador pode formar
   dupla com qualquer outro.
-- Ao formar um time (seeding ou `next_challenger`), o `TeamDrawer::draw`
-  ordena o grupo escolhido evitando best-effort colocar como parceiros dois
-  jogadores que já jogaram juntos na mesma `Session` — mas **só anota** a
-  repetição quando não tem alternativa, nunca bloqueia nem espera. O
-  histórico (`PartnerHistory`) é só de `Team`s que de fato entraram em algum
-  `Match`. *Quem* entra no time a cada rodada é decidido pela lista de
-  jogadores (`session_queue`), não pelo `TeamDrawer` — ver "Fila e rotação
-  de quadra".
+- *Quem* entra no time a cada rodada é decidido pela lista de jogadores
+  (`session_queue`) — ver "Fila e rotação de quadra". `next_challenger` pega
+  os primeiros da lista sem tentar alternativas de pareamento; só **anota**
+  (`repeats_partner`, nunca bloqueia) se os escolhidos já jogaram juntos na
+  mesma `Session`, via `PartnerHistory` (só conta `Team`s que de fato
+  entraram em algum `Match`). O `TeamDrawer::draw` só é usado no **seeding**
+  inicial (`queue/seed`), pra distribuir os jogadores de abertura entre as
+  quadras — nesse ponto o histórico está vazio, então é só embaralhamento
+  respeitando gênero.
 - Quem não entra num time agora (não é dos primeiros da lista, ou, em
   `Mixed`, é do gênero já esgotado na rodada) continua na `session_queue`,
   visível via `GET /matchmaking/sessions/{id}/queue`, e entra numa rodada
@@ -101,13 +102,16 @@ Orquestrado por `TeamHandlerImpl::resolve_match_result`, chamado por
   composição de gênero do `GameMode`: `Mixed` = `players_per_team / 2` de
   cada gênero (cada gênero na sua própria ordem); `Male`/`Female`/`Open` =
   os `players_per_team` primeiros.
-- Se não há jogadores suficientes do gênero necessário → **não forma nada**
-  pra aquela quadra (fica ociosa, a resposta sinaliza). O operador pode
-  montar a dupla manualmente (ver "Montagem manual").
-- Roda o grupo escolhido pelo `TeamDrawer::draw` só pra ordená-lo e
-  **anotar** (não bloquear) se algum par já jogou junto na `Session`
-  (`PartnerHistory`). A sugestão pega exatamente os N do topo — sem tentar
-  alternativas pra evitar repetição; se repetir, o operador troca.
+- Se não há jogadores suficientes do gênero necessário → retorna `None`,
+  **não forma nada** pra aquela quadra (fica ociosa, a resposta sinaliza).
+  O operador pode montar a dupla manualmente (ver "Montagem manual").
+- Pega exatamente os N do topo, na ordem da lista — **sem** `TeamDrawer`,
+  sem tentar alternativas pra evitar repetição. Só marca `repeats_partner`
+  (via `PartnerHistory`) se os escolhidos já jogaram juntos na `Session`;
+  é dica pro operador, não bloqueio — se repetir e ele não gostar, troca no
+  `Draft`. Retorna `ChallengerSuggestion { player_ids, repeats_partner }`.
+  Implementado em `SessionQueue::next_challenger`
+  (`api/src/modules/matchmaking/domain/queue.rs`).
 
 #### Confirmar / descartar / editar o `Draft`
 
@@ -157,8 +161,8 @@ Orquestrado por `TeamHandlerImpl::resolve_match_result`, chamado por
   homens / metade mulheres por `Team`). Validado na criação/edição da
   `Session` (`GameMode::validate_players_per_team`, chamado por
   `Session::new`/`set_settings`/`set_game_mode`) e honrado pelo caminho
-  automático (`next_challenger`/`TeamDrawer::draw`). A montagem manual pode
-  ignorar (ver "Montagem manual" em "Fila e rotação de quadra").
+  automático (`SessionQueue::next_challenger` e o seeding). A montagem
+  manual pode ignorar (ver "Montagem manual" em "Fila e rotação de quadra").
 - O seeding (`POST /matchmaking/sessions/{id}/queue/seed`) só forma
   partidas de abertura enquanto a `Session` não tiver nenhum `Match`; depois
   disso a rotação segue por resultado de partida. Não há re-seed.
