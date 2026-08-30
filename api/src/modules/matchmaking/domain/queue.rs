@@ -47,8 +47,9 @@ impl QueueEntry {
     /// then longest waiting. Non-pinned entries always have `pinned_at =
     /// None`, which the leading `!pinned` flag already orders after every
     /// pinned entry, so the `Option` never has to compare `None` against a
-    /// pinned `Some`.
-    pub fn order_key(&self) -> (bool, Option<DateTime<Utc>>, u16, DateTime<Utc>) {
+    /// pinned `Some`. Only used by `SessionQueue::ordered` — the ordering
+    /// rule lives in exactly one place.
+    fn order_key(&self) -> (bool, Option<DateTime<Utc>>, u16, DateTime<Utc>) {
         (
             !self.pinned,
             self.pinned_at,
@@ -86,11 +87,32 @@ impl From<&sqlx::postgres::PgRow> for QueueEntry {
     }
 }
 
-/// Orders `entries` in place by `QueueEntry::order_key` — the canonical
-/// "who enters next" order. Every consumer of the queue sorts through here
-/// so the ordering rule lives in exactly one place.
-pub fn order_queue(entries: &mut [QueueEntry]) {
-    entries.sort_by_key(|entry| entry.order_key());
+/// A session's waiting queue: the `QueueEntry` rows of players not on a
+/// court right now, wrapped so the "who enters next" ordering — and, from
+/// F2 on, the challenger selection — live behind one type instead of loose
+/// functions. Built from a repository read; holds no session config yet
+/// (`next_challenger` will bind `game_mode`/`players_per_team` here when it
+/// lands).
+pub struct SessionQueue {
+    entries: Vec<QueueEntry>,
+}
+
+impl SessionQueue {
+    pub fn new(entries: Vec<QueueEntry>) -> Self {
+        Self { entries }
+    }
+
+    /// The entries in canonical "who enters next" order: pinned first
+    /// (oldest pin first), then fewest games played, then longest waiting.
+    pub fn ordered(&self) -> Vec<&QueueEntry> {
+        let mut ordered: Vec<&QueueEntry> = self.entries.iter().collect();
+        ordered.sort_by_key(|entry| entry.order_key());
+        ordered
+    }
+
+    pub fn entries(&self) -> &[QueueEntry] {
+        &self.entries
+    }
 }
 
 #[cfg(test)]
@@ -103,17 +125,22 @@ mod tests {
         e
     }
 
+    fn ordered_ids(entries: Vec<QueueEntry>) -> Vec<Uuid> {
+        SessionQueue::new(entries)
+            .ordered()
+            .iter()
+            .map(|entry| *entry.id())
+            .collect()
+    }
+
     #[test]
     fn test_order_by_games_then_wait_time() {
         let a = entry(2, 100); // most games — last
         let b = entry(1, 10); // fewer games, but waited less than c
         let c = entry(1, 50); // fewer games, waited longest — first
-        let mut list = vec![a.clone(), b.clone(), c.clone()];
-
-        order_queue(&mut list);
 
         assert_eq!(
-            list.iter().map(|e| *e.id()).collect::<Vec<_>>(),
+            ordered_ids(vec![a.clone(), b.clone(), c.clone()]),
             vec![*c.id(), *b.id(), *a.id()]
         );
     }
@@ -126,12 +153,14 @@ mod tests {
             e
         };
         let long_waiting_no_games = entry(0, 999);
-        let mut list = vec![long_waiting_no_games.clone(), fresh_but_pinned.clone()];
 
-        order_queue(&mut list);
-
-        assert_eq!(*list[0].id(), *fresh_but_pinned.id());
-        assert_eq!(*list[1].id(), *long_waiting_no_games.id());
+        assert_eq!(
+            ordered_ids(vec![
+                long_waiting_no_games.clone(),
+                fresh_but_pinned.clone()
+            ]),
+            vec![*fresh_but_pinned.id(), *long_waiting_no_games.id()]
+        );
     }
 
     #[test]
@@ -144,11 +173,10 @@ mod tests {
         second.set_pinned(true);
         second.pinned_at = Some(Utc::now() - chrono::Duration::seconds(5));
 
-        let mut list = vec![second.clone(), first.clone()];
-        order_queue(&mut list);
-
-        assert_eq!(*list[0].id(), *first.id());
-        assert_eq!(*list[1].id(), *second.id());
+        assert_eq!(
+            ordered_ids(vec![second.clone(), first.clone()]),
+            vec![*first.id(), *second.id()]
+        );
     }
 
     #[test]
