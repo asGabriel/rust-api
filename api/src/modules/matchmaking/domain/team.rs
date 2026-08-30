@@ -182,8 +182,8 @@ impl From<&sqlx::postgres::PgRow> for Team {
 /// Centralizes the validation rules for forming a `Team` within a `Session`,
 /// including the manual (contingency) path: an operator picking specific
 /// players to force a team into the queue, regardless of the session's
-/// `GameMode`/`ShuffleType` — those only constrain the automated draw and
-/// queue rotation, never a manually assembled team.
+/// `GameMode` — that only constrains the automated draw and queue
+/// rotation, never a manually assembled team.
 /// Bound to a `session_id` and that session's confirmed `player_ids` at
 /// construction so it always scopes its checks to that session, regardless
 /// of what `existing_teams` the caller passes in.

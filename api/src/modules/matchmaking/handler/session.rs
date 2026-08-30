@@ -37,7 +37,6 @@ impl SessionHandler for SessionHandlerImpl {
             request.settings.unwrap_or_default(),
             request.available_courts,
             request.game_mode,
-            request.shuffle_type,
         )?;
 
         self.session_repository.insert(session).await
@@ -73,10 +72,8 @@ impl SessionHandler for SessionHandlerImpl {
             session.set_available_courts(available_courts);
         }
 
-        if request.game_mode.is_some() || request.shuffle_type.is_some() {
-            let game_mode = request.game_mode.unwrap_or(*session.game_mode());
-            let shuffle_type = request.shuffle_type.unwrap_or(*session.shuffle_type());
-            session.set_game_mode_and_shuffle_type(game_mode, shuffle_type)?;
+        if let Some(game_mode) = request.game_mode {
+            session.set_game_mode(game_mode)?;
         }
 
         if let Some(player_ids) = request.player_ids {
@@ -92,7 +89,7 @@ pub mod use_cases {
     use serde::{Deserialize, Serialize};
     use uuid::Uuid;
 
-    use crate::modules::matchmaking::domain::session::{GameMode, SessionSettings, ShuffleType};
+    use crate::modules::matchmaking::domain::session::{GameMode, SessionSettings};
 
     #[derive(Debug, Clone, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -101,7 +98,6 @@ pub mod use_cases {
         pub description: Option<String>,
         pub available_courts: u8,
         pub game_mode: GameMode,
-        pub shuffle_type: ShuffleType,
         pub settings: Option<SessionSettings>,
     }
 
@@ -112,7 +108,6 @@ pub mod use_cases {
         pub description: Option<String>,
         pub available_courts: Option<u8>,
         pub game_mode: Option<GameMode>,
-        pub shuffle_type: Option<ShuffleType>,
         pub settings: Option<SessionSettings>,
         pub player_ids: Option<Vec<Uuid>>,
     }

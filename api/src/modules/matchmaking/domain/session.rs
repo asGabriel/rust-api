@@ -6,8 +6,7 @@ use uuid::Uuid;
 
 /// Filter applied when drawing teams for a `Session`: pairs restricted to
 /// men, restricted to women, mixed (1 man + 1 woman per team), or open
-/// (gender not considered at all — only valid together with
-/// `ShuffleType::RoundRobin`).
+/// (gender not considered at all).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum GameMode {
@@ -39,26 +38,6 @@ impl GameMode {
 
         Ok(())
     }
-
-    /// `Open` (gender not considered) only makes sense paired with
-    /// `ShuffleType::RoundRobin` (the strategy that leans on that freedom to
-    /// chase novel pairings), and `RoundRobin` only makes sense paired with
-    /// `Open` — checked here, at the Session boundary, so the two fields can
-    /// never drift into an inconsistent combination.
-    pub fn validate_shuffle_type(&self, shuffle_type: ShuffleType) -> HttpResult<()> {
-        let compatible = match self {
-            GameMode::Open => shuffle_type == ShuffleType::RoundRobin,
-            _ => shuffle_type != ShuffleType::RoundRobin,
-        };
-
-        if !compatible {
-            return Err(Box::new(HttpError::bad_request(
-                "GameMode::Open and ShuffleType::RoundRobin can only be used together",
-            )));
-        }
-
-        Ok(())
-    }
 }
 
 impl From<String> for GameMode {
@@ -79,37 +58,6 @@ impl From<GameMode> for String {
             GameMode::Female => "FEMALE".to_string(),
             GameMode::Mixed => "MIXED".to_string(),
             GameMode::Open => "OPEN".to_string(),
-        }
-    }
-}
-
-/// The strategy governing how a session's team queue evolves as matches
-/// finish.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ShuffleType {
-    KingAndQueen,
-    /// Same win/loss court-holding and fresh-partner queue mechanic as
-    /// `KingAndQueen` (see `TeamQueueManager::release_players`) — the only
-    /// difference is `GameMode::Open`, which `RoundRobin` is exclusively
-    /// paired with, ignoring gender entirely when matching players up.
-    RoundRobin,
-}
-
-impl From<String> for ShuffleType {
-    fn from(s: String) -> Self {
-        match s.as_str() {
-            "ROUND_ROBIN" => ShuffleType::RoundRobin,
-            _ => ShuffleType::KingAndQueen,
-        }
-    }
-}
-
-impl From<ShuffleType> for String {
-    fn from(shuffle_type: ShuffleType) -> Self {
-        match shuffle_type {
-            ShuffleType::KingAndQueen => "KING_AND_QUEEN".to_string(),
-            ShuffleType::RoundRobin => "ROUND_ROBIN".to_string(),
         }
     }
 }
@@ -153,7 +101,6 @@ pub struct Session {
     settings: SessionSettings,
     available_courts: u8,
     game_mode: GameMode,
-    shuffle_type: ShuffleType,
     player_ids: Vec<Uuid>,
     created_at: DateTime<Utc>,
     updated_at: Option<DateTime<Utc>>,
@@ -166,10 +113,8 @@ impl Session {
         settings: SessionSettings,
         available_courts: u8,
         game_mode: GameMode,
-        shuffle_type: ShuffleType,
     ) -> HttpResult<Self> {
         game_mode.validate_players_per_team(*settings.players_per_team())?;
-        game_mode.validate_shuffle_type(shuffle_type)?;
 
         Ok(Self {
             id: Uuid::new_v4(),
@@ -178,7 +123,6 @@ impl Session {
             settings,
             available_courts,
             game_mode,
-            shuffle_type,
             player_ids: Vec::new(),
             created_at: Utc::now(),
             updated_at: None,
@@ -211,36 +155,7 @@ impl Session {
 
     pub fn set_game_mode(&mut self, game_mode: GameMode) -> HttpResult<()> {
         game_mode.validate_players_per_team(*self.settings.players_per_team())?;
-        game_mode.validate_shuffle_type(self.shuffle_type)?;
         self.game_mode = game_mode;
-        self.updated_at = Some(Utc::now());
-
-        Ok(())
-    }
-
-    pub fn set_shuffle_type(&mut self, shuffle_type: ShuffleType) -> HttpResult<()> {
-        self.game_mode.validate_shuffle_type(shuffle_type)?;
-        self.shuffle_type = shuffle_type;
-        self.updated_at = Some(Utc::now());
-
-        Ok(())
-    }
-
-    /// Sets `game_mode` and `shuffle_type` together, validating the pair as
-    /// the target state rather than validating each field against the
-    /// other's current value in sequence — needed because swapping between
-    /// two mutually exclusive combinations (e.g. `Male`+`KingAndQueen` to
-    /// `Open`+`RoundRobin`) has no valid intermediate state for
-    /// `set_game_mode`/`set_shuffle_type` to pass through one at a time.
-    pub fn set_game_mode_and_shuffle_type(
-        &mut self,
-        game_mode: GameMode,
-        shuffle_type: ShuffleType,
-    ) -> HttpResult<()> {
-        game_mode.validate_players_per_team(*self.settings.players_per_team())?;
-        game_mode.validate_shuffle_type(shuffle_type)?;
-        self.game_mode = game_mode;
-        self.shuffle_type = shuffle_type;
         self.updated_at = Some(Utc::now());
 
         Ok(())
@@ -260,7 +175,6 @@ getters! {
         settings: SessionSettings,
         available_courts: u8,
         game_mode: GameMode,
-        shuffle_type: ShuffleType,
         player_ids: Vec<Uuid>,
         created_at: DateTime<Utc>,
         updated_at: Option<DateTime<Utc>>,
@@ -284,7 +198,6 @@ impl From<&sqlx::postgres::PgRow> for Session {
             settings,
             available_courts: row.get::<i16, _>("available_courts") as u8,
             game_mode: row.get::<String, _>("game_mode").into(),
-            shuffle_type: row.get::<String, _>("shuffle_type").into(),
             player_ids: row.get("player_ids"),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
@@ -307,29 +220,14 @@ mod tests {
         let mut settings = SessionSettings::default();
         settings.players_per_team = 3;
 
-        let err = Session::new(
-            date(),
-            None,
-            settings,
-            2,
-            GameMode::Mixed,
-            ShuffleType::KingAndQueen,
-        )
-        .unwrap_err();
+        let err = Session::new(date(), None, settings, 2, GameMode::Mixed).unwrap_err();
 
         assert_eq!(err.kind, HttpErrorKind::BadRequest);
     }
 
     #[test]
     fn test_new_session_allows_mixed_mode_with_even_players_per_team() {
-        let session = Session::new(
-            date(),
-            None,
-            SessionSettings::default(),
-            2,
-            GameMode::Mixed,
-            ShuffleType::KingAndQueen,
-        );
+        let session = Session::new(date(), None, SessionSettings::default(), 2, GameMode::Mixed);
 
         assert!(session.is_ok());
     }
@@ -338,15 +236,7 @@ mod tests {
     fn test_set_game_mode_rejects_mixed_when_current_settings_are_odd() {
         let mut settings = SessionSettings::default();
         settings.players_per_team = 3;
-        let mut session = Session::new(
-            date(),
-            None,
-            settings,
-            2,
-            GameMode::Male,
-            ShuffleType::KingAndQueen,
-        )
-        .unwrap();
+        let mut session = Session::new(date(), None, settings, 2, GameMode::Male).unwrap();
 
         let err = session.set_game_mode(GameMode::Mixed).unwrap_err();
 
@@ -355,138 +245,12 @@ mod tests {
 
     #[test]
     fn test_set_settings_rejects_odd_players_per_team_when_mode_is_mixed() {
-        let mut session = Session::new(
-            date(),
-            None,
-            SessionSettings::default(),
-            2,
-            GameMode::Mixed,
-            ShuffleType::KingAndQueen,
-        )
-        .unwrap();
+        let mut session =
+            Session::new(date(), None, SessionSettings::default(), 2, GameMode::Mixed).unwrap();
         let mut odd_settings = SessionSettings::default();
         odd_settings.players_per_team = 3;
 
         let err = session.set_settings(odd_settings).unwrap_err();
-
-        assert_eq!(err.kind, HttpErrorKind::BadRequest);
-    }
-
-    #[test]
-    fn test_new_session_rejects_open_mode_with_king_and_queen_shuffle() {
-        let err = Session::new(
-            date(),
-            None,
-            SessionSettings::default(),
-            2,
-            GameMode::Open,
-            ShuffleType::KingAndQueen,
-        )
-        .unwrap_err();
-
-        assert_eq!(err.kind, HttpErrorKind::BadRequest);
-    }
-
-    #[test]
-    fn test_new_session_rejects_round_robin_shuffle_with_non_open_mode() {
-        let err = Session::new(
-            date(),
-            None,
-            SessionSettings::default(),
-            2,
-            GameMode::Male,
-            ShuffleType::RoundRobin,
-        )
-        .unwrap_err();
-
-        assert_eq!(err.kind, HttpErrorKind::BadRequest);
-    }
-
-    #[test]
-    fn test_new_session_allows_open_mode_with_round_robin_shuffle() {
-        let session = Session::new(
-            date(),
-            None,
-            SessionSettings::default(),
-            2,
-            GameMode::Open,
-            ShuffleType::RoundRobin,
-        );
-
-        assert!(session.is_ok());
-    }
-
-    #[test]
-    fn test_set_game_mode_rejects_open_when_current_shuffle_is_king_and_queen() {
-        let mut session = Session::new(
-            date(),
-            None,
-            SessionSettings::default(),
-            2,
-            GameMode::Male,
-            ShuffleType::KingAndQueen,
-        )
-        .unwrap();
-
-        let err = session.set_game_mode(GameMode::Open).unwrap_err();
-
-        assert_eq!(err.kind, HttpErrorKind::BadRequest);
-    }
-
-    #[test]
-    fn test_set_shuffle_type_rejects_round_robin_when_current_mode_is_not_open() {
-        let mut session = Session::new(
-            date(),
-            None,
-            SessionSettings::default(),
-            2,
-            GameMode::Male,
-            ShuffleType::KingAndQueen,
-        )
-        .unwrap();
-
-        let err = session
-            .set_shuffle_type(ShuffleType::RoundRobin)
-            .unwrap_err();
-
-        assert_eq!(err.kind, HttpErrorKind::BadRequest);
-    }
-
-    #[test]
-    fn test_set_game_mode_and_shuffle_type_together_allows_swapping_to_open_round_robin() {
-        let mut session = Session::new(
-            date(),
-            None,
-            SessionSettings::default(),
-            2,
-            GameMode::Male,
-            ShuffleType::KingAndQueen,
-        )
-        .unwrap();
-
-        session
-            .set_game_mode_and_shuffle_type(GameMode::Open, ShuffleType::RoundRobin)
-            .unwrap();
-
-        assert_eq!(*session.game_mode(), GameMode::Open);
-        assert_eq!(*session.shuffle_type(), ShuffleType::RoundRobin);
-    }
-
-    #[test]
-    fn test_set_game_mode_and_shuffle_type_rejects_mismatched_pair() {
-        let mut session = Session::new(
-            date(),
-            None,
-            SessionSettings::default(),
-            2,
-            GameMode::Male,
-            ShuffleType::KingAndQueen,
-        )
-        .unwrap();
-
-        let err = session
-            .set_game_mode_and_shuffle_type(GameMode::Open, ShuffleType::KingAndQueen)
-            .unwrap_err();
 
         assert_eq!(err.kind, HttpErrorKind::BadRequest);
     }

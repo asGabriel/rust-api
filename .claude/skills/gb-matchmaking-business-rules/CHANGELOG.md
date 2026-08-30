@@ -4,6 +4,35 @@
 > Não é recarregado automaticamente com o `SKILL.md` — só ler quando for
 > preciso entender o motivo/contexto histórico de uma regra específica.
 
+- 2026-08-30 — considerada e descartada uma 3ª regra pra
+  `TeamQueueManager::release_players` que adiava uma repetição forçada de
+  dupla (o grupo voltava a ser 2 `Team`s incompletas) quando já havia
+  outra `Team` completa `Waiting` mantendo alguma quadra ocupada. Chegou a
+  ser prototipada com guardas contra deadlock (só quando a liberação
+  formava um único grupo, nunca um grupo com jogador `priority`, só quando
+  existia a tal alternativa completa na fila), mas foi removida antes de
+  mergear: reintroduzia justamente o tipo de bookkeeping de histórico de
+  parceria + condição de escape que a reescrita de 2026-08-23 tirou, e
+  carregava um trade-off de justiça/espera não resolvido — em `Session`
+  multi-quadra com fila funda, a mesma dupla podia ser adiada rodada após
+  rodada enquanto sempre sobrasse outra `Team` completa. Decisão: manter a
+  fila governada só pelas 2 regras de 2026-08-23 e aceitar repetição
+  forçada de dupla quando o `TeamDrawer` não acha alternativa no pool — é
+  a mesma limitação estrutural que o sorteio inicial já tem quando sobra
+  pouca gente pra formar o último grupo.
+- 2026-08-25 — removido `ShuffleType` (`KingAndQueen`/`RoundRobin`) por
+  completo: campo, validação cruzada com `GameMode`
+  (`GameMode::validate_shuffle_type`), coluna `shuffle_type` na tabela
+  `matchmaking.session` (migration
+  `20260825133214_drop-session-shuffle-type.sql`), e o campo equivalente na
+  API/schema/client do `my-app`. Desde a reescrita de 2026-08-23,
+  `ShuffleType` já não tinha nenhum efeito de comportamento próprio —
+  `Open ⇔ RoundRobin` era uma bijeção forçada por validação, então o valor
+  era inteiramente derivável de `GameMode` (o próprio `SessionFormSheet.tsx`
+  do frontend já derivava `shuffleType` a partir do `gameMode` escolhido, em
+  vez de deixar o usuário escolher). Sem nenhuma lógica lendo o campo, ele
+  só carregava dado redundante — removido como simplificação, não como
+  mudança de regra de negócio.
 - 2026-08-23 — reescrito `TeamQueueManager::release_players` do zero. O
   design anterior (jogadores liberados tentando completar `Team`s
   incompletas uma a uma, com `PartnerHistory` bloqueando repetição) passou

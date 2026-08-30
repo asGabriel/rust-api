@@ -18,9 +18,7 @@ description: Regras de negócio do módulo de matchmaking — critérios de pare
   do mesmo gênero; `Mixed` forma cada `Team` com metade dos jogadores homens
   e metade mulheres (com `players_per_team = 2`, na prática 1 homem + 1
   mulher); `Open` ignora gênero totalmente — qualquer jogador pode formar
-  dupla com qualquer outro. `Open` só é válido combinado com
-  `ShuffleType::RoundRobin` (ver seção seguinte); qualquer outra combinação
-  é rejeitada por `GameMode::validate_shuffle_type`.
+  dupla com qualquer outro.
 - O sorteio evita, best-effort, formar uma `Team` com dois jogadores que já
   jogaram juntos como parceiros na mesma `Session` — mas aceita repetir se
   não houver alternativa (nunca trava o sorteio por causa disso).
@@ -48,16 +46,6 @@ habilidade, histórico de parceria, aleatoriedade controlada, etc.
 
 ### Fila e rotação de quadra
 
-- Toda `Session` tem um `ShuffleType` (`KingAndQueen` ou `RoundRobin`, só
-  válido com `GameMode::Open`) — mas hoje ele não tem nenhum efeito próprio
-  na rotação da fila: os dois `ShuffleType`s passam pelo mesmo algoritmo
-  (ver bullet de fila abaixo), e a única diferença de comportamento entre
-  `Open` e os outros `GameMode`s (ignorar gênero) já vem do próprio
-  `GameMode`, não do `ShuffleType`. O campo continua explícito e obrigatório
-  na `Session` (mesmo padrão do `GameMode`, validado junto por
-  `GameMode::validate_shuffle_type`) e continua existindo por enquanto — só
-  não tem mais peso na lógica de fila. Ver "Histórico de mudanças" pra por
-  que essa distinção existiu e foi removida.
 - Uma `Team` tem um `status`: `Waiting` (na fila, disponível pra entrar em
   quadra), `Holding` (venceu e está segurando a quadra aguardando o próximo
   desafiante) ou `Disbanded` (perdeu, ou girou pra fora por ter batido o
@@ -170,13 +158,6 @@ habilidade, histórico de parceria, aleatoriedade controlada, etc.
   `Session::new`/`set_settings`/`set_game_mode`) quanto no sorteio
   (`TeamDrawer::draw`), para que uma `Session` nunca fique salva numa
   configuração que o sorteio não consegue honrar.
-- `GameMode::Open` só pode ser combinado com `ShuffleType::RoundRobin`, e
-  vice-versa — qualquer outra combinação retorna `HttpError::bad_request`
-  (`GameMode::validate_shuffle_type`). Validado em `Session::new`,
-  `set_game_mode`, `set_shuffle_type` e `set_game_mode_and_shuffle_type`
-  (esse último usado quando os dois campos mudam na mesma atualização, pra
-  validar o par final em vez de passar por um estado intermediário
-  inválido — ver `SessionHandlerImpl::update_session`).
 - `draw_teams` só pode ser chamado uma vez por `Session` (é o sorteio de
   *inicialização*): se a `Session` já tiver alguma `Team`, retorna
   `HttpError::conflict`. Não existe hoje endpoint para resetar/re-sortear
@@ -199,9 +180,9 @@ Validado por `Match::new`/`Match::finish`/`MatchStartValidator`
 /matchmaking/matches/` e `POST /matchmaking/matches/{match_id}/result`.
 
 - `POST /matchmaking/teams/` (`create_team`) é a via manual de entrada de
-  `Team`: independente do `GameMode`/`ShuffleType` da `Session` (esses só
-  restringem o sorteio automático e a rotação da fila, nunca a montagem
-  manual), permite montar um time escolhendo jogadores específicos — usado
+  `Team`: independente do `GameMode` da `Session` (que só restringe o
+  sorteio automático e a rotação da fila, nunca a montagem manual), permite
+  montar um time escolhendo jogadores específicos — usado
   como contingência quando o sorteio/fila automáticos precisam de correção
   manual. Ainda assim exige que todo `player_id` esteja confirmado em
   `Session::player_ids` e que nenhum já esteja em outra `Team` **ativa**
@@ -269,22 +250,21 @@ Ex: balanceamento de nível tem prioridade sobre variar parceiros.
   `players_per_team = 2`: o time perdedor de uma partida é liberado sozinho,
   sem mais ninguém por perto), eles formam `Team` um com o outro mesmo que
   já tenham jogado juntos antes — não há uma terceira pessoa com quem
-  formar `TeamDrawer::draw` consideraria uma alternativa. Isso vale pra
-  todo `GameMode` (inclusive `Open`/`RoundRobin`, que não tem mais nenhum
-  comportamento especial de "espera mais" — ver "Histórico de mudanças").
-  Grupos maiores (ex. quando o vencedor também bate o cap de vitórias e
-  libera 4 jogadores de uma vez, ou quando várias `Team`s incompletas de
-  liberações anteriores se acumulam) dão ao `TeamDrawer` alternativas reais
-  pra evitar a repetição. Comportamento aceito, não é bug — é a mesma
-  limitação estrutural que o sorteio inicial já tem quando sobra pouca
-  gente pra formar o último grupo.
+  `TeamDrawer::draw` consideraria uma alternativa. Isso vale pra todo
+  `GameMode` (inclusive `Open`, que não tem nenhum comportamento especial de
+  "espera mais" — ver "Histórico de mudanças"). Grupos maiores (ex. quando o
+  vencedor também bate o cap de vitórias e libera 4 jogadores de uma vez, ou
+  quando várias `Team`s incompletas de liberações anteriores se acumulam)
+  dão ao `TeamDrawer` alternativas reais pra evitar a repetição. Comportamento
+  aceito, não é bug — é a mesma limitação estrutural que o sorteio inicial já
+  tem quando sobra pouca gente pra formar o último grupo.
 - A seleção de quem entra na próxima rodada de `Team`s (etapa 1 da fila) é
   sempre calculada a partir do grupo inteiro de jogadores sem `Team`
   completa naquele momento — nunca fica travada tentando um parceiro
   específico indefinidamente. Isso garante que a `Session` nunca trava de
-  vez (nem em `Open`/`RoundRobin`, nem numa `Session` pequena o bastante
-  pra ter só o mínimo de jogadores pra fechar os times) — ver "Histórico de
-  mudanças" pro caso real de produção que motivou essa garantia.
+  vez (nem em `Open`, nem numa `Session` pequena o bastante pra ter só o
+  mínimo de jogadores pra fechar os times) — ver "Histórico de mudanças"
+  pro caso real de produção que motivou essa garantia.
 
 <!--
 Situações especiais já discutidas/decididas. Ex: número ímpar de jogadores,

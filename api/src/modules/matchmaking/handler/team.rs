@@ -29,9 +29,9 @@ pub trait TeamHandler {
     /// Manually forms a team from players confirmed in the session, entering
     /// it into the queue as `Waiting` — the contingency path for an operator
     /// to force a team in (e.g. the automated draw/rotation got stuck or
-    /// needs a manual correction), regardless of the session's `GameMode` or
-    /// `ShuffleType`: those only constrain the automated draw and queue
-    /// rotation, never a manually assembled team. Still enforces that every
+    /// needs a manual correction), regardless of the session's `GameMode`:
+    /// that only constrains the automated draw and queue rotation, never a
+    /// manually assembled team. Still enforces that every
     /// player is confirmed in the session and not currently in another
     /// active (non-disbanded) team of it.
     async fn create_team(&self, request: CreateTeamRequest) -> HttpResult<Team>;
@@ -220,7 +220,10 @@ impl TeamHandler for TeamHandlerImpl {
             .team_repository
             .list_by_session(team.session_id())
             .await?;
-        let session_matches = self.match_repository.list_by_session(team.session_id()).await?;
+        let session_matches = self
+            .match_repository
+            .list_by_session(team.session_id())
+            .await?;
         let busy_team_ids = Match::busy_team_ids(&session_matches);
 
         let other_teams: Vec<Team> = existing_teams
@@ -475,20 +478,23 @@ impl TeamHandler for TeamHandlerImpl {
             // is never holding (always disbanded). Every other court's pair
             // is untouched by this call, so the stale snapshot is accurate
             // for them.
-            let holding_team_id = [*latest.team_a_id(), *latest.team_b_id()]
-                .into_iter()
-                .find(|&team_id| {
-                    if team_id == winner_team_id {
-                        winner_still_holding
-                    } else if team_id == loser_team_id {
-                        false
-                    } else {
-                        session_teams
-                            .iter()
-                            .find(|team| *team.id() == team_id)
-                            .is_some_and(|team| team.is_holding() && !busy_team_ids.contains(team.id()))
-                    }
-                });
+            let holding_team_id =
+                [*latest.team_a_id(), *latest.team_b_id()]
+                    .into_iter()
+                    .find(|&team_id| {
+                        if team_id == winner_team_id {
+                            winner_still_holding
+                        } else if team_id == loser_team_id {
+                            false
+                        } else {
+                            session_teams
+                                .iter()
+                                .find(|team| *team.id() == team_id)
+                                .is_some_and(|team| {
+                                    team.is_holding() && !busy_team_ids.contains(team.id())
+                                })
+                        }
+                    });
 
             slots.push(CourtSlot {
                 court,
