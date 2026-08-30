@@ -19,24 +19,18 @@ description: Regras de negócio do módulo de matchmaking — critérios de pare
   e metade mulheres (com `players_per_team = 2`, na prática 1 homem + 1
   mulher); `Open` ignora gênero totalmente — qualquer jogador pode formar
   dupla com qualquer outro.
-- O sorteio evita, best-effort, formar uma `Team` com dois jogadores que já
-  jogaram juntos como parceiros na mesma `Session` — mas aceita repetir se
-  não houver alternativa (nunca trava o sorteio por causa disso).
-  Implementado por `PartnerHistory` + o algoritmo greedy
-  most-constrained-first de `TeamDrawer::draw`
-  (`api/src/modules/matchmaking/domain/team_drawer.rs`). O histórico usado é
-  só de `Team`s que de fato entraram em algum `Match`; uma dupla que só
-  passou pela fila sem chegar a jogar não conta. A fila (conforme partidas
-  terminam) reutiliza esse mesmo `TeamDrawer::draw` pra decidir quem forma
-  dupla com quem — ver "Fila e rotação de quadra" pra como ela decide *quem*
-  entra nesse sorteio a cada rodada.
-- Jogadores que sobram (não fecham um time cheio, ou, no modo `Mixed`, são
-  do gênero já esgotado) nunca são descartados: formam uma `Team`
-  incompleta, visível via `GET /matchmaking/teams/{session_id}`, esperando
-  outro jogador ser liberado para completá-la.
-- Implementado por `TeamDrawer::draw` (sorteio inicial, sem histórico) e por
-  `TeamHandlerImpl::draw_teams` via `POST
-  /matchmaking/teams/{session_id}/draw`.
+- Ao formar um time (seeding ou `next_challenger`), o `TeamDrawer::draw`
+  ordena o grupo escolhido evitando best-effort colocar como parceiros dois
+  jogadores que já jogaram juntos na mesma `Session` — mas **só anota** a
+  repetição quando não tem alternativa, nunca bloqueia nem espera. O
+  histórico (`PartnerHistory`) é só de `Team`s que de fato entraram em algum
+  `Match`. *Quem* entra no time a cada rodada é decidido pela lista de
+  jogadores (`session_queue`), não pelo `TeamDrawer` — ver "Fila e rotação
+  de quadra".
+- Quem não entra num time agora (não é dos primeiros da lista, ou, em
+  `Mixed`, é do gênero já esgotado na rodada) continua na `session_queue`,
+  visível via `GET /matchmaking/sessions/{id}/queue`, e entra numa rodada
+  seguinte conforme partidas terminam.
 
 <!--
 Como jogadores são agrupados em duplas/times (Team) e como partidas
@@ -46,132 +40,138 @@ habilidade, histórico de parceria, aleatoriedade controlada, etc.
 
 ### Fila e rotação de quadra
 
-- Uma `Team` tem um `status`: `Waiting` (na fila, disponível pra entrar em
-  quadra), `Holding` (venceu e está segurando a quadra aguardando o próximo
-  desafiante) ou `Disbanded` (perdeu, ou girou pra fora por ter batido o
-  cap de vitórias — jogadores livres, registro mantido só como histórico de
-  parceria).
-- **Vencedor:** ao vencer, a `Team` fica segurando a quadra e joga mais uma
-  (`Team::register_win`, `status = Holding`). Se vencer essa também (2
-  vitórias seguidas na mesma quadra — `MAX_CONSECUTIVE_WINS`), ela também é
-  desfeita: seus jogadores voltam pra fila igual a um time perdedor, e a
-  quadra precisa de duas `Team`s novas da fila.
-- **Perdedor:** sempre se desfaz (`Team::disband`); seus jogadores voltam
-  pra fila.
-- **Fila:** toda vez que jogadores são liberados (do perdedor, e do
-  vencedor quando bate o cap), `TeamQueueManager::release_players`
-  (`api/src/modules/matchmaking/domain/team_queue.rs`) reagrupa **todos os
-  jogadores sem `Team` completa no momento** — os recém-liberados mais
-  quem já estava esperando numa `Team` incompleta — em duas etapas, sem
-  fases/tentativas condicionais:
-  1. **Quem joga agora (regra: ninguém retorna imediatamente).** Calcula
-     quantas `Team`s completas dá pra formar agora com esse grupo (conforme
-     o `GameMode` — em `Mixed`, homens e mulheres são contados e limitados
-     separadamente, já que a `Team` precisa da metade de cada) e seleciona
-     exatamente esses jogadores **por ordem de quem está esperando há mais
-     tempo**. Um jogador recém-liberado só entra nessa seleção se não
-     houver gente esperando há mais tempo o bastante pra preencher a(s)
-     `Team`(s) sem ele — cai fora da seleção dessa vez, sem tratamento
-     especial, simplesmente por ter o timestamp mais recente.
-  2. **Como parear quem foi selecionado (regra: mesclar o máximo possível
-     respeitando o `GameMode`).** Os jogadores selecionados nunca são
-     poucos demais nem demais — são exatamente o suficiente pra formar
-     `Team`s completas — e são entregues direto pro **mesmo**
-     `TeamDrawer::draw` do sorteio inicial (mesma instância de
-     `PartnerHistory`, mesmo `GameMode`), que já implementa best-effort
-     "evita repetir parceiro, mas aceita se for forçado" sem precisar de
-     uma segunda implementação dessa regra.
-  Uma `Team` incompleta pré-existente que perde um membro pra um grupo
-  formado assim é desfeita (`Team::disband`) e reportada como alterada; uma
-  que não perde ninguém fica intocada (nem é retornada). Cada jogador que
-  sobra sem grupo (não selecionado, ou desfeito e ainda sem par) vira sua
-  própria `Team` incompleta de 1 jogador, esperando a próxima rodada. Não
-  existe mais o conceito de uma `Team` incompleta "tentando" achar um
-  parceiro específico e ficando esperando indefinidamente por ele — a cada
-  liberação, o grupo inteiro de jogadores sem `Team` completa é
-  reconsiderado do zero. Isso nunca trava a `Session`: contanto que o grupo
-  tenha jogadores suficientes pra pelo menos uma `Team` completa (conforme
-  o `GameMode`), esta chamada forma pelo menos uma — nunca deixa todo mundo
-  esperando indefinidamente por um parceiro mais "fresco" que talvez nunca
-  apareça. Usado tanto por `resolve_match_result` quanto por
-  `create_priority_team`/`update_team` (ver "Entrada prioritária manual"
-  abaixo) — a mesma regra vale nesses dois fluxos manuais também.
-- **Continuação automática da quadra:** ao reportar o resultado de um
-  `Match` (`POST /matchmaking/matches/{match_id}/result`), o sistema já
-  cria automaticamente o próximo `Match` daquela quadra — vencedor (se
-  ainda segurando) contra o primeiro time completo da fila
-  (`TeamQueueManager::next_complete_teams`), ou duas `Team`s novas da fila
-  se o vencedor também girou. Não é preciso chamar `POST
-  /matchmaking/matches/` de novo pra continuar uma quadra já ocupada — esse
-  endpoint só serve pra abrir uma quadra pela primeira vez. Se a fila ainda
-  não tiver `Team`s completas suficientes, a quadra fica ociosa até ter
-  (não é tratado como erro).
-- **Toda quadra ociosa da `Session` é reconsiderada a cada resultado, não só
-  a que acabou de liberar** — essencial em `Session`s com mais de uma
-  quadra: a cada `POST /matchmaking/matches/{match_id}/result`,
-  `resolve_match_result` varre todas as quadras que a `Session` já abriu
-  alguma vez (via `Match.court` no histórico) e refaz a tentativa de
-  preenchimento em qualquer uma cuja última partida já tenha resultado —
-  não só a quadra do `Match` recém-reportado. Sem isso, uma quadra que
-  ficou ociosa porque a fila estava rasa no momento em que *ela* tentou
-  puxar um desafiante nunca seria revisitada depois, mesmo que a fila
-  enchesse via resultados de *outras* quadras — ficaria travada
-  indefinidamente. As quadras ociosas são preenchidas em ordem de "ociosa
-  há mais tempo primeiro" (mesmo princípio FIFO da fila de jogadores),
-  cada uma consumindo da mesma fila compartilhada sem repetir `Team`; uma
-  quadra que a fila ainda não consegue preencher só é pulada (sem
-  consumir nada), não trava as demais. **Trade-off aceito:** esse
-  preenchimento guloso por ordem de espera não maximiza necessariamente o
-  número de quadras ativas no fim da chamada — uma quadra antiga
-  precisando de 2 `Team`s novas pode consumir as duas últimas `Team`s
-  completas da fila e deixar uma quadra mais nova (precisando de só 1
-  desafiante) ociosa, quando preenchê-la primeiro colocaria mais uma
-  quadra em jogo agora. Prioriza justiça por tempo de espera sobre
-  utilização total das quadras.
-- Orquestrado por `TeamHandlerImpl::resolve_match_result`
-  (`api/src/modules/matchmaking/handler/team.rs`), chamado por
-  `MatchHandlerImpl::report_match_result`
-  (`api/src/modules/matchmaking/handler/matches.rs`).
-- **Entrada prioritária manual:** `POST /matchmaking/teams/priority`
-  (`TeamHandlerImpl::create_priority_team`) monta uma `Team` a partir dos
-  jogadores informados e a marca com `Team::with_priority`, o que a coloca
-  na frente de toda `Team` não-prioritária em
-  `TeamQueueManager::next_complete_teams` — é o próximo desafiante
-  garantido assim que uma quadra ficar livre (não necessariamente *essa*
-  quadra específica, se mais de uma abrir ao mesmo tempo). Diferente de
-  `create_team`, essa via aceita puxar um jogador que já está em outra
-  `Team` `Waiting` (contanto que ela não esteja disputando um `Match` em
-  andamento): a `Team` de origem é desfeita e o(s) parceiro(s) que sobrou(aram)
-  sem dupla volta(m) pra fila normalmente, via
-  `TeamQueueManager::release_players` — o mesmo caminho usado para
-  jogadores liberados por resultado de partida. Um jogador numa `Team`
-  `Holding` (segurando quadra) ou já ocupada num `Match` não pode ser
-  puxado. Validado por `TeamValidator::validate_priority_team`.
+> Reescrito em 2026-08-30 (ver "Histórico de mudanças"): a fila deixou de
+> ser uma fila de `Team`s pré-formadas e passou a ser uma **lista de
+> jogadores individuais** por `Session` (`matchmaking.session_queue`). Times
+> só são formados no momento de entrar em quadra, como *sugestão* que o
+> operador confirma. Removeu `TeamQueueManager`/`release_players` e o
+> conceito de `Team` `Waiting`.
+
+#### A lista (`session_queue`)
+
+- Uma linha por jogador da `Session` que **não** está em quadra nem
+  `Holding`. Colunas: `player_id`, `games_played` (nº de `Match`es que o
+  jogador já terminou — mantido na escrita, não derivado), `enqueued_at`
+  (vira `now()` toda vez que o jogador (re)entra na lista) e `pinned` /
+  `pinned_at` (prioridade manual).
+- **Ordem de quem entra primeiro:**
+  `pinned DESC, pinned_at ASC, games_played ASC, enqueued_at ASC`.
+  A justiça é por **jogos disputados** (quem jogou menos entra antes),
+  com tempo de espera como desempate.
+- "Ninguém volta na hora" é consequência da ordem, não uma regra à parte:
+  quem sai de uma partida entra na lista com `games_played + 1` **e**
+  `enqueued_at = now()` — afunda nos dois critérios.
+- Ao criar a `Session`, todos os `player_ids` confirmados entram na lista
+  com `games_played = 0`.
+
+#### `Team` — status
+
+- `Draft` — sugestão de time formada pra entrar numa quadra, ainda **não**
+  em `Match`; editável (`PATCH /matchmaking/teams/{id}/players`) e
+  descartável (`DELETE`). Seus jogadores já saíram da `session_queue`
+  (reservados).
+- `Playing` — em `Match` aberto (derivado por trigger, como antes).
+- `Holding` — venceu e está segurando a quadra.
+- `Disbanded` — perdeu, girou por bater o cap de vitórias, ou `Draft`
+  descartado. Mantido só como histórico de parceria.
+
+#### Ao reportar o resultado (`POST /matchmaking/matches/{match_id}/result`)
+
+1. `Match` é finalizado (`Match::finish`).
+2. **Perdedor:** `Team::disband`; cada jogador volta pra `session_queue`
+   (`games_played + 1`, `enqueued_at = now()`).
+3. **Vencedor:** `Team::register_win`. Se foi a 2ª vitória seguida na
+   mesma quadra (`MAX_CONSECUTIVE_WINS`), também é desfeito e seus
+   jogadores voltam pra lista (`games_played + 1`); senão fica `Holding`.
+4. **Preenche as quadras ociosas.** Varre toda quadra que a `Session` já
+   abriu (última `Match` de cada `court`); pra cada uma cuja última partida
+   já tem resultado: `needed` = 1 se há `Team` `Holding` nela, senão 2.
+   Chama `next_challenger` `needed` vezes, cada chamada **removendo da
+   `session_queue`** os jogadores escolhidos (mesma transação) e criando um
+   `Team` `Draft`. Ordem: quadra ociosa há mais tempo primeiro.
+5. A resposta traz, por quadra, o(s) `draft_team_id`(s) e o
+   `holding_team_id` — **não inicia `Match` nenhum**.
+
+Orquestrado por `TeamHandlerImpl::resolve_match_result`, chamado por
+`MatchHandlerImpl::report_match_result`.
+
+#### `next_challenger` (sugestão automática)
+
+- Pega da lista, **na ordem**, os primeiros jogadores que satisfazem a
+  composição de gênero do `GameMode`: `Mixed` = `players_per_team / 2` de
+  cada gênero (cada gênero na sua própria ordem); `Male`/`Female`/`Open` =
+  os `players_per_team` primeiros.
+- Se não há jogadores suficientes do gênero necessário → **não forma nada**
+  pra aquela quadra (fica ociosa, a resposta sinaliza). O operador pode
+  montar a dupla manualmente (ver "Montagem manual").
+- Roda o grupo escolhido pelo `TeamDrawer::draw` só pra ordená-lo e
+  **anotar** (não bloquear) se algum par já jogou junto na `Session`
+  (`PartnerHistory`). A sugestão pega exatamente os N do topo — sem tentar
+  alternativas pra evitar repetição; se repetir, o operador troca.
+
+#### Confirmar / descartar / editar o `Draft`
+
+- **Confirmar:** `POST /matchmaking/courts/{court}/start` com os dois
+  `team_id`s → valida e cria o `Match` (drafts viram `Playing`).
+- **Descartar:** `DELETE /matchmaking/teams/{draft_id}` → jogadores voltam
+  pra `session_queue` (`enqueued_at = now()`, `games_played` inalterado).
+- **Editar roster:** `PATCH /matchmaking/teams/{draft_id}/players` — trocar
+  jogadores antes de confirmar. Quem entra sai da `session_queue`; quem sai
+  volta pra ela.
+
+#### Montagem manual (contingência) vs. automático
+
+- O caminho **automático** (`next_challenger`, seeding) **respeita o
+  `GameMode`**: não monta dupla fora da composição de gênero.
+- O caminho **manual** (criar `Draft` direto, ou editar o roster de um
+  `Draft`) **não** valida gênero — o operador pode compor qualquer dupla
+  (ex.: 2 homens numa `Session` `Mixed`). Mesmo princípio do antigo
+  `create_team`: a montagem manual é soberana sobre a config da `Session`.
+- **Iniciar o `Match`** valida, pra os dois times: jogadores confirmados na
+  `Session`, ninguém já `Playing`/`Holding` em outra quadra, e **roster com
+  exatamente `players_per_team` jogadores** — mas **não** valida gênero.
+
+#### Prioridade manual
+
+- Em vez de "time prioritário", o operador **fixa jogadores** no topo da
+  lista: `pinned = true` (ver ordenação acima). O próximo `next_challenger`
+  vai pegar esses jogadores primeiro. Não há mais `Team::with_priority` nem
+  `create_priority_team`.
+
+#### Seeding inicial
+
+- `POST /matchmaking/sessions/{id}/queue/seed` forma as partidas de
+  abertura: chama `next_challenger` até `2 * available_courts` vezes (ou o
+  que a lista permitir) e devolve os `Draft`s — mesmo fluxo "formar →
+  revisar → confirmar". Substitui `draw_teams`.
+- **Trade-off aceito (preenchimento guloso):** quadras ociosas são
+  preenchidas por ordem de espera, não maximizando o nº de quadras ativas —
+  uma quadra que precisa de 2 times pode esvaziar a lista antes de uma
+  quadra que precisava de só 1. Prioriza justiça sobre utilização.
 
 ## Restrições
 
 - Um jogador não pode aparecer em duas `Team`s da mesma `Session`.
 - Um jogador não pode se repetir dentro da mesma `Team`.
 - `GameMode::Mixed` exige `players_per_team` par (para dividir metade
-  homens / metade mulheres por `Team`). Validado tanto na criação/edição da
+  homens / metade mulheres por `Team`). Validado na criação/edição da
   `Session` (`GameMode::validate_players_per_team`, chamado por
-  `Session::new`/`set_settings`/`set_game_mode`) quanto no sorteio
-  (`TeamDrawer::draw`), para que uma `Session` nunca fique salva numa
-  configuração que o sorteio não consegue honrar.
-- `draw_teams` só pode ser chamado uma vez por `Session` (é o sorteio de
-  *inicialização*): se a `Session` já tiver alguma `Team`, retorna
-  `HttpError::conflict`. Não existe hoje endpoint para resetar/re-sortear
-  do zero (a fila segue evoluindo sozinha depois, via resultado de partida).
+  `Session::new`/`set_settings`/`set_game_mode`) e honrado pelo caminho
+  automático (`next_challenger`/`TeamDrawer::draw`). A montagem manual pode
+  ignorar (ver "Montagem manual" em "Fila e rotação de quadra").
+- O seeding (`POST /matchmaking/sessions/{id}/queue/seed`) só forma
+  partidas de abertura enquanto a `Session` não tiver nenhum `Match`; depois
+  disso a rotação segue por resultado de partida. Não há re-seed.
 - Um `Match` não pode ter as duas equipes iguais (`team_a_id != team_b_id`).
 - O resultado de um `Match` só pode ser reportado uma vez: reportar de novo
   um `Match` que já tem `winner_team_id` retorna `HttpError::conflict`.
 - `winner_team_id` reportado precisa ser `team_a_id` ou `team_b_id` do
   próprio `Match`; qualquer outro valor retorna `HttpError::bad_request`.
-- Para iniciar um `Match` (`POST /matchmaking/matches/`), as duas `Team`s
-  precisam: pertencer à `Session` informada, estar completas
-  (`Team::is_complete`, não uma sobra esperando parceiro), não estar
-  `Disbanded`, e não estar já disputando outro `Match` em andamento em
-  outra quadra (`Match::busy_team_ids`). Validado por
+- Para iniciar um `Match` (`POST /matchmaking/courts/{court}/start`), os
+  dois times precisam: pertencer à `Session` informada, ter **exatamente
+  `players_per_team` jogadores** no roster, não estar `Disbanded`, e nenhum
+  jogador seu estar já `Playing`/`Holding` em outra quadra
+  (`Match::busy_team_ids`). Gênero **não** é validado aqui. Validado por
   `MatchStartValidator::validate_start`.
 
 Validado por `Match::new`/`Match::finish`/`MatchStartValidator`
@@ -179,20 +179,18 @@ Validado por `Match::new`/`Match::finish`/`MatchStartValidator`
 `MatchHandlerImpl::create_match`/`report_match_result` via `POST
 /matchmaking/matches/` e `POST /matchmaking/matches/{match_id}/result`.
 
-- `POST /matchmaking/teams/` (`create_team`) é a via manual de entrada de
-  `Team`: independente do `GameMode` da `Session` (que só restringe o
-  sorteio automático e a rotação da fila, nunca a montagem manual), permite
-  montar um time escolhendo jogadores específicos — usado
-  como contingência quando o sorteio/fila automáticos precisam de correção
-  manual. Ainda assim exige que todo `player_id` esteja confirmado em
-  `Session::player_ids` e que nenhum já esteja em outra `Team` **ativa**
-  (`Waiting`/`Holding`) da mesma `Session`; jogadores de uma `Team`
-  `Disbanded` já estão livres de novo e não bloqueiam.
+- `POST /matchmaking/teams/` (`create_team`) é a via manual de montar um
+  `Team` `Draft`: independente do `GameMode` da `Session` (que só restringe
+  o caminho automático, nunca a montagem manual), permite escolher
+  jogadores específicos — contingência quando a sugestão automática não
+  serve. Exige que todo `player_id` esteja confirmado em
+  `Session::player_ids` e que nenhum já esteja `Playing`/`Holding` (ou num
+  outro `Draft`) da mesma `Session`; jogadores de um `Team` `Disbanded` já
+  estão livres e não bloqueiam. Os jogadores escolhidos saem da
+  `session_queue`.
 
 Restrições de duplicidade/elegibilidade de jogador validadas por
-`TeamValidator::validate_new_team` (`api/src/modules/matchmaking/domain/team.rs`),
-chamado tanto por `TeamHandlerImpl::create_team` quanto por
-`TeamHandlerImpl::draw_teams`.
+`TeamValidator::validate_new_team` (`api/src/modules/matchmaking/domain/team.rs`).
 
 <!--
 Condições que uma implementação NUNCA pode violar. Ex: número mínimo/máximo
@@ -202,17 +200,19 @@ ser excedidas, etc.
 
 ## Prioridades
 
-- Uma `Team` marcada `priority` (via `POST /matchmaking/teams/priority`)
-  sempre entra em quadra antes de qualquer `Team` não-prioritária, mesmo
-  que essa última esteja esperando há mais tempo — a ordem por
-  `created_at` (FIFO) só decide empate dentro do mesmo grupo (entre
-  prioritárias, ou entre não-prioritárias). Ver
-  `TeamQueueManager::next_complete_teams`. Se essa `Team` prioritária ficar
-  incompleta (`create_priority_team` não valida hoje que o roster informado
-  bate com `players_per_team` — ver "Casos-limite conhecidos"), o flag
-  `priority` é preservado quando a fila (`release_players`) a completa
-  depois — nunca perde a prioridade só por ter passado por uma rodada de
-  fila incompleta.
+- Prioridade é por **jogador**, não por time: `pinned = true` numa linha da
+  `session_queue` (`PATCH /matchmaking/sessions/{id}/queue/{player_id}`).
+  Jogadores `pinned` vêm antes de todos os outros na ordem da lista
+  (`pinned DESC, pinned_at ASC, …`), então o próximo `next_challenger` os
+  pega primeiro — é o próximo desafiante garantido assim que uma quadra
+  ficar livre (não necessariamente *essa* quadra, se mais de uma abrir ao
+  mesmo tempo).
+- `pinned` é limpo quando o jogador entra numa partida (sai da lista) e não
+  volta automaticamente — se o operador quer que ele tenha prioridade de
+  novo depois, marca de novo.
+- Se o operador precisa garantir uma **dupla específica** (não só a ordem),
+  a via é montar o `Draft` manualmente (`create_team`) — aí os dois já
+  estão reservados juntos, independente da ordem da lista.
 
 <!--
 Quando múltiplos critérios de pareamento entram em conflito, qual prevalece.
@@ -221,50 +221,26 @@ Ex: balanceamento de nível tem prioridade sobre variar parceiros.
 
 ## Casos-limite conhecidos
 
-- `draw_teams` faz o check de "sessão já tem times" e os inserts em
-  chamadas separadas ao repositório — duas chamadas concorrentes para a
-  mesma `Session` podem, em teoria, passar pelo check antes de qualquer
-  insert acontecer (TOCTOU). Não tratado ainda (sem transação/lock em
-  nenhum repositório do módulo). O repositório já é Postgres real (desde o
-  PR #82 de `feat/matchmaking-sql-repository`), não mais em memória — a
-  ressalva antiga de "aceitável por não ter carga concorrente real" descreve
-  a ausência de operadores simultâneos de fato, não uma proteção técnica.
-  Desde que `resolve_match_result` passou a reconsiderar todas as quadras
-  ociosas da `Session` a cada resultado (não só a que acabou de liberar —
-  ver "Continuação automática da quadra"), essa janela de corrida ficou bem
-  mais larga: duas chamadas concorrentes de `report_match_result` para
-  quadras *diferentes* da mesma `Session` agora podem disputar a mesma
-  `Team` `Holding` ociosa antiga ou as mesmas `Team`s da fila, não só
-  colidir consigo mesma na mesma quadra como antes.
-- Resolvido nesta rodada (ver Histórico de mudanças): jogadores que
-  sobravam no sorteio eram descartados silenciosamente; não havia checagem
-  de `Team` pertencente à `Session` nem de partida simultânea na mesma
-  `Team`/quadra; não existia noção do que acontece depois que um `Match`
-  termina.
-- Em `Mixed` mode, o grupo de jogadores selecionável pra formar `Team`s
-  novas é limitado pelo gênero menos numeroso entre quem está sem `Team`
-  completa (ver "Fila e rotação de quadra") — se o desbalanceamento de
-  gênero for grande, sobra gente de um gênero só esperando, cada um na sua
-  própria `Team` incompleta de 1 jogador. Comportamento aceito, não é bug.
-- Com apenas 2 jogadores sem `Team` completa no grupo (o caso comum de
-  `players_per_team = 2`: o time perdedor de uma partida é liberado sozinho,
-  sem mais ninguém por perto), eles formam `Team` um com o outro mesmo que
-  já tenham jogado juntos antes — não há uma terceira pessoa com quem
-  `TeamDrawer::draw` consideraria uma alternativa. Isso vale pra todo
-  `GameMode` (inclusive `Open`, que não tem nenhum comportamento especial de
-  "espera mais" — ver "Histórico de mudanças"). Grupos maiores (ex. quando o
-  vencedor também bate o cap de vitórias e libera 4 jogadores de uma vez, ou
-  quando várias `Team`s incompletas de liberações anteriores se acumulam)
-  dão ao `TeamDrawer` alternativas reais pra evitar a repetição. Comportamento
-  aceito, não é bug — é a mesma limitação estrutural que o sorteio inicial já
-  tem quando sobra pouca gente pra formar o último grupo.
-- A seleção de quem entra na próxima rodada de `Team`s (etapa 1 da fila) é
-  sempre calculada a partir do grupo inteiro de jogadores sem `Team`
-  completa naquele momento — nunca fica travada tentando um parceiro
-  específico indefinidamente. Isso garante que a `Session` nunca trava de
-  vez (nem em `Open`, nem numa `Session` pequena o bastante pra ter só o
-  mínimo de jogadores pra fechar os times) — ver "Histórico de mudanças"
-  pro caso real de produção que motivou essa garantia.
+- **Concorrência no pop da lista:** criar um `Draft` (automático ou manual)
+  remove seus jogadores de `session_queue` na **mesma transação** — dois
+  `report_match_result` concorrentes (quadras diferentes da mesma `Session`)
+  não conseguem reservar o mesmo jogador pras duas quadras. É o único ponto
+  do módulo com proteção transacional; o resto (`create_match` check + insert,
+  etc.) ainda é TOCTOU teórico, aceito por não haver operadores simultâneos
+  de fato.
+- **`next_challenger` sem gente suficiente do gênero necessário** (`Mixed`
+  desbalanceado, ou lista quase vazia): não forma `Draft` pra aquela quadra,
+  ela fica ociosa e a resposta sinaliza. O operador monta manualmente
+  (pode furar o gênero) ou espera a lista encher. Comportamento aceito.
+- **Repetição de parceiro na sugestão automática:** `next_challenger` pega
+  exatamente os N primeiros da lista e não tenta alternativas pra evitar
+  repetir uma dupla que já jogou junta — só anota. Se os 2 primeiros da
+  lista já foram parceiros, a sugestão os repete; o operador troca no
+  `Draft` se quiser. Aceito (o balanceamento de parceria é responsabilidade
+  do operador nesse modelo, não da lista).
+- **Preenchimento guloso multi-quadra:** ver "Seeding inicial" em "Fila e
+  rotação de quadra" — quadras ociosas são servidas por ordem de espera,
+  não maximizando o nº de quadras ativas.
 
 <!--
 Situações especiais já discutidas/decididas. Ex: número ímpar de jogadores,
