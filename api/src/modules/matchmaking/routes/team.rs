@@ -1,7 +1,7 @@
 use axum::{
     extract::{Path, State},
     response::IntoResponse,
-    routing::{get, patch, post},
+    routing::{delete, get, patch, post},
     Json, Router,
 };
 use http_error::HttpResult;
@@ -17,10 +17,9 @@ pub fn configure_routes() -> Router<AppState> {
         "/teams",
         Router::new()
             .route("/", post(create_team))
-            .route("/priority", post(create_priority_team))
             .route("/{session_id}", get(list_teams_by_session))
-            .route("/{session_id}/draw", post(draw_teams))
-            .route("/{team_id}/players", patch(update_team)),
+            .route("/{team_id}/players", patch(update_team))
+            .route("/{team_id}", delete(discard_draft)),
     )
 }
 
@@ -32,19 +31,6 @@ async fn create_team(
         .matchmaking_state
         .team_handler
         .create_team(request)
-        .await?;
-
-    Ok(Json(team))
-}
-
-async fn create_priority_team(
-    state: State<AppState>,
-    Json(request): Json<CreateTeamRequest>,
-) -> HttpResult<impl IntoResponse> {
-    let team = state
-        .matchmaking_state
-        .team_handler
-        .create_priority_team(request)
         .await?;
 
     Ok(Json(team))
@@ -77,15 +63,15 @@ async fn update_team(
     Ok(Json(team))
 }
 
-async fn draw_teams(
+async fn discard_draft(
     state: State<AppState>,
-    Path(session_id): Path<Uuid>,
+    Path(team_id): Path<Uuid>,
 ) -> HttpResult<impl IntoResponse> {
-    let teams = state
+    state
         .matchmaking_state
         .team_handler
-        .draw_teams(session_id)
+        .discard_draft(team_id)
         .await?;
 
-    Ok(Json(teams))
+    Ok(axum::http::StatusCode::NO_CONTENT)
 }

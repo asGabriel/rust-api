@@ -88,10 +88,11 @@ impl Match {
 }
 
 /// Centralizes the checks for starting a match: both teams must belong to
-/// this session, be a full team (not one still waiting on a partner), still
-/// be around to play (not disbanded), and not already be busy in another
-/// in-progress match. Bound to a `session_id` and `players_per_team` at
-/// construction, same as `TeamValidator`.
+/// this session, have exactly a full roster (`players_per_team` players —
+/// gender composition is NOT checked here, the manual paths may override
+/// it), still be around to play (not disbanded), and not already be busy in
+/// another in-progress match. Bound to a `session_id` and `players_per_team`
+/// at construction, same as `TeamValidator`.
 pub struct MatchStartValidator {
     session_id: Uuid,
     players_per_team: u8,
@@ -138,9 +139,10 @@ impl MatchStartValidator {
             ))));
         }
 
-        if !team.is_complete(self.players_per_team) {
+        if !team.has_full_roster(self.players_per_team) {
             return Err(Box::new(HttpError::conflict(format!(
-                "Team {team_id} is still waiting on a partner and cannot start a match"
+                "Team {team_id} does not have exactly {} players and cannot start a match",
+                self.players_per_team
             ))));
         }
 
@@ -269,7 +271,7 @@ mod tests {
     }
 
     #[test]
-    fn test_match_start_validator_accepts_waiting_teams_from_the_same_session() {
+    fn test_match_start_validator_accepts_full_draft_teams_from_the_same_session() {
         let session_id = Uuid::new_v4();
         let team_a = team(session_id);
         let team_b = team(session_id);

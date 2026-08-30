@@ -6,11 +6,17 @@ use serde::{Deserialize, Serialize};
 use util::getters;
 use uuid::Uuid;
 
-/// A team's place in the session's rotation: `Waiting` in the queue to be
-/// called up to a court, `Holding` a court after a win (until it either
-/// loses or hits the consecutive-win cap), `Playing` while it has an
-/// in-progress match, or `Disbanded` once it's done, freeing its players
-/// back into the queue.
+/// A team's place in the session's rotation: `Draft` while it's a suggested
+/// (or manually assembled) lineup the operator hasn't started yet, `Holding`
+/// a court after a win (until it either loses or hits the consecutive-win
+/// cap), `Playing` while it has an in-progress match, or `Disbanded` once
+/// it's done — lost, hit the win cap, or a draft that was discarded —
+/// freeing its players back into the session queue.
+///
+/// There is no standing queue of teams: waiting players live in
+/// `matchmaking.session_queue` as individuals, and a `Team` row exists only
+/// from the moment it's drafted for a court onward. See the matchmaking
+/// skill, "Fila e rotação de quadra".
 ///
 /// `Playing` is never set by this domain layer — no method here constructs
 /// it. It's written exclusively by the `trg_match_marks_teams_playing`
@@ -23,7 +29,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TeamStatus {
-    Waiting,
+    Draft,
     Holding,
     Playing,
     Disbanded,
@@ -35,7 +41,7 @@ impl From<String> for TeamStatus {
             "HOLDING" => TeamStatus::Holding,
             "PLAYING" => TeamStatus::Playing,
             "DISBANDED" => TeamStatus::Disbanded,
-            _ => TeamStatus::Waiting,
+            _ => TeamStatus::Draft,
         }
     }
 }
@@ -43,7 +49,7 @@ impl From<String> for TeamStatus {
 impl From<TeamStatus> for String {
     fn from(status: TeamStatus) -> Self {
         match status {
-            TeamStatus::Waiting => "WAITING".to_string(),
+            TeamStatus::Draft => "DRAFT".to_string(),
             TeamStatus::Holding => "HOLDING".to_string(),
             TeamStatus::Playing => "PLAYING".to_string(),
             TeamStatus::Disbanded => "DISBANDED".to_string(),
@@ -61,9 +67,6 @@ pub struct Team {
     player_ids: Vec<Uuid>,
     status: TeamStatus,
     consecutive_wins: u8,
-    /// Set by `Team::with_priority` — jumps this team ahead of every
-    /// non-priority team in `TeamQueueManager::next_complete_teams`.
-    priority: bool,
     created_at: DateTime<Utc>,
 }
 
@@ -72,29 +75,21 @@ impl Team {
     /// court, so other waiting teams get a turn.
     const MAX_CONSECUTIVE_WINS: u8 = 2;
 
+    /// A freshly drafted lineup for a court — the operator confirms (or
+    /// edits, or discards) it before it starts a match.
     pub fn new(session_id: Uuid, player_ids: Vec<Uuid>) -> Self {
         Self {
             id: Uuid::new_v4(),
             session_id,
             player_ids,
-            status: TeamStatus::Waiting,
+            status: TeamStatus::Draft,
             consecutive_wins: 0,
-            priority: false,
             created_at: Utc::now(),
         }
     }
 
-    /// Marks this team to jump the queue: the manual "who plays next"
-    /// override for when an operator needs to put a specific pairing on
-    /// court next, regardless of how long everyone else has been waiting.
-    /// See `TeamQueueManager::next_complete_teams`.
-    pub fn with_priority(mut self) -> Self {
-        self.priority = true;
-        self
-    }
-
-    pub fn is_waiting(&self) -> bool {
-        self.status == TeamStatus::Waiting
+    pub fn is_draft(&self) -> bool {
+        self.status == TeamStatus::Draft
     }
 
     pub fn is_holding(&self) -> bool {
@@ -109,13 +104,11 @@ impl Team {
         self.status == TeamStatus::Disbanded
     }
 
-    pub fn is_priority(&self) -> bool {
-        self.priority
-    }
-
-    /// Whether this team has as many players as a full team needs.
-    pub fn is_complete(&self, players_per_team: u8) -> bool {
-        self.player_ids.len() >= players_per_team.into()
+    /// Whether this team's roster is exactly a full team — the queue never
+    /// drafts a short or oversized team, but the manual paths can, so a
+    /// match can't start until this holds.
+    pub fn has_full_roster(&self, players_per_team: u8) -> bool {
+        self.player_ids.len() == usize::from(players_per_team)
     }
 
     /// Frees this team's players back into the queue: it's done, whether it
@@ -173,7 +166,6 @@ impl From<&sqlx::postgres::PgRow> for Team {
             player_ids: row.get("player_ids"),
             status: row.get::<String, _>("status").into(),
             consecutive_wins: row.get::<i16, _>("consecutive_wins") as u8,
-            priority: row.get("priority"),
             created_at: row.get("created_at"),
         }
     }
@@ -217,46 +209,20 @@ impl TeamValidator {
         Ok(())
     }
 
-    /// Validates a manual "priority" team — the operator override to put a
-    /// specific pairing on court next (see `Team::with_priority`). Same
-    /// duplicate/session-membership checks as `validate_new_team`, but here
-    /// a player already in another `Waiting` team is allowed *if* that team
-    /// isn't tied up in an in-progress match: pulling them out to jump this
-    /// pairing to the front of the queue is exactly what this path is for.
-    /// A player in a `Holding` team, or one that's playing right now, can't
-    /// be pulled — that would strand a court still being defended or an
-    /// in-progress match.
+    /// Validates replacing a `Draft` team's whole roster with
+    /// `new_player_ids` — the operator editing a suggested lineup before
+    /// starting it. Only `entering_player_ids` (the players in
+    /// `new_player_ids` that aren't already on the team being edited) are
+    /// checked against other teams — a player staying on the team, or simply
+    /// leaving it, is never treated as being "stolen". An entering player
+    /// already on another `Draft` that isn't busy can be pulled (that draft
+    /// is broken up); one in a `Holding` team or mid-match can't.
+    /// `other_teams` must exclude the team being edited, so it's never
+    /// mistaken for its own origin team.
     ///
-    /// Returns, for each distinct origin team a player was pulled from, that
-    /// team paired with the ids of its now partner-less remaining players —
-    /// the caller must disband the origin team and re-slot those remaining
-    /// players back into the queue (see `TeamQueueManager::release_players`).
-    pub fn validate_priority_team(
-        &self,
-        existing_teams: &[Team],
-        busy_team_ids: &HashSet<Uuid>,
-        player_ids: &[Uuid],
-    ) -> HttpResult<Vec<(Team, Vec<Uuid>)>> {
-        Self::reject_duplicate_players_in_team(player_ids)?;
-        self.reject_players_not_confirmed_in_session(player_ids)?;
-        self.collect_broken_origin_teams(existing_teams, busy_team_ids, player_ids)
-    }
-
-    /// Validates replacing an existing team's whole roster with
-    /// `new_player_ids` — the "editar time" contingency path: an operator
-    /// correcting a team manually after the draw, which in practice usually
-    /// means pulling a player who's already in another team of the same
-    /// session. Only `entering_player_ids` (the players in `new_player_ids`
-    /// that aren't already on the team being edited) are checked against
-    /// other teams — a player staying on the team, or simply leaving it, is
-    /// never treated as being "stolen" from anywhere. The pull itself
-    /// follows the same rule as `validate_priority_team`: a player in a
-    /// `Waiting` team that isn't busy can be pulled, one in a `Holding` team
-    /// or mid-match can't. `other_teams` must exclude the team being edited,
-    /// so it's never mistaken for its own origin team.
-    ///
-    /// Returns the same broken-origin-team report as `validate_priority_team`,
-    /// for the caller to disband and re-slot.
+    /// Returns, for each distinct draft a player was pulled from, that team
+    /// paired with the ids of its now partner-less remaining players — the
+    /// caller must disband that draft and return those players to the queue.
     pub fn validate_team_update(
         &self,
         other_teams: &[Team],
@@ -292,7 +258,7 @@ impl TeamValidator {
                 continue;
             };
 
-            if !owner.is_waiting() || busy_team_ids.contains(owner.id()) {
+            if !owner.is_draft() || busy_team_ids.contains(owner.id()) {
                 return Err(Box::new(HttpError::conflict(format!(
                     "Player {player_id} is in a team that can't be broken up right now"
                 ))));
@@ -385,10 +351,10 @@ mod tests {
     }
 
     #[test]
-    fn test_new_team_starts_waiting_with_no_wins() {
+    fn test_new_team_starts_draft_with_no_wins() {
         let team = Team::new(Uuid::new_v4(), vec![Uuid::new_v4(), Uuid::new_v4()]);
 
-        assert!(team.is_waiting());
+        assert!(team.is_draft());
         assert_eq!(*team.consecutive_wins(), 0);
     }
 
@@ -424,14 +390,15 @@ mod tests {
     }
 
     #[test]
-    fn test_is_complete_checks_player_count_against_players_per_team() {
-        let team = Team::new(Uuid::new_v4(), vec![Uuid::new_v4()]);
-
-        assert!(!team.is_complete(2));
-
-        let full_team = Team::new(Uuid::new_v4(), vec![Uuid::new_v4(), Uuid::new_v4()]);
-
-        assert!(full_team.is_complete(2));
+    fn test_has_full_roster_is_an_exact_count_not_a_minimum() {
+        assert!(!Team::new(Uuid::new_v4(), vec![Uuid::new_v4()]).has_full_roster(2));
+        assert!(Team::new(Uuid::new_v4(), vec![Uuid::new_v4(), Uuid::new_v4()]).has_full_roster(2));
+        // one player over the session's team size is not a valid full team
+        let oversized = Team::new(
+            Uuid::new_v4(),
+            vec![Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4()],
+        );
+        assert!(!oversized.has_full_roster(2));
     }
 
     #[test]
@@ -442,7 +409,7 @@ mod tests {
         team.add_player(player_id);
 
         assert!(team.player_ids().contains(&player_id));
-        assert!(team.is_complete(2));
+        assert!(team.has_full_roster(2));
     }
 
     #[test]
@@ -691,140 +658,5 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(err.kind, HttpErrorKind::Conflict);
-    }
-
-    #[test]
-    fn test_with_priority_marks_the_team_as_priority() {
-        let team = Team::new(Uuid::new_v4(), vec![Uuid::new_v4(), Uuid::new_v4()]).with_priority();
-
-        assert!(team.is_priority());
-    }
-
-    #[test]
-    fn test_validate_priority_team_allows_a_player_free_in_the_session() {
-        let session_id = Uuid::new_v4();
-        let player_ids = vec![Uuid::new_v4(), Uuid::new_v4()];
-        let validator = TeamValidator::new(session_id, player_ids.clone());
-
-        let broken = validator
-            .validate_priority_team(&[], &HashSet::new(), &player_ids)
-            .unwrap();
-
-        assert!(broken.is_empty());
-    }
-
-    /// The whole point of the priority path: pulling one player out of a
-    /// `Waiting` team that isn't mid-match must report that team so the
-    /// caller can disband it and re-slot its now partner-less teammate.
-    #[test]
-    fn test_validate_priority_team_reports_the_origin_team_of_a_stolen_player() {
-        let session_id = Uuid::new_v4();
-        let stolen_player = Uuid::new_v4();
-        let stranded_partner = Uuid::new_v4();
-        let new_partner = Uuid::new_v4();
-
-        let origin_team = Team::new(session_id, vec![stolen_player, stranded_partner]);
-        let origin_team_id = *origin_team.id();
-        let validator = TeamValidator::new(
-            session_id,
-            vec![stolen_player, stranded_partner, new_partner],
-        );
-        let player_ids = vec![stolen_player, new_partner];
-
-        let broken = validator
-            .validate_priority_team(
-                std::slice::from_ref(&origin_team),
-                &HashSet::new(),
-                &player_ids,
-            )
-            .unwrap();
-
-        assert_eq!(broken.len(), 1);
-        let (reported_team, remaining) = &broken[0];
-        assert_eq!(reported_team.id(), &origin_team_id);
-        assert_eq!(remaining, &vec![stranded_partner]);
-    }
-
-    /// Stealing both members of a pair must report that origin team with no
-    /// remaining players — nothing left to re-slot, just disband it.
-    #[test]
-    fn test_validate_priority_team_reports_empty_remaining_when_both_players_are_stolen() {
-        let session_id = Uuid::new_v4();
-        let player_a = Uuid::new_v4();
-        let player_b = Uuid::new_v4();
-
-        let origin_team = Team::new(session_id, vec![player_a, player_b]);
-        let validator = TeamValidator::new(session_id, vec![player_a, player_b]);
-
-        let broken = validator
-            .validate_priority_team(
-                std::slice::from_ref(&origin_team),
-                &HashSet::new(),
-                &[player_a, player_b],
-            )
-            .unwrap();
-
-        assert_eq!(broken.len(), 1);
-        assert!(broken[0].1.is_empty());
-    }
-
-    #[test]
-    fn test_validate_priority_team_rejects_a_player_from_a_holding_team() {
-        let session_id = Uuid::new_v4();
-        let player_id = Uuid::new_v4();
-        let new_partner = Uuid::new_v4();
-        let mut holding_team = Team::new(session_id, vec![player_id, Uuid::new_v4()]);
-        holding_team.register_win();
-        let validator = TeamValidator::new(session_id, vec![player_id, new_partner]);
-
-        let err = validator
-            .validate_priority_team(
-                std::slice::from_ref(&holding_team),
-                &HashSet::new(),
-                &[player_id, new_partner],
-            )
-            .unwrap_err();
-
-        assert_eq!(err.kind, HttpErrorKind::Conflict);
-    }
-
-    #[test]
-    fn test_validate_priority_team_rejects_a_player_from_a_busy_team() {
-        let session_id = Uuid::new_v4();
-        let player_id = Uuid::new_v4();
-        let new_partner = Uuid::new_v4();
-        let busy_team = Team::new(session_id, vec![player_id, Uuid::new_v4()]);
-        let busy_team_id = *busy_team.id();
-        let validator = TeamValidator::new(session_id, vec![player_id, new_partner]);
-
-        let err = validator
-            .validate_priority_team(
-                std::slice::from_ref(&busy_team),
-                &HashSet::from([busy_team_id]),
-                &[player_id, new_partner],
-            )
-            .unwrap_err();
-
-        assert_eq!(err.kind, HttpErrorKind::Conflict);
-    }
-
-    #[test]
-    fn test_validate_priority_team_ignores_a_disbanded_teammate() {
-        let session_id = Uuid::new_v4();
-        let player_id = Uuid::new_v4();
-        let new_partner = Uuid::new_v4();
-        let mut disbanded_team = Team::new(session_id, vec![player_id, Uuid::new_v4()]);
-        disbanded_team.disband();
-        let validator = TeamValidator::new(session_id, vec![player_id, new_partner]);
-
-        let broken = validator
-            .validate_priority_team(
-                std::slice::from_ref(&disbanded_team),
-                &HashSet::new(),
-                &[player_id, new_partner],
-            )
-            .unwrap();
-
-        assert!(broken.is_empty());
     }
 }

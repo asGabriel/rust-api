@@ -11,70 +11,56 @@ use uuid::Uuid;
 use crate::modules::matchmaking::{
     domain::{
         matches::Match,
+        player::Player,
+        queue::{QueueEntry, SessionQueue},
+        session::Session,
         team::{Team, TeamValidator},
         team_drawer::{PartnerHistory, TeamDrawer},
-        team_queue::TeamQueueManager,
     },
     handler::team::use_cases::{
-        CourtAssignment, CreateTeamRequest, ResolvedRotation, UpdateTeamRequest,
+        CourtSuggestion, CreateTeamRequest, ResolvedRotation, UpdateTeamRequest,
     },
     repository::{
-        matches::DynMatchRepository, player::DynPlayerRepository, session::DynSessionRepository,
-        team::DynTeamRepository,
+        matches::DynMatchRepository, player::DynPlayerRepository, queue::DynSessionQueueRepository,
+        session::DynSessionRepository, team::DynTeamRepository,
     },
 };
 
 #[async_trait]
 pub trait TeamHandler {
-    /// Manually forms a team from players confirmed in the session, entering
-    /// it into the queue as `Waiting` — the contingency path for an operator
-    /// to force a team in (e.g. the automated draw/rotation got stuck or
-    /// needs a manual correction), regardless of the session's `GameMode`:
-    /// that only constrains the automated draw and queue rotation, never a
-    /// manually assembled team. Still enforces that every
-    /// player is confirmed in the session and not currently in another
-    /// active (non-disbanded) team of it.
+    /// Manually assembles a `Draft` team from queued players — the
+    /// contingency path when the automatic suggestion doesn't fit. Ignores
+    /// the session's `GameMode` gender rules (that only constrains the
+    /// automatic path); still requires every player be confirmed in the
+    /// session and not already in an active (`Draft`/`Holding`/`Playing`)
+    /// team of it. The chosen players leave the session queue.
     async fn create_team(&self, request: CreateTeamRequest) -> HttpResult<Team>;
-
-    /// Manual "who plays next" override: forms a team from the given
-    /// players and jumps it to the front of the waiting queue
-    /// (`Team::with_priority`), so it's the next one an idle court pulls
-    /// in — ahead of everyone who's been waiting longer. Unlike
-    /// `create_team`, a player already in another `Waiting` team (not
-    /// mid-match) can be pulled into this one: that team is disbanded and
-    /// its now partner-less remaining player(s) are re-slotted back into
-    /// the queue, exactly like a freed player after a match result.
-    async fn create_priority_team(&self, request: CreateTeamRequest) -> HttpResult<Team>;
 
     async fn list_teams_by_session(&self, session_id: Uuid) -> HttpResult<Vec<Team>>;
 
-    /// Replaces an existing team's roster — the manual "editar time"
-    /// contingency path for correcting a team after the draw. Only a
-    /// `Waiting` team can be edited (a `Holding`/`Playing` team is actively
-    /// on court, and a `Disbanded` one is done). A player being added who's
-    /// already in another `Waiting`, non-busy team is pulled out of it
-    /// (same rule as `create_priority_team`); that origin team is disbanded
-    /// and its now partner-less remaining player(s) — together with
-    /// whoever this edit itself dropped from the team — are re-slotted
-    /// back into the queue.
+    /// Replaces a `Draft` team's roster before it's started. Players entering
+    /// the roster leave the queue (or, if on another `Draft`, break that
+    /// draft up); players leaving the roster return to the queue.
     async fn update_team(&self, team_id: Uuid, request: UpdateTeamRequest) -> HttpResult<Team>;
 
-    /// First draw of teams for a session: random pairing of the session's
-    /// confirmed players, honoring the session's `GameMode` filter. Fails if
-    /// the session already has teams, since it's meant to initialize them.
-    async fn draw_teams(&self, session_id: Uuid) -> HttpResult<Vec<Team>>;
+    /// Discards a `Draft` that was never started: the row is deleted and its
+    /// players return to the queue.
+    async fn discard_draft(&self, team_id: Uuid) -> HttpResult<()>;
 
-    /// Applies a match's result to the team rotation: the loser is always
-    /// disbanded, the winner either keeps holding the court (up to the
-    /// consecutive-win cap) or is disbanded too, and every player freed by
-    /// either outcome is slotted back into the waiting queue. Returns a
-    /// match assignment for every court the now-larger queue can fill —
-    /// not just the court that just freed up: any other court left idle by
-    /// an earlier result (a `Holding` team with no in-progress match,
-    /// because the queue didn't have enough complete teams back then) is
-    /// reconsidered too, oldest-idle-first, so a result on one court can
-    /// unstick another. A court is left out of the result entirely if the
-    /// queue still can't fill it.
+    /// Forms the opening `Draft`s for a session that has no `Match` yet:
+    /// `TeamDrawer` splits the queued players (gender-aware, history empty)
+    /// into up to `2 * available_courts` teams; those players leave the
+    /// queue. Returns the drafts for the operator to confirm/start.
+    async fn seed_queue(&self, session_id: Uuid) -> HttpResult<Vec<Team>>;
+
+    /// Applies a match's result to the queue: the loser's players return to
+    /// the queue; the winner keeps `Holding` the court, or — at the
+    /// consecutive-win cap — is disbanded and its players return too. Then
+    /// every idle court (oldest-idle first, so a result on one court can
+    /// unstick another) gets a challenger `Draft` suggested from the queue
+    /// via `SessionQueue::next_challenger`, the chosen players leaving the
+    /// queue in the same step. Starts no match — returns the suggestions for
+    /// the operator to confirm.
     async fn resolve_match_result(
         &self,
         session_id: Uuid,
@@ -91,16 +77,78 @@ pub struct TeamHandlerImpl {
     pub session_repository: Arc<DynSessionRepository>,
     pub player_repository: Arc<DynPlayerRepository>,
     pub match_repository: Arc<DynMatchRepository>,
+    pub session_queue_repository: Arc<DynSessionQueueRepository>,
+}
+
+impl TeamHandlerImpl {
+    async fn load_session(&self, session_id: Uuid) -> HttpResult<Session> {
+        self.session_repository
+            .get(&session_id)
+            .await?
+            .ok_or_else(|| Box::new(HttpError::not_found("Session", session_id)))
+    }
+
+    async fn session_players(&self, session: &Session) -> HttpResult<Vec<Player>> {
+        Ok(self
+            .player_repository
+            .list()
+            .await?
+            .into_iter()
+            .filter(|player| session.player_ids().contains(player.id()))
+            .collect())
+    }
+
+    /// How many finished matches each player has taken part in this session,
+    /// derived straight from the teams that entered a `Match` — the same
+    /// source `PartnerHistory` uses, so "games played" can never drift from
+    /// the record.
+    fn games_played_by_player(teams: &[Team], matches: &[Match]) -> HashMap<Uuid, u16> {
+        let played_team_ids: HashSet<Uuid> = matches
+            .iter()
+            .filter(|match_| match_.is_finished())
+            .flat_map(|match_| [*match_.team_a_id(), *match_.team_b_id()])
+            .collect();
+
+        let mut games: HashMap<Uuid, u16> = HashMap::new();
+        for team in teams
+            .iter()
+            .filter(|team| played_team_ids.contains(team.id()))
+        {
+            for player_id in team.player_ids() {
+                *games.entry(*player_id).or_insert(0) += 1;
+            }
+        }
+        games
+    }
+
+    /// Returns `player_ids` to the session queue, each with its current
+    /// games-played count and a fresh `enqueued_at` (so they sink behind
+    /// everyone who has played less / waited longer).
+    async fn return_players_to_queue(
+        &self,
+        session_id: Uuid,
+        player_ids: &[Uuid],
+        games_played: &HashMap<Uuid, u16>,
+    ) -> HttpResult<Vec<QueueEntry>> {
+        let entries: Vec<QueueEntry> = player_ids
+            .iter()
+            .map(|player_id| {
+                QueueEntry::new(
+                    session_id,
+                    *player_id,
+                    games_played.get(player_id).copied().unwrap_or(0),
+                )
+            })
+            .collect();
+        self.session_queue_repository.insert_many(&entries).await?;
+        Ok(entries)
+    }
 }
 
 #[async_trait]
 impl TeamHandler for TeamHandlerImpl {
     async fn create_team(&self, request: CreateTeamRequest) -> HttpResult<Team> {
-        let session = self
-            .session_repository
-            .get(&request.session_id)
-            .await?
-            .ok_or_else(|| Box::new(HttpError::not_found("Session", request.session_id)))?;
+        let session = self.load_session(request.session_id).await?;
 
         let existing_teams = self
             .team_repository
@@ -110,86 +158,11 @@ impl TeamHandler for TeamHandlerImpl {
         TeamValidator::new(request.session_id, session.player_ids().clone())
             .validate_new_team(&existing_teams, &request.player_ids)?;
 
+        self.session_queue_repository
+            .remove_players(&request.session_id, &request.player_ids)
+            .await?;
+
         let team = Team::new(request.session_id, request.player_ids);
-
-        self.team_repository.insert(team).await
-    }
-
-    async fn create_priority_team(&self, request: CreateTeamRequest) -> HttpResult<Team> {
-        let session = self
-            .session_repository
-            .get(&request.session_id)
-            .await?
-            .ok_or_else(|| Box::new(HttpError::not_found("Session", request.session_id)))?;
-
-        let existing_teams = self
-            .team_repository
-            .list_by_session(&request.session_id)
-            .await?;
-        let session_matches = self
-            .match_repository
-            .list_by_session(&request.session_id)
-            .await?;
-        let busy_team_ids = Match::busy_team_ids(&session_matches);
-
-        let broken_origin_teams =
-            TeamValidator::new(request.session_id, session.player_ids().clone())
-                .validate_priority_team(&existing_teams, &busy_team_ids, &request.player_ids)?;
-
-        let history = PartnerHistory::from_matches(&existing_teams, &session_matches);
-        let queue_manager = TeamQueueManager::new(
-            request.session_id,
-            *session.game_mode(),
-            *session.settings().players_per_team(),
-        );
-
-        let session_players: Vec<_> = self
-            .player_repository
-            .list()
-            .await?
-            .into_iter()
-            .filter(|player| session.player_ids().contains(player.id()))
-            .collect();
-
-        let broken_ids: HashSet<Uuid> = broken_origin_teams
-            .iter()
-            .map(|(team, _)| *team.id())
-            .collect();
-        let mut remaining_waiting_teams: Vec<Team> = existing_teams
-            .into_iter()
-            .filter(|team| team.is_waiting() && !broken_ids.contains(team.id()))
-            .collect();
-
-        for (mut origin, leftover_player_ids) in broken_origin_teams {
-            origin.disband();
-            self.team_repository.insert(origin).await?;
-
-            if leftover_player_ids.is_empty() {
-                continue;
-            }
-
-            let changed_teams = queue_manager.release_players(
-                &remaining_waiting_teams,
-                &leftover_player_ids,
-                &session_players,
-                &history,
-            );
-
-            for changed in changed_teams {
-                self.team_repository.insert(changed.clone()).await?;
-
-                match remaining_waiting_teams
-                    .iter_mut()
-                    .find(|team| team.id() == changed.id())
-                {
-                    Some(existing) => *existing = changed,
-                    None => remaining_waiting_teams.push(changed),
-                }
-            }
-        }
-
-        let team = Team::new(request.session_id, request.player_ids).with_priority();
-
         self.team_repository.insert(team).await
     }
 
@@ -204,29 +177,24 @@ impl TeamHandler for TeamHandlerImpl {
             .await?
             .ok_or_else(|| Box::new(HttpError::not_found("Team", team_id)))?;
 
-        if !team.is_waiting() {
+        if !team.is_draft() {
             return Err(Box::new(HttpError::conflict(format!(
-                "Team {team_id} can't be edited while it isn't waiting"
+                "Team {team_id} can't be edited once it isn't a draft"
             ))));
         }
 
-        let session = self
-            .session_repository
-            .get(team.session_id())
-            .await?
-            .ok_or_else(|| Box::new(HttpError::not_found("Session", *team.session_id())))?;
+        let session = self.load_session(*team.session_id()).await?;
 
-        let existing_teams = self
-            .team_repository
-            .list_by_session(team.session_id())
-            .await?;
         let session_matches = self
             .match_repository
             .list_by_session(team.session_id())
             .await?;
         let busy_team_ids = Match::busy_team_ids(&session_matches);
 
-        let other_teams: Vec<Team> = existing_teams
+        let other_teams: Vec<Team> = self
+            .team_repository
+            .list_by_session(team.session_id())
+            .await?
             .into_iter()
             .filter(|other| other.id() != team.id())
             .collect();
@@ -237,116 +205,123 @@ impl TeamHandler for TeamHandlerImpl {
             .copied()
             .filter(|id| !team.player_ids().contains(id))
             .collect();
-        let mut freed_player_ids: Vec<Uuid> = team
+        let mut returning_player_ids: Vec<Uuid> = team
             .player_ids()
             .iter()
             .copied()
             .filter(|id| !request.player_ids.contains(id))
             .collect();
 
-        let broken_origin_teams =
-            TeamValidator::new(*team.session_id(), session.player_ids().clone())
-                .validate_team_update(
-                    &other_teams,
-                    &busy_team_ids,
-                    &request.player_ids,
-                    &entering_player_ids,
-                )?;
+        let broken_drafts = TeamValidator::new(*team.session_id(), session.player_ids().clone())
+            .validate_team_update(
+                &other_teams,
+                &busy_team_ids,
+                &request.player_ids,
+                &entering_player_ids,
+            )?;
+
+        // Entering players leave the queue; a draft they were pulled from is
+        // deleted and its other players fall through to `returning`.
+        self.session_queue_repository
+            .remove_players(team.session_id(), &entering_player_ids)
+            .await?;
+        for (broken, leftover) in broken_drafts {
+            self.team_repository.delete(broken.id()).await?;
+            returning_player_ids.extend(leftover);
+        }
 
         team.set_player_ids(request.player_ids);
         let updated_team = self.team_repository.insert(team).await?;
 
-        if broken_origin_teams.is_empty() {
-            return Ok(updated_team);
-        }
-
-        let history = PartnerHistory::from_matches(&other_teams, &session_matches);
-        let queue_manager = TeamQueueManager::new(
-            *updated_team.session_id(),
-            *session.game_mode(),
-            *session.settings().players_per_team(),
-        );
-
-        let session_players: Vec<_> = self
-            .player_repository
-            .list()
-            .await?
-            .into_iter()
-            .filter(|player| session.player_ids().contains(player.id()))
-            .collect();
-
-        let broken_ids: HashSet<Uuid> = broken_origin_teams
-            .iter()
-            .map(|(team, _)| *team.id())
-            .collect();
-        let remaining_waiting_teams: Vec<Team> = other_teams
-            .into_iter()
-            .filter(|other| other.is_waiting() && !broken_ids.contains(other.id()))
-            .collect();
-
-        for (mut origin, leftover_player_ids) in broken_origin_teams {
-            origin.disband();
-            self.team_repository.insert(origin).await?;
-            freed_player_ids.extend(leftover_player_ids);
-        }
-
-        let changed_teams = queue_manager.release_players(
-            &remaining_waiting_teams,
-            &freed_player_ids,
-            &session_players,
-            &history,
-        );
-
-        for changed in changed_teams {
-            self.team_repository.insert(changed).await?;
+        if !returning_player_ids.is_empty() {
+            let session_teams = self.team_repository.list_by_session(session.id()).await?;
+            let games = Self::games_played_by_player(&session_teams, &session_matches);
+            self.return_players_to_queue(*session.id(), &returning_player_ids, &games)
+                .await?;
         }
 
         Ok(updated_team)
     }
 
-    async fn draw_teams(&self, session_id: Uuid) -> HttpResult<Vec<Team>> {
-        let existing_teams = self.team_repository.list_by_session(&session_id).await?;
-        if !existing_teams.is_empty() {
+    async fn discard_draft(&self, team_id: Uuid) -> HttpResult<()> {
+        let team = self
+            .team_repository
+            .get(&team_id)
+            .await?
+            .ok_or_else(|| Box::new(HttpError::not_found("Team", team_id)))?;
+
+        if !team.is_draft() {
+            return Err(Box::new(HttpError::conflict(format!(
+                "Team {team_id} isn't a draft and can't be discarded"
+            ))));
+        }
+
+        self.team_repository.delete(&team_id).await?;
+
+        let session_teams = self
+            .team_repository
+            .list_by_session(team.session_id())
+            .await?;
+        let session_matches = self
+            .match_repository
+            .list_by_session(team.session_id())
+            .await?;
+        let games = Self::games_played_by_player(&session_teams, &session_matches);
+        self.return_players_to_queue(*team.session_id(), team.player_ids(), &games)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn seed_queue(&self, session_id: Uuid) -> HttpResult<Vec<Team>> {
+        let session = self.load_session(session_id).await?;
+
+        if !self
+            .match_repository
+            .list_by_session(&session_id)
+            .await?
+            .is_empty()
+        {
             return Err(Box::new(HttpError::conflict(
-                "Session already has teams drawn",
+                "Session already has matches — the queue rotates by result from here on",
             )));
         }
 
-        let session = self
-            .session_repository
-            .get(&session_id)
-            .await?
-            .ok_or_else(|| Box::new(HttpError::not_found("Session", session_id)))?;
-
-        let session_players: Vec<_> = self
-            .player_repository
-            .list()
+        let session_players = self.session_players(&session).await?;
+        let queued_ids: HashSet<Uuid> = self
+            .session_queue_repository
+            .list_by_session(&session_id)
             .await?
             .into_iter()
-            .filter(|player| session.player_ids().contains(player.id()))
+            .map(|entry| *entry.player_id())
+            .collect();
+        let queued_players: Vec<Player> = session_players
+            .into_iter()
+            .filter(|player| queued_ids.contains(player.id()))
             .collect();
 
-        let drawn_teams =
-            TeamDrawer::new(*session.game_mode(), *session.settings().players_per_team())
-                .draw(&session_players, &PartnerHistory::empty())?;
+        let players_per_team = *session.settings().players_per_team();
+        let groups = TeamDrawer::new(*session.game_mode(), players_per_team)
+            .draw(&queued_players, &PartnerHistory::empty())?;
 
-        if drawn_teams.is_empty() {
-            return Err(Box::new(HttpError::bad_request(
-                "Not enough players to form a team with the session's game mode",
-            )));
+        let court_cap = usize::from(*session.available_courts()) * 2;
+        let mut created = Vec::new();
+        for group in groups
+            .into_iter()
+            .filter(|group| group.len() == usize::from(players_per_team))
+            .take(court_cap)
+        {
+            self.session_queue_repository
+                .remove_players(&session_id, &group)
+                .await?;
+            created.push(
+                self.team_repository
+                    .insert(Team::new(session_id, group))
+                    .await?,
+            );
         }
 
-        let validator = TeamValidator::new(session_id, session.player_ids().clone());
-        let mut created_teams = Vec::with_capacity(drawn_teams.len());
-
-        for player_ids in drawn_teams {
-            validator.validate_new_team(&created_teams, &player_ids)?;
-
-            let team = Team::new(session_id, player_ids);
-            created_teams.push(self.team_repository.insert(team).await?);
-        }
-
-        Ok(created_teams)
+        Ok(created)
     }
 
     async fn resolve_match_result(
@@ -355,16 +330,14 @@ impl TeamHandler for TeamHandlerImpl {
         winner_team_id: Uuid,
         loser_team_id: Uuid,
     ) -> HttpResult<ResolvedRotation> {
-        let session = self
-            .session_repository
-            .get(&session_id)
-            .await?
-            .ok_or_else(|| Box::new(HttpError::not_found("Session", session_id)))?;
+        let session = self.load_session(session_id).await?;
+        let players_per_team = *session.settings().players_per_team();
 
         let session_teams = self.team_repository.list_by_session(&session_id).await?;
         let session_matches = self.match_repository.list_by_session(&session_id).await?;
         let history = PartnerHistory::from_matches(&session_teams, &session_matches);
-        let busy_team_ids = Match::busy_team_ids(&session_matches);
+        let games_played = Self::games_played_by_player(&session_teams, &session_matches);
+        let session_players = self.session_players(&session).await?;
 
         let mut winner = self
             .team_repository
@@ -389,69 +362,23 @@ impl TeamHandler for TeamHandlerImpl {
         self.team_repository.insert(loser).await?;
         self.team_repository.insert(winner).await?;
 
-        let session_players: Vec<_> = self
-            .player_repository
-            .list()
-            .await?
-            .into_iter()
-            .filter(|player| session.player_ids().contains(player.id()))
-            .collect();
+        // Loser (and a capped-out winner) go back on the list, one more game
+        // to their name — sinking them behind everyone who has played less.
+        let mut queue_entries = self
+            .session_queue_repository
+            .list_by_session(&session_id)
+            .await?;
+        let returned = self
+            .return_players_to_queue(session_id, &freed_player_ids, &games_played)
+            .await?;
+        queue_entries.extend(returned);
 
-        let queue_manager = TeamQueueManager::new(
-            session_id,
-            *session.game_mode(),
-            *session.settings().players_per_team(),
-        );
-
-        // The winner/loser rows above are stale here (fetched before this
-        // resolution mutated them), and a `Waiting` team elsewhere in the
-        // session might actually be busy on another court right now — both
-        // must be kept out of the queue view this rotation acts on.
-        let mut waiting_teams: Vec<Team> = session_teams
-            .iter()
-            .filter(|team| {
-                team.is_waiting()
-                    && *team.id() != winner_team_id
-                    && *team.id() != loser_team_id
-                    && !busy_team_ids.contains(team.id())
-            })
-            .cloned()
-            .collect();
-
-        let changed_teams = queue_manager.release_players(
-            &waiting_teams,
-            &freed_player_ids,
-            &session_players,
-            &history,
-        );
-
-        for team in &changed_teams {
-            self.team_repository.insert(team.clone()).await?;
-        }
-
-        for changed in changed_teams {
-            match waiting_teams
-                .iter_mut()
-                .find(|team| team.id() == changed.id())
-            {
-                Some(existing) => *existing = changed,
-                None => waiting_teams.push(changed),
-            }
-        }
-
-        // Every court that needs a new match: for each court this session
-        // has ever opened, look at its most recent match. If that match is
-        // still unfinished, the court is genuinely busy — skip it. If it's
-        // finished, the court is idle and needs refilling: by whichever of
-        // its two teams is still `Holding` (the winner, if it stayed on
-        // court) plus one challenger, or by two fresh teams if neither
-        // survived (loser always disbands; the winner does too past the
-        // consecutive-win cap — see `Team::register_win`). This is what
-        // makes an old idle court reachable again from a *different*
-        // court's result: nothing here is scoped to `winner_team_id`/
-        // `loser_team_id`, so the court that just freed up is just one
-        // instance of the same scan, not a special case. Oldest-idle-first,
-        // same FIFO fairness as the player queue itself.
+        // Every court whose most recent match is finished needs a challenger.
+        // `session_teams` was read before the winner/loser mutations above,
+        // so it still shows them `Playing`; `winner_still_holding` is the
+        // authority for `winner_team_id` and `loser_team_id` is never
+        // holding — every other court's pair is untouched here and accurate
+        // in the snapshot.
         let mut latest_match_by_court: HashMap<u8, &Match> = HashMap::new();
         for match_ in &session_matches {
             latest_match_by_court
@@ -464,20 +391,13 @@ impl TeamHandler for TeamHandlerImpl {
                 .or_insert(match_);
         }
 
-        let mut slots: Vec<CourtSlot> = Vec::new();
+        let busy_team_ids = Match::busy_team_ids(&session_matches);
+        let mut idle: Vec<(u8, DateTime<Utc>, Option<Uuid>)> = Vec::new();
         for (&court, latest) in &latest_match_by_court {
             if !latest.is_finished() {
                 continue;
             }
 
-            // `session_teams` was fetched before this call mutated `winner`/
-            // `loser` — at that point both still read `Playing` (they were
-            // mid-match), never `Holding`, so the just-finished court's own
-            // pair can't be read off that stale snapshot. `winner_still_holding`
-            // is the authoritative answer for `winner_team_id`; `loser_team_id`
-            // is never holding (always disbanded). Every other court's pair
-            // is untouched by this call, so the stale snapshot is accurate
-            // for them.
             let holding_team_id =
                 [*latest.team_a_id(), *latest.team_b_id()]
                     .into_iter()
@@ -496,60 +416,61 @@ impl TeamHandler for TeamHandlerImpl {
                         }
                     });
 
-            slots.push(CourtSlot {
+            idle.push((
                 court,
-                idle_since: latest.played_at().unwrap_or(*latest.started_at()),
-                fixed_team_id: holding_team_id,
-                needed: if holding_team_id.is_some() { 1 } else { 2 },
-            });
+                latest.played_at().unwrap_or(*latest.started_at()),
+                holding_team_id,
+            ));
         }
+        idle.sort_by_key(|(_, idle_since, _)| *idle_since);
 
-        slots.sort_by_key(|slot| slot.idle_since);
+        let mut courts = Vec::new();
+        for (court, _, holding_team_id) in idle {
+            let needed = if holding_team_id.is_some() { 1 } else { 2 };
+            let mut draft_team_ids = Vec::new();
+            let mut missing_challenger = false;
 
-        let mut pool = waiting_teams;
-        let mut court_assignments = Vec::new();
+            for _ in 0..needed {
+                let queue = SessionQueue::new(
+                    queue_entries.clone(),
+                    *session.game_mode(),
+                    players_per_team,
+                );
+                let Some(suggestion) = queue.next_challenger(&session_players, &history) else {
+                    missing_challenger = true;
+                    break;
+                };
 
-        for slot in slots {
-            let picked: Vec<Uuid> = queue_manager
-                .next_complete_teams(&pool, slot.needed)
-                .into_iter()
-                .map(|team| *team.id())
-                .collect();
-
-            if picked.len() != slot.needed {
-                continue;
+                queue_entries.retain(|entry| !suggestion.player_ids.contains(entry.player_id()));
+                let claimed = self
+                    .session_queue_repository
+                    .remove_players(&session_id, &suggestion.player_ids)
+                    .await?;
+                // Another court (a concurrent result on the same session)
+                // grabbed one of these players first: the `DELETE` took
+                // fewer rows than we asked for. Skip this slot rather than
+                // draft a player who's already reserved elsewhere.
+                if claimed.len() != suggestion.player_ids.len() {
+                    missing_challenger = true;
+                    break;
+                }
+                let draft = self
+                    .team_repository
+                    .insert(Team::new(session_id, suggestion.player_ids))
+                    .await?;
+                draft_team_ids.push(*draft.id());
             }
 
-            pool.retain(|team| !picked.contains(team.id()));
-
-            let (team_a_id, team_b_id) = match slot.fixed_team_id {
-                Some(fixed) => (fixed, picked[0]),
-                None => (picked[0], picked[1]),
-            };
-
-            court_assignments.push(CourtAssignment {
-                court: slot.court,
-                team_a_id,
-                team_b_id,
+            courts.push(CourtSuggestion {
+                court,
+                holding_team_id,
+                draft_team_ids,
+                missing_challenger,
             });
         }
 
-        Ok(ResolvedRotation { court_assignments })
+        Ok(ResolvedRotation { courts })
     }
-}
-
-/// A court whose most recent match is finished and needs a new one — the
-/// court that just freed up is just one instance of this, found the same
-/// way as any other idle court. `fixed_team_id` is the team already
-/// anchored to it (a `Holding` team, still defending) — `None` when neither
-/// of that court's last two teams is still around (the loser always
-/// disbands, and so does a winner that hit the consecutive-win cap), so
-/// both sides come fresh from the queue.
-struct CourtSlot {
-    court: u8,
-    idle_since: DateTime<Utc>,
-    fixed_team_id: Option<Uuid>,
-    needed: usize,
 }
 
 pub mod use_cases {
@@ -569,20 +490,25 @@ pub mod use_cases {
         pub player_ids: Vec<Uuid>,
     }
 
-    /// The outcome of applying a match result to the team rotation: a match
-    /// assignment for every court the queue could fill — the one that just
-    /// freed up, and any other court left idle by an earlier result that
-    /// the now-larger queue can finally serve. A court missing from this
-    /// list just stays idle; the queue still doesn't have what it needs.
-    #[derive(Debug, Clone)]
+    /// What a reported result did to the queue, per court: the `Holding`
+    /// team still defending (if any) and the challenger `Draft`(s) the queue
+    /// suggested, for the operator to confirm/edit/start. `missing_challenger`
+    /// means the queue couldn't supply a full team for that court (e.g. a
+    /// `Mixed` gender imbalance) — it stays idle until the operator builds
+    /// one by hand or the queue fills. A court absent from the list simply
+    /// had no finished match to react to.
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
     pub struct ResolvedRotation {
-        pub court_assignments: Vec<CourtAssignment>,
+        pub courts: Vec<CourtSuggestion>,
     }
 
-    #[derive(Debug, Clone)]
-    pub struct CourtAssignment {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct CourtSuggestion {
         pub court: u8,
-        pub team_a_id: Uuid,
-        pub team_b_id: Uuid,
+        pub holding_team_id: Option<Uuid>,
+        pub draft_team_ids: Vec<Uuid>,
+        pub missing_challenger: bool,
     }
 }

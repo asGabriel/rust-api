@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 use util::getters;
 use uuid::Uuid;
 
@@ -16,7 +17,8 @@ use crate::modules::matchmaking::domain::{
 /// player has finished in the session; it is maintained on every result,
 /// never derived. It carries over when the player leaves the list for a
 /// court and comes back.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct QueueEntry {
     id: Uuid,
     session_id: Uuid,

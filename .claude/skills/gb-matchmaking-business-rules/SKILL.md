@@ -62,8 +62,10 @@ habilidade, histórico de parceria, aleatoriedade controlada, etc.
 - "Ninguém volta na hora" é consequência da ordem, não uma regra à parte:
   quem sai de uma partida entra na lista com `games_played + 1` **e**
   `enqueued_at = now()` — afunda nos dois critérios.
-- Ao criar a `Session`, todos os `player_ids` confirmados entram na lista
-  com `games_played = 0`.
+- Quando jogadores são confirmados na `Session` (`PATCH
+  /matchmaking/sessions/{id}` com `playerIds`), entram na lista com
+  `games_played = 0`; jogadores tirados da `Session` saem da lista (um que
+  esteja em quadra fica jogando, só perde a linha da lista).
 
 #### `Team` — status
 
@@ -88,8 +90,10 @@ habilidade, histórico de parceria, aleatoriedade controlada, etc.
    abriu (última `Match` de cada `court`); pra cada uma cuja última partida
    já tem resultado: `needed` = 1 se há `Team` `Holding` nela, senão 2.
    Chama `next_challenger` `needed` vezes, cada chamada **removendo da
-   `session_queue`** os jogadores escolhidos (mesma transação) e criando um
-   `Team` `Draft`. Ordem: quadra ociosa há mais tempo primeiro.
+   `session_queue`** os jogadores escolhidos (um `DELETE ... RETURNING` só)
+   antes de criar o `Team` `Draft`; se o `DELETE` levar menos linhas que o
+   pedido (outra quadra pegou o jogador primeiro), a vaga é pulada. Ordem:
+   quadra ociosa há mais tempo primeiro.
 5. A resposta traz, por quadra, o(s) `draft_team_id`(s) e o
    `holding_team_id` — **não inicia `Match` nenhum**.
 
@@ -115,7 +119,7 @@ Orquestrado por `TeamHandlerImpl::resolve_match_result`, chamado por
 
 #### Confirmar / descartar / editar o `Draft`
 
-- **Confirmar:** `POST /matchmaking/courts/{court}/start` com os dois
+- **Confirmar:** `POST /matchmaking/matches/` com os dois
   `team_id`s → valida e cria o `Match` (drafts viram `Playing`).
 - **Descartar:** `DELETE /matchmaking/teams/{draft_id}` → jogadores voltam
   pra `session_queue` (`enqueued_at = now()`, `games_played` inalterado).
@@ -144,10 +148,12 @@ Orquestrado por `TeamHandlerImpl::resolve_match_result`, chamado por
 
 #### Seeding inicial
 
-- `POST /matchmaking/sessions/{id}/queue/seed` forma as partidas de
-  abertura: chama `next_challenger` até `2 * available_courts` vezes (ou o
-  que a lista permitir) e devolve os `Draft`s — mesmo fluxo "formar →
-  revisar → confirmar". Substitui `draw_teams`.
+- `POST /matchmaking/sessions/{id}/queue/seed` forma as `Team`s `Draft` de
+  abertura: `TeamDrawer::draw` distribui os jogadores da lista (respeitando
+  gênero, histórico vazio) em até `2 * available_courts` times; esses
+  jogadores saem da lista. Devolve os `Draft`s — mesmo fluxo "revisar →
+  confirmar". Só funciona enquanto a `Session` não tiver nenhum `Match`.
+  Substitui `draw_teams` (`TeamHandlerImpl::seed_queue`).
 - **Trade-off aceito (preenchimento guloso):** quadras ociosas são
   preenchidas por ordem de espera, não maximizando o nº de quadras ativas —
   uma quadra que precisa de 2 times pode esvaziar a lista antes de uma
@@ -171,7 +177,7 @@ Orquestrado por `TeamHandlerImpl::resolve_match_result`, chamado por
   um `Match` que já tem `winner_team_id` retorna `HttpError::conflict`.
 - `winner_team_id` reportado precisa ser `team_a_id` ou `team_b_id` do
   próprio `Match`; qualquer outro valor retorna `HttpError::bad_request`.
-- Para iniciar um `Match` (`POST /matchmaking/courts/{court}/start`), os
+- Para iniciar um `Match` (`POST /matchmaking/matches/`), os
   dois times precisam: pertencer à `Session` informada, ter **exatamente
   `players_per_team` jogadores** no roster, não estar `Disbanded`, e nenhum
   jogador seu estar já `Playing`/`Holding` em outra quadra

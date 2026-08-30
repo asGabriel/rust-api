@@ -29,7 +29,8 @@ use api::modules::{
         },
         repository::{
             matches::MatchRepositoryImpl, player::PlayerRepositoryImpl,
-            session::SessionRepositoryImpl, team::TeamRepositoryImpl,
+            queue::SessionQueueRepositoryImpl, session::SessionRepositoryImpl,
+            team::TeamRepositoryImpl,
         },
         MatchmakingState,
     },
@@ -133,18 +134,21 @@ fn build_matchmaking_state(pool: &Pool<Postgres>) -> MatchmakingState {
     let session_repository = Arc::new(SessionRepositoryImpl::new(pool));
     let team_repository = Arc::new(TeamRepositoryImpl::new(pool));
     let match_repository = Arc::new(MatchRepositoryImpl::new(pool));
+    let session_queue_repository = Arc::new(SessionQueueRepositoryImpl::new(pool));
 
     let team_handler = Arc::new(TeamHandlerImpl {
         team_repository,
         session_repository: session_repository.clone(),
         player_repository: player_repository.clone(),
         match_repository: match_repository.clone(),
+        session_queue_repository: session_queue_repository.clone(),
     });
 
     MatchmakingState {
         player_handler: Arc::new(PlayerHandlerImpl { player_repository }),
         session_handler: Arc::new(SessionHandlerImpl {
             session_repository: session_repository.clone(),
+            session_queue_repository,
         }),
         team_handler: team_handler.clone(),
         match_handler: Arc::new(MatchHandlerImpl {
