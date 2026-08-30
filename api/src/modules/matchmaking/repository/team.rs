@@ -12,6 +12,11 @@ pub trait TeamRepository {
     async fn list_by_session(&self, session_id: &Uuid) -> HttpResult<Vec<Team>>;
 
     async fn get(&self, id: &Uuid) -> HttpResult<Option<Team>>;
+
+    /// Hard-deletes a team row. Only used to discard a `Draft` that was
+    /// never started — a draft carries no partner history (that's only
+    /// teams that entered a `Match`), so there's nothing to keep.
+    async fn delete(&self, id: &Uuid) -> HttpResult<()>;
 }
 
 pub type DynTeamRepository = dyn TeamRepository + Send + Sync;
@@ -38,14 +43,14 @@ impl TeamRepository for TeamRepositoryImpl {
         let row = sqlx::query(
             r#"
             INSERT INTO matchmaking.team (
-                id, session_id, player_ids, status, consecutive_wins, priority, created_at
+                id, session_id, player_ids, status, consecutive_wins, court, created_at
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT (id) DO UPDATE SET
                 player_ids = EXCLUDED.player_ids,
                 status = EXCLUDED.status,
                 consecutive_wins = EXCLUDED.consecutive_wins,
-                priority = EXCLUDED.priority
+                court = EXCLUDED.court
             RETURNING *
             "#,
         )
@@ -54,7 +59,7 @@ impl TeamRepository for TeamRepositoryImpl {
         .bind(player_ids)
         .bind(status)
         .bind(*team.consecutive_wins() as i16)
-        .bind(team.is_priority())
+        .bind(team.court().map(|court| court as i16))
         .bind(*team.created_at())
         .fetch_one(&self.pool)
         .await?;
@@ -78,5 +83,14 @@ impl TeamRepository for TeamRepositoryImpl {
             .await?;
 
         Ok(row.as_ref().map(Team::from))
+    }
+
+    async fn delete(&self, id: &Uuid) -> HttpResult<()> {
+        sqlx::query("DELETE FROM matchmaking.team WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
     }
 }

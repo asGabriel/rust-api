@@ -7,7 +7,9 @@ use uuid::Uuid;
 use crate::modules::matchmaking::{
     domain::matches::{Match, MatchStartValidator},
     handler::{
-        matches::use_cases::{CreateMatchRequest, ReportMatchResultRequest},
+        matches::use_cases::{
+            CreateMatchRequest, ReportMatchResultRequest, ReportMatchResultResponse,
+        },
         team::DynTeamHandler,
     },
     repository::{matches::DynMatchRepository, session::DynSessionRepository},
@@ -23,16 +25,17 @@ pub trait MatchHandler {
 
     async fn list_matches_by_session(&self, session_id: Uuid) -> HttpResult<Vec<Match>>;
 
-    /// Reports the result of a match that's in progress on a court, and
-    /// applies the resulting rotation: the loser is always disbanded, the
-    /// winner keeps (or loses) the court per the consecutive-win cap, and if
-    /// the queue already has the team(s) needed to keep that court going,
-    /// the next match there is started automatically.
+    /// Reports the result of a match in progress on a court and applies it to
+    /// the queue: the loser's players go back on the list, the winner keeps
+    /// (or loses) the court per the consecutive-win cap, and every idle court
+    /// gets a challenger `Draft` suggested from the queue. Does NOT start the
+    /// next match — the response carries the suggestions for the operator to
+    /// confirm via `POST /matchmaking/matches/`.
     async fn report_match_result(
         &self,
         match_id: Uuid,
         request: ReportMatchResultRequest,
-    ) -> HttpResult<Match>;
+    ) -> HttpResult<ReportMatchResultResponse>;
 }
 
 pub type DynMatchHandler = dyn MatchHandler + Send + Sync;
@@ -61,13 +64,17 @@ impl MatchHandler for MatchHandlerImpl {
             .list_by_session(&request.session_id)
             .await?;
 
-        MatchStartValidator::new(request.session_id, *session.settings().players_per_team())
-            .validate_start(
-                &session_teams,
-                &session_matches,
-                request.team_a_id,
-                request.team_b_id,
-            )?;
+        MatchStartValidator::new(
+            request.session_id,
+            session.player_ids().clone(),
+            *session.settings().players_per_team(),
+        )
+        .validate_start(
+            &session_teams,
+            &session_matches,
+            request.team_a_id,
+            request.team_b_id,
+        )?;
 
         let match_ = Match::new(
             request.session_id,
@@ -87,7 +94,7 @@ impl MatchHandler for MatchHandlerImpl {
         &self,
         match_id: Uuid,
         request: ReportMatchResultRequest,
-    ) -> HttpResult<Match> {
+    ) -> HttpResult<ReportMatchResultResponse> {
         let mut match_ = self
             .match_repository
             .get(&match_id)
@@ -112,29 +119,20 @@ impl MatchHandler for MatchHandlerImpl {
             )
             .await?;
 
-        // Each assignment's teams were just computed straight off the queue
-        // (complete, waiting, not busy elsewhere), so there's nothing left
-        // for `MatchStartValidator` to catch here. This can start matches on
-        // courts other than `finished_match`'s own — any other court left
-        // idle by an earlier result that the now-larger queue can finally
-        // fill (see `TeamHandler::resolve_match_result`).
-        for assignment in rotation.court_assignments {
-            let next = Match::new(
-                *finished_match.session_id(),
-                assignment.court,
-                assignment.team_a_id,
-                assignment.team_b_id,
-            )?;
-            self.match_repository.insert(next).await?;
-        }
-
-        Ok(finished_match)
+        Ok(ReportMatchResultResponse {
+            match_: finished_match,
+            courts: rotation.courts,
+        })
     }
 }
 
 pub mod use_cases {
     use serde::{Deserialize, Serialize};
     use uuid::Uuid;
+
+    use crate::modules::matchmaking::{
+        domain::matches::Match, handler::team::use_cases::CourtSuggestion,
+    };
 
     #[derive(Debug, Clone, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -149,5 +147,16 @@ pub mod use_cases {
     #[serde(rename_all = "camelCase")]
     pub struct ReportMatchResultRequest {
         pub winner_team_id: Uuid,
+    }
+
+    /// The finished match, plus what the result did to each idle court's
+    /// queue: the `Holding` team (if any) and the challenger `Draft`(s) the
+    /// operator should confirm/edit/start. Nothing is auto-started.
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ReportMatchResultResponse {
+        #[serde(rename = "match")]
+        pub match_: Match,
+        pub courts: Vec<CourtSuggestion>,
     }
 }

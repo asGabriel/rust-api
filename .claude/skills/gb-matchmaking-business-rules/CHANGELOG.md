@@ -4,6 +4,34 @@
 > Não é recarregado automaticamente com o `SKILL.md` — só ler quando for
 > preciso entender o motivo/contexto histórico de uma regra específica.
 
+- 2026-08-30 — **redesenho da fila: de fila de `Team`s pra lista de
+  jogadores.** A fila deixou de ser uma coleção de `Team`s pré-formadas
+  (`TeamQueueManager::release_players`, regras 1/2 de 2026-08-23) e passou a
+  ser uma lista de jogadores individuais por `Session`
+  (`matchmaking.session_queue`), ordenada por `pinned`, jogos disputados
+  (`games_played` asc) e tempo de espera. Times só são formados no momento
+  de entrar em quadra: ao reportar o resultado, `next_challenger` pega os
+  primeiros da lista que fecham a composição de gênero, roda o
+  `TeamDrawer::draw` só pra ordenar/anotar repetição, e cria um `Team`
+  `Draft` — o operador revisa (pode editar o roster ou montar manual,
+  furando o gênero se quiser), confirma e a partida começa. Motivo: dados
+  reais de produção (`Session` ca58f864) mostraram que o modelo de fila de
+  `Team`s não misturava no caso comum — com o pool do `release_players`
+  restrito a quem está sem time completo, a dupla perdedora liberada era
+  quase sempre a única opção do `TeamDrawer` e se reformava toda rodada. As
+  tentativas de consertar isso dentro do modelo antigo (a "regra 3" de
+  adiar repetição forçada, ver entrada abaixo) esbarravam em deadlock ou
+  em não disparar no cenário real. O modelo de lista corta a classe inteira
+  de bug: "quem entra" vira um `sort` + `take`, sem reagrupamento, sem
+  fases, sem deadlock possível; a qualidade do pareamento passa a ser
+  responsabilidade explícita do operador (que agora vê e confirma cada time
+  antes de jogar). Remove `team_queue.rs` inteiro (`TeamQueueManager`,
+  `release_players`, `select_playable`, `next_complete_teams`), o status
+  `Team::Waiting`, `Team::with_priority`/`create_priority_team` (prioridade
+  vira `pinned` na linha da lista) e `draw_teams` (vira `queue/seed` no
+  mesmo fluxo formar→confirmar). `TeamDrawer` e `PartnerHistory` ficam, só
+  como sugestão. Sem migração de dados — o app ainda não está em uso real,
+  o DB foi resetado. Ver "Fila e rotação de quadra" no `SKILL.md`.
 - 2026-08-30 — considerada e descartada uma 3ª regra pra
   `TeamQueueManager::release_players` que adiava uma repetição forçada de
   dupla (o grupo voltava a ser 2 `Team`s incompletas) quando já havia
