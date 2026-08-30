@@ -597,3 +597,504 @@ pub mod use_cases {
         pub missing_challenger: bool,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use chrono::NaiveDate;
+
+    use super::*;
+    use crate::modules::matchmaking::{
+        domain::{
+            player::{Gender, Player},
+            session::{GameMode, Session, SessionSettings},
+        },
+        repository::{
+            matches::MatchRepository, player::PlayerRepository, queue::SessionQueueRepository,
+            session::SessionRepository, team::TeamRepository,
+        },
+    };
+
+    #[derive(Default)]
+    struct FakeTeams(Mutex<Vec<Team>>);
+
+    #[async_trait]
+    impl TeamRepository for FakeTeams {
+        async fn insert(&self, team: Team) -> HttpResult<Team> {
+            let mut rows = self.0.lock().unwrap();
+            match rows.iter_mut().find(|row| row.id() == team.id()) {
+                Some(row) => *row = team.clone(),
+                None => rows.push(team.clone()),
+            }
+            Ok(team)
+        }
+        async fn list_by_session(&self, session_id: &Uuid) -> HttpResult<Vec<Team>> {
+            Ok(self
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|team| team.session_id() == session_id)
+                .cloned()
+                .collect())
+        }
+        async fn get(&self, id: &Uuid) -> HttpResult<Option<Team>> {
+            Ok(self
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|team| team.id() == id)
+                .cloned())
+        }
+        async fn delete(&self, id: &Uuid) -> HttpResult<()> {
+            self.0.lock().unwrap().retain(|team| team.id() != id);
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct FakeMatches(Mutex<Vec<Match>>);
+
+    #[async_trait]
+    impl MatchRepository for FakeMatches {
+        async fn insert(&self, match_: Match) -> HttpResult<Match> {
+            self.0.lock().unwrap().push(match_.clone());
+            Ok(match_)
+        }
+        async fn list_by_session(&self, session_id: &Uuid) -> HttpResult<Vec<Match>> {
+            Ok(self
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|match_| match_.session_id() == session_id)
+                .cloned()
+                .collect())
+        }
+        async fn get(&self, id: &Uuid) -> HttpResult<Option<Match>> {
+            Ok(self
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|match_| match_.id() == id)
+                .cloned())
+        }
+        async fn update(&self, match_: Match) -> HttpResult<Match> {
+            let mut rows = self.0.lock().unwrap();
+            if let Some(row) = rows.iter_mut().find(|row| row.id() == match_.id()) {
+                *row = match_.clone();
+            }
+            Ok(match_)
+        }
+    }
+
+    struct FakeSessions(Mutex<Vec<Session>>);
+
+    #[async_trait]
+    impl SessionRepository for FakeSessions {
+        async fn insert(&self, session: Session) -> HttpResult<Session> {
+            self.0.lock().unwrap().push(session.clone());
+            Ok(session)
+        }
+        async fn list(&self) -> HttpResult<Vec<Session>> {
+            Ok(self.0.lock().unwrap().clone())
+        }
+        async fn get(&self, id: &Uuid) -> HttpResult<Option<Session>> {
+            Ok(self
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|session| session.id() == id)
+                .cloned())
+        }
+        async fn update(&self, session: Session) -> HttpResult<Session> {
+            let mut rows = self.0.lock().unwrap();
+            if let Some(row) = rows.iter_mut().find(|row| row.id() == session.id()) {
+                *row = session.clone();
+            }
+            Ok(session)
+        }
+    }
+
+    #[derive(Default)]
+    struct FakePlayers(Mutex<Vec<Player>>);
+
+    #[async_trait]
+    impl PlayerRepository for FakePlayers {
+        async fn insert(&self, player: Player) -> HttpResult<Player> {
+            self.0.lock().unwrap().push(player.clone());
+            Ok(player)
+        }
+        async fn list(&self) -> HttpResult<Vec<Player>> {
+            Ok(self.0.lock().unwrap().clone())
+        }
+        async fn get(&self, id: &Uuid) -> HttpResult<Option<Player>> {
+            Ok(self
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|player| player.id() == id)
+                .cloned())
+        }
+        async fn update(&self, player: Player) -> HttpResult<Player> {
+            Ok(player)
+        }
+    }
+
+    #[derive(Default)]
+    struct FakeQueue(Mutex<Vec<QueueEntry>>);
+
+    #[async_trait]
+    impl SessionQueueRepository for FakeQueue {
+        async fn list_by_session(&self, session_id: &Uuid) -> HttpResult<Vec<QueueEntry>> {
+            Ok(self
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|entry| entry.session_id() == session_id)
+                .cloned()
+                .collect())
+        }
+        async fn insert_many(&self, entries: &[QueueEntry]) -> HttpResult<()> {
+            self.0.lock().unwrap().extend(entries.iter().cloned());
+            Ok(())
+        }
+        async fn remove_players(
+            &self,
+            session_id: &Uuid,
+            player_ids: &[Uuid],
+        ) -> HttpResult<Vec<QueueEntry>> {
+            let mut rows = self.0.lock().unwrap();
+            let mut removed = Vec::new();
+            rows.retain(|entry| {
+                if entry.session_id() == session_id && player_ids.contains(entry.player_id()) {
+                    removed.push(entry.clone());
+                    false
+                } else {
+                    true
+                }
+            });
+            Ok(removed)
+        }
+        async fn set_pinned(
+            &self,
+            session_id: &Uuid,
+            player_id: &Uuid,
+            pinned: bool,
+        ) -> HttpResult<Option<QueueEntry>> {
+            let mut rows = self.0.lock().unwrap();
+            let found = rows
+                .iter_mut()
+                .find(|entry| entry.session_id() == session_id && entry.player_id() == player_id);
+            match found {
+                Some(entry) => {
+                    entry.set_pinned(pinned);
+                    Ok(Some(entry.clone()))
+                }
+                None => Ok(None),
+            }
+        }
+    }
+
+    struct World {
+        handler: TeamHandlerImpl,
+        session_id: Uuid,
+        teams: Arc<FakeTeams>,
+        queue: Arc<FakeQueue>,
+    }
+
+    impl World {
+        fn add_teams(&self, teams: impl IntoIterator<Item = Team>) {
+            self.teams.0.lock().unwrap().extend(teams);
+        }
+
+        async fn add_finished_match(&self, court: u8, team_a: &Team, team_b: &Team, winner: &Team) {
+            let mut m = Match::new(self.session_id, court, *team_a.id(), *team_b.id()).unwrap();
+            m.finish(*winner.id()).unwrap();
+            self.handler.match_repository.insert(m).await.unwrap();
+        }
+
+        async fn enqueue(&self, players: &[(&Player, u16)]) {
+            let entries: Vec<QueueEntry> = players
+                .iter()
+                .map(|(player, games)| QueueEntry::new(self.session_id, *player.id(), *games))
+                .collect();
+            self.handler
+                .session_queue_repository
+                .insert_many(&entries)
+                .await
+                .unwrap();
+        }
+
+        fn drafts_by_court(&self) -> Vec<u8> {
+            self.teams
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(|team| if team.is_draft() { *team.court() } else { None })
+                .collect()
+        }
+    }
+
+    fn world(game_mode: GameMode, available_courts: u8, players: &[Player]) -> World {
+        let mut session = Session::new(
+            NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+            None,
+            SessionSettings::default(),
+            available_courts,
+            game_mode,
+        )
+        .unwrap();
+        session.set_player_ids(players.iter().map(|player| *player.id()).collect());
+        let session_id = *session.id();
+
+        let teams = Arc::new(FakeTeams::default());
+        let queue = Arc::new(FakeQueue::default());
+        let handler = TeamHandlerImpl {
+            team_repository: teams.clone(),
+            session_repository: Arc::new(FakeSessions(Mutex::new(vec![session]))),
+            player_repository: Arc::new(FakePlayers(Mutex::new(players.to_vec()))),
+            match_repository: Arc::new(FakeMatches::default()),
+            session_queue_repository: queue.clone(),
+        };
+
+        World {
+            handler,
+            session_id,
+            teams,
+            queue,
+        }
+    }
+
+    fn male() -> Player {
+        Player::new("P".to_string(), Gender::Male)
+    }
+
+    fn female() -> Player {
+        Player::new("P".to_string(), Gender::Female)
+    }
+
+    /// The loser comes back on the list with one more game to its name and
+    /// is deprioritised behind fresher players; the winner keeps the court
+    /// and gets exactly one challenger draft, tagged with its court.
+    #[tokio::test]
+    async fn test_resolve_holds_the_winner_and_drafts_one_challenger_from_the_queue() {
+        let (a, b, c, d, e, f) = (male(), male(), male(), male(), male(), male());
+        let w = world(
+            GameMode::Male,
+            1,
+            &[
+                a.clone(),
+                b.clone(),
+                c.clone(),
+                d.clone(),
+                e.clone(),
+                f.clone(),
+            ],
+        );
+
+        let ab = Team::new(w.session_id, vec![*a.id(), *b.id()]);
+        let cd = Team::new(w.session_id, vec![*c.id(), *d.id()]);
+        w.add_teams([ab.clone(), cd.clone()]);
+        w.add_finished_match(1, &ab, &cd, &ab).await;
+        w.enqueue(&[(&e, 0), (&f, 0)]).await;
+
+        let rotation = w
+            .handler
+            .resolve_match_result(w.session_id, *ab.id(), *cd.id())
+            .await
+            .unwrap();
+
+        assert_eq!(rotation.courts.len(), 1);
+        let court = &rotation.courts[0];
+        assert_eq!(court.court, 1);
+        assert_eq!(court.holding_team_id, Some(*ab.id()));
+        assert_eq!(court.draft_team_ids.len(), 1);
+        assert!(!court.missing_challenger);
+
+        let teams = w.teams.0.lock().unwrap();
+        assert!(teams
+            .iter()
+            .find(|t| t.id() == ab.id())
+            .unwrap()
+            .is_holding());
+        assert!(teams
+            .iter()
+            .find(|t| t.id() == cd.id())
+            .unwrap()
+            .is_disbanded());
+        let draft = teams
+            .iter()
+            .find(|t| t.is_draft_for_court(1))
+            .expect("a draft tagged for court 1");
+        // the fresher players (0 games) get drafted, not the returning losers
+        let mut drafted = draft.player_ids().clone();
+        drafted.sort();
+        let mut expected = vec![*e.id(), *f.id()];
+        expected.sort();
+        assert_eq!(drafted, expected);
+        drop(teams);
+
+        // C and D are back on the list, one game each, still waiting
+        let queue = w.queue.0.lock().unwrap();
+        for loser in [c.id(), d.id()] {
+            assert_eq!(
+                *queue
+                    .iter()
+                    .find(|q| q.player_id() == loser)
+                    .unwrap()
+                    .games_played(),
+                1
+            );
+        }
+    }
+
+    /// A winner past the consecutive-win cap is disbanded too, so the court
+    /// needs two fresh challenger drafts, not one.
+    #[tokio::test]
+    async fn test_resolve_drafts_two_challengers_when_the_winner_hits_the_cap() {
+        let (a, b, c, d, e, f) = (male(), male(), male(), male(), male(), male());
+        let w = world(
+            GameMode::Male,
+            1,
+            &[
+                a.clone(),
+                b.clone(),
+                c.clone(),
+                d.clone(),
+                e.clone(),
+                f.clone(),
+            ],
+        );
+
+        let mut ab = Team::new(w.session_id, vec![*a.id(), *b.id()]);
+        ab.register_win(); // already won once — this result is the 2nd
+        let cd = Team::new(w.session_id, vec![*c.id(), *d.id()]);
+        w.add_teams([ab.clone(), cd.clone()]);
+        w.add_finished_match(1, &ab, &cd, &ab).await;
+        w.enqueue(&[(&e, 0), (&f, 0)]).await;
+
+        let rotation = w
+            .handler
+            .resolve_match_result(w.session_id, *ab.id(), *cd.id())
+            .await
+            .unwrap();
+
+        assert_eq!(rotation.courts.len(), 1);
+        assert_eq!(rotation.courts[0].holding_team_id, None);
+        assert_eq!(rotation.courts[0].draft_team_ids.len(), 2);
+
+        let teams = w.teams.0.lock().unwrap();
+        assert!(teams
+            .iter()
+            .find(|t| t.id() == ab.id())
+            .unwrap()
+            .is_disbanded());
+        assert_eq!(teams.iter().filter(|t| t.is_draft_for_court(1)).count(), 2);
+    }
+
+    /// `Mixed` with no player of a needed gender left in the queue → the
+    /// court is reported `missing_challenger` and no draft is created.
+    #[tokio::test]
+    async fn test_resolve_reports_missing_challenger_when_a_gender_runs_out() {
+        let (m1, f1, m2, m3) = (male(), female(), male(), male());
+        let w = world(
+            GameMode::Mixed,
+            1,
+            &[m1.clone(), f1.clone(), m2.clone(), m3.clone()],
+        );
+
+        // t2 is deliberately mis-composed (two men) — resolve doesn't police
+        // team gender; the point is the queue ends up all-male.
+        let t1 = Team::new(w.session_id, vec![*m1.id(), *f1.id()]);
+        let t2 = Team::new(w.session_id, vec![*m2.id(), *m3.id()]);
+        w.add_teams([t1.clone(), t2.clone()]);
+        w.add_finished_match(1, &t1, &t2, &t1).await;
+
+        let rotation = w
+            .handler
+            .resolve_match_result(w.session_id, *t1.id(), *t2.id())
+            .await
+            .unwrap();
+
+        assert_eq!(rotation.courts.len(), 1);
+        assert!(rotation.courts[0].missing_challenger);
+        assert!(rotation.courts[0].draft_team_ids.is_empty());
+        assert_eq!(
+            w.teams
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|t| t.is_draft())
+                .count(),
+            0
+        );
+    }
+
+    /// Regression for the guardian's C1: a court that already has a pending
+    /// challenger draft is NOT filled again when a *different* court's result
+    /// comes in. Two successive results leave two drafts total — one per
+    /// court — never three.
+    #[tokio::test]
+    async fn test_resolve_does_not_stack_drafts_on_a_court_that_already_has_a_pending_draft() {
+        let players: Vec<Player> = (0..8).map(|_| male()).collect();
+        let w = world(GameMode::Male, 2, &players);
+
+        let ab = Team::new(w.session_id, vec![*players[0].id(), *players[1].id()]);
+        let cd = Team::new(w.session_id, vec![*players[2].id(), *players[3].id()]);
+        let ef = Team::new(w.session_id, vec![*players[4].id(), *players[5].id()]);
+        let gh = Team::new(w.session_id, vec![*players[6].id(), *players[7].id()]);
+        w.add_teams([ab.clone(), cd.clone(), ef.clone(), gh.clone()]);
+
+        // court 1 done (AB beat CD); court 2 still running (EF vs GH)
+        w.add_finished_match(1, &ab, &cd, &ab).await;
+        let court2_match = Match::new(w.session_id, 2, *ef.id(), *gh.id()).unwrap();
+        let court2_match_id = *court2_match.id();
+        w.handler
+            .match_repository
+            .insert(court2_match)
+            .await
+            .unwrap();
+
+        let first = w
+            .handler
+            .resolve_match_result(w.session_id, *ab.id(), *cd.id())
+            .await
+            .unwrap();
+        assert_eq!(first.courts.len(), 1);
+        assert_eq!(first.courts[0].court, 1);
+        assert_eq!(w.drafts_by_court(), vec![1]);
+
+        // court 2's match now finishes
+        let mut m2 = w
+            .handler
+            .match_repository
+            .get(&court2_match_id)
+            .await
+            .unwrap()
+            .unwrap();
+        m2.finish(*ef.id()).unwrap();
+        w.handler.match_repository.update(m2).await.unwrap();
+
+        let second = w
+            .handler
+            .resolve_match_result(w.session_id, *ef.id(), *gh.id())
+            .await
+            .unwrap();
+
+        // only court 2 is filled — court 1 already has its pending draft
+        assert_eq!(second.courts.len(), 1);
+        assert_eq!(second.courts[0].court, 2);
+        let mut drafts = w.drafts_by_court();
+        drafts.sort();
+        assert_eq!(drafts, vec![1, 2], "one draft per court, not three");
+    }
+}
