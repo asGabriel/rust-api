@@ -88,20 +88,23 @@ impl Match {
 }
 
 /// Centralizes the checks for starting a match: both teams must belong to
-/// this session, have exactly a full roster (`players_per_team` players —
-/// gender composition is NOT checked here, the manual paths may override
-/// it), still be around to play (not disbanded), and not already be busy in
-/// another in-progress match. Bound to a `session_id` and `players_per_team`
-/// at construction, same as `TeamValidator`.
+/// this session, be made up only of players still confirmed in it, have
+/// exactly a full roster (`players_per_team` players — gender composition is
+/// NOT checked here, the manual paths may override it), still be around to
+/// play (not disbanded), and not already be busy in another in-progress
+/// match. Bound to a `session_id`, its confirmed `player_ids` and
+/// `players_per_team` at construction, same as `TeamValidator`.
 pub struct MatchStartValidator {
     session_id: Uuid,
+    session_player_ids: Vec<Uuid>,
     players_per_team: u8,
 }
 
 impl MatchStartValidator {
-    pub fn new(session_id: Uuid, players_per_team: u8) -> Self {
+    pub fn new(session_id: Uuid, session_player_ids: Vec<Uuid>, players_per_team: u8) -> Self {
         Self {
             session_id,
+            session_player_ids,
             players_per_team,
         }
     }
@@ -136,6 +139,16 @@ impl MatchStartValidator {
         if team.is_disbanded() {
             return Err(Box::new(HttpError::conflict(format!(
                 "Team {team_id} has been disbanded and cannot start a match"
+            ))));
+        }
+
+        if let Some(player_id) = team
+            .player_ids()
+            .iter()
+            .find(|player_id| !self.session_player_ids.contains(player_id))
+        {
+            return Err(Box::new(HttpError::conflict(format!(
+                "Team {team_id} has player {player_id}, who is no longer confirmed in this session"
             ))));
         }
 
@@ -270,15 +283,25 @@ mod tests {
         Team::new(session_id, vec![Uuid::new_v4(), Uuid::new_v4()])
     }
 
+    /// A validator whose confirmed-player list already contains every player
+    /// on `teams`, so the session-membership check is a no-op and each test
+    /// exercises exactly the rule it names.
+    fn validator_for(session_id: Uuid, teams: &[&Team]) -> MatchStartValidator {
+        let players: Vec<Uuid> = teams
+            .iter()
+            .flat_map(|team| team.player_ids().iter().copied())
+            .collect();
+        MatchStartValidator::new(session_id, players, 2)
+    }
+
     #[test]
     fn test_match_start_validator_accepts_full_draft_teams_from_the_same_session() {
         let session_id = Uuid::new_v4();
         let team_a = team(session_id);
         let team_b = team(session_id);
-        let team_a_id = *team_a.id();
-        let team_b_id = *team_b.id();
+        let (team_a_id, team_b_id) = (*team_a.id(), *team_b.id());
 
-        let result = MatchStartValidator::new(session_id, 2).validate_start(
+        let result = validator_for(session_id, &[&team_a, &team_b]).validate_start(
             &[team_a, team_b],
             &[],
             team_a_id,
@@ -293,11 +316,25 @@ mod tests {
         let session_id = Uuid::new_v4();
         let incomplete_team = Team::new(session_id, vec![Uuid::new_v4()]);
         let team_b = team(session_id);
-        let team_a_id = *incomplete_team.id();
-        let team_b_id = *team_b.id();
+        let (team_a_id, team_b_id) = (*incomplete_team.id(), *team_b.id());
 
-        let err = MatchStartValidator::new(session_id, 2)
+        let err = validator_for(session_id, &[&incomplete_team, &team_b])
             .validate_start(&[incomplete_team, team_b], &[], team_a_id, team_b_id)
+            .unwrap_err();
+
+        assert_eq!(err.kind, HttpErrorKind::Conflict);
+    }
+
+    #[test]
+    fn test_match_start_validator_rejects_team_with_a_player_not_confirmed_in_the_session() {
+        let session_id = Uuid::new_v4();
+        let team_a = team(session_id);
+        let team_b = team(session_id);
+        let (team_a_id, team_b_id) = (*team_a.id(), *team_b.id());
+
+        // Session only knows team_a's players — team_b has an outsider.
+        let err = MatchStartValidator::new(session_id, team_a.player_ids().clone(), 2)
+            .validate_start(&[team_a, team_b], &[], team_a_id, team_b_id)
             .unwrap_err();
 
         assert_eq!(err.kind, HttpErrorKind::Conflict);
@@ -308,10 +345,9 @@ mod tests {
         let session_id = Uuid::new_v4();
         let team_a = team(session_id);
         let team_b = team(Uuid::new_v4());
-        let team_a_id = *team_a.id();
-        let team_b_id = *team_b.id();
+        let (team_a_id, team_b_id) = (*team_a.id(), *team_b.id());
 
-        let err = MatchStartValidator::new(session_id, 2)
+        let err = validator_for(session_id, &[&team_a, &team_b])
             .validate_start(&[team_a, team_b], &[], team_a_id, team_b_id)
             .unwrap_err();
 
@@ -324,10 +360,9 @@ mod tests {
         let mut team_a = team(session_id);
         team_a.disband();
         let team_b = team(session_id);
-        let team_a_id = *team_a.id();
-        let team_b_id = *team_b.id();
+        let (team_a_id, team_b_id) = (*team_a.id(), *team_b.id());
 
-        let err = MatchStartValidator::new(session_id, 2)
+        let err = validator_for(session_id, &[&team_a, &team_b])
             .validate_start(&[team_a, team_b], &[], team_a_id, team_b_id)
             .unwrap_err();
 
@@ -340,13 +375,11 @@ mod tests {
         let team_a = team(session_id);
         let team_b = team(session_id);
         let team_c = team(session_id);
-        let team_a_id = *team_a.id();
-        let team_b_id = *team_b.id();
-        let team_c_id = *team_c.id();
+        let (team_a_id, team_b_id, team_c_id) = (*team_a.id(), *team_b.id(), *team_c.id());
 
         let ongoing = Match::new(session_id, 1, team_a_id, team_b_id).unwrap();
 
-        let err = MatchStartValidator::new(session_id, 2)
+        let err = validator_for(session_id, &[&team_a, &team_b, &team_c])
             .validate_start(&[team_a, team_b, team_c], &[ongoing], team_a_id, team_c_id)
             .unwrap_err();
 

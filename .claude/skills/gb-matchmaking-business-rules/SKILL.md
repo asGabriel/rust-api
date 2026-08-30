@@ -72,7 +72,9 @@ habilidade, histórico de parceria, aleatoriedade controlada, etc.
 - `Draft` — sugestão de time formada pra entrar numa quadra, ainda **não**
   em `Match`; editável (`PATCH /matchmaking/teams/{id}/players`) e
   descartável (`DELETE`). Seus jogadores já saíram da `session_queue`
-  (reservados).
+  (reservados). `Team.court` = a quadra que ele é desafiante (preenchido
+  pelo automático e pelo seeding; `NULL` num `Draft` manual — o operador
+  escolhe a quadra ao iniciar).
 - `Playing` — em `Match` aberto (derivado por trigger, como antes).
 - `Holding` — venceu e está segurando a quadra.
 - `Disbanded` — perdeu, girou por bater o cap de vitórias, ou `Draft`
@@ -87,18 +89,36 @@ habilidade, histórico de parceria, aleatoriedade controlada, etc.
    mesma quadra (`MAX_CONSECUTIVE_WINS`), também é desfeito e seus
    jogadores voltam pra lista (`games_played + 1`); senão fica `Holding`.
 4. **Preenche as quadras ociosas.** Varre toda quadra que a `Session` já
-   abriu (última `Match` de cada `court`); pra cada uma cuja última partida
-   já tem resultado: `needed` = 1 se há `Team` `Holding` nela, senão 2.
-   Chama `next_challenger` `needed` vezes, cada chamada **removendo da
-   `session_queue`** os jogadores escolhidos (um `DELETE ... RETURNING` só)
-   antes de criar o `Team` `Draft`; se o `DELETE` levar menos linhas que o
-   pedido (outra quadra pegou o jogador primeiro), a vaga é pulada. Ordem:
-   quadra ociosa há mais tempo primeiro.
-5. A resposta traz, por quadra, o(s) `draft_team_id`(s) e o
-   `holding_team_id` — **não inicia `Match` nenhum**.
+   abriu (última `Match` de cada `court`). Uma quadra é preenchida se a
+   última partida dela já tem resultado **e** ela ainda não tem um `Team`
+   `Draft` pendente pra ela (`Team.court`). `needed` = 1 se há `Team`
+   `Holding` nela, senão 2. Chama `next_challenger` `needed` vezes; cada
+   chamada **remove da `session_queue`** os jogadores escolhidos (um
+   `DELETE ... RETURNING` só) antes de criar o `Team` `Draft` (com
+   `court = <quadra>`). Se o `DELETE` levar menos linhas que o pedido (outra
+   quadra concorrente pegou o jogador primeiro), os que *foram* removidos
+   voltam pra lista e a vaga é pulada. Ordem: quadra ociosa há mais tempo
+   primeiro.
+5. A resposta traz, por quadra, o(s) `draft_team_id`(s), o `holding_team_id`
+   e `missing_challenger` — **não inicia `Match` nenhum**.
 
-Orquestrado por `TeamHandlerImpl::resolve_match_result`, chamado por
-`MatchHandlerImpl::report_match_result`.
+O `Team.court` do `Draft` é o que impede empilhar um 2º desafiante na mesma
+quadra a cada resultado enquanto o operador não confirma nem descarta o 1º.
+Quando ele confirma (`POST /matchmaking/matches/`), o draft vira `Playing` e
+a quadra passa a viver no `Match`; quando descarta, o draft some e a quadra
+volta a ser preenchida na próxima varredura.
+
+Orquestrado por `TeamHandlerImpl::resolve_match_result` (que reusa
+`fill_idle_courts`), chamado por `MatchHandlerImpl::report_match_result`.
+
+#### Refazer o preenchimento sem resultado
+
+- `POST /matchmaking/sessions/{id}/queue/fill` (`refresh_idle_courts`) roda
+  a mesma varredura de "preenche quadras ociosas" sem um resultado pra
+  reagir — pra quando as quadras estão ociosas com `missing_challenger` e
+  não há partida em andamento pra disparar isso sozinho (ex.: jogadores
+  chegaram atrasados e o operador acabou de confirmá-los na `Session`).
+  Devolve as mesmas `CourtSuggestion`s.
 
 #### `next_challenger` (sugestão automática)
 
@@ -135,9 +155,14 @@ Orquestrado por `TeamHandlerImpl::resolve_match_result`, chamado por
   `Draft`) **não** valida gênero — o operador pode compor qualquer dupla
   (ex.: 2 homens numa `Session` `Mixed`). Mesmo princípio do antigo
   `create_team`: a montagem manual é soberana sobre a config da `Session`.
-- **Iniciar o `Match`** valida, pra os dois times: jogadores confirmados na
-  `Session`, ninguém já `Playing`/`Holding` em outra quadra, e **roster com
-  exatamente `players_per_team` jogadores** — mas **não** valida gênero.
+- **Iniciar o `Match`** (`MatchStartValidator::validate_start`) valida, pra
+  os dois times: pertencer à `Session`; **todo jogador ainda confirmado em
+  `Session::player_ids`** (barra iniciar com um time que segurava um jogador
+  depois tirado da sessão); não estar `Disbanded`; **roster com exatamente
+  `players_per_team` jogadores** (barra tanto curto quanto grande — cobre o
+  gap de tamanho de roster do `TeamValidator` no ponto de iniciar); e nenhum
+  time já num `Match` em andamento (`Match::busy_team_ids`). **Não** valida
+  gênero.
 
 #### Prioridade manual
 
@@ -231,13 +256,27 @@ Ex: balanceamento de nível tem prioridade sobre variar parceiros.
 
 ## Casos-limite conhecidos
 
-- **Concorrência no pop da lista:** criar um `Draft` (automático ou manual)
-  remove seus jogadores de `session_queue` na **mesma transação** — dois
-  `report_match_result` concorrentes (quadras diferentes da mesma `Session`)
-  não conseguem reservar o mesmo jogador pras duas quadras. É o único ponto
-  do módulo com proteção transacional; o resto (`create_match` check + insert,
-  etc.) ainda é TOCTOU teórico, aceito por não haver operadores simultâneos
-  de fato.
+- **Concorrência no pop da lista:** o único passo atômico é o
+  `DELETE ... RETURNING` que tira os jogadores da `session_queue` — não há
+  transação envolvendo `remove` + `insert` do `Draft` (são dois statements
+  autocommit). Dois `report_match_result` concorrentes (quadras diferentes
+  da mesma `Session`) não conseguem os dois reservar o mesmo jogador: o
+  segundo `DELETE` leva menos linhas que pediu, e aí os jogadores que ele
+  *chegou* a remover voltam pra lista e a vaga é pulada. O resto do módulo
+  (`create_match` check + insert, `update_session`, etc.) segue TOCTOU
+  teórico, aceito por não haver operadores simultâneos de fato. Envolver
+  `remove`+`insert` numa `sqlx::Transaction` de verdade é follow-up.
+- **Jogador tirado da `Session` que está num `Draft` ou `Holding`:**
+  `update_session` só apaga a linha da `session_queue` dele — o `Draft`/
+  `Holding` fica com o roster de então. `MatchStartValidator` barra iniciar
+  um `Match` com esse time (checa `Session::player_ids`), então o time fica
+  "morto" até o operador editar/descartar. Aceito; a via limpa é o operador
+  não tirar da sessão quem está prestes a jogar.
+- **Re-adicionar um jogador tirado da `Session` no meio:** ele volta pra
+  `session_queue` com `games_played = 0` (o `update_session` não deriva do
+  histórico), então fura a fila na ordenação por jogos. Aceito — tirar e
+  re-adicionar alguém no meio da sessão é caso raro; se incomodar, derivar
+  `games_played` no `update_session` igual `resolve_match_result` faz.
 - **`next_challenger` sem gente suficiente do gênero necessário** (`Mixed`
   desbalanceado, ou lista quase vazia): não forma `Draft` pra aquela quadra,
   ela fica ociosa e a resposta sinaliza. O operador monta manualmente

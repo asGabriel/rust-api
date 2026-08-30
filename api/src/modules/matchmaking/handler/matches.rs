@@ -64,13 +64,17 @@ impl MatchHandler for MatchHandlerImpl {
             .list_by_session(&request.session_id)
             .await?;
 
-        MatchStartValidator::new(request.session_id, *session.settings().players_per_team())
-            .validate_start(
-                &session_teams,
-                &session_matches,
-                request.team_a_id,
-                request.team_b_id,
-            )?;
+        MatchStartValidator::new(
+            request.session_id,
+            session.player_ids().clone(),
+            *session.settings().players_per_team(),
+        )
+        .validate_start(
+            &session_teams,
+            &session_matches,
+            request.team_a_id,
+            request.team_b_id,
+        )?;
 
         let match_ = Match::new(
             request.session_id,

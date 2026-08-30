@@ -21,6 +21,7 @@ pub fn configure_routes() -> Router<AppState> {
             .route("/{id}", get(get_session).patch(update_session))
             .route("/{id}/queue", get(list_queue))
             .route("/{id}/queue/seed", post(seed_queue))
+            .route("/{id}/queue/fill", post(fill_idle_courts))
             .route("/{id}/queue/{player_id}", patch(set_pin)),
     )
 }
@@ -95,6 +96,19 @@ async fn seed_queue(state: State<AppState>, Path(id): Path<Uuid>) -> HttpResult<
     let drafts = state.matchmaking_state.team_handler.seed_queue(id).await?;
 
     Ok(Json(drafts))
+}
+
+async fn fill_idle_courts(
+    state: State<AppState>,
+    Path(id): Path<Uuid>,
+) -> HttpResult<impl IntoResponse> {
+    let rotation = state
+        .matchmaking_state
+        .team_handler
+        .refresh_idle_courts(id)
+        .await?;
+
+    Ok(Json(rotation.courts))
 }
 
 async fn set_pin(

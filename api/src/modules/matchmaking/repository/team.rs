@@ -43,13 +43,14 @@ impl TeamRepository for TeamRepositoryImpl {
         let row = sqlx::query(
             r#"
             INSERT INTO matchmaking.team (
-                id, session_id, player_ids, status, consecutive_wins, created_at
+                id, session_id, player_ids, status, consecutive_wins, court, created_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT (id) DO UPDATE SET
                 player_ids = EXCLUDED.player_ids,
                 status = EXCLUDED.status,
-                consecutive_wins = EXCLUDED.consecutive_wins
+                consecutive_wins = EXCLUDED.consecutive_wins,
+                court = EXCLUDED.court
             RETURNING *
             "#,
         )
@@ -58,6 +59,7 @@ impl TeamRepository for TeamRepositoryImpl {
         .bind(player_ids)
         .bind(status)
         .bind(*team.consecutive_wins() as i16)
+        .bind(team.court().map(|court| court as i16))
         .bind(*team.created_at())
         .fetch_one(&self.pool)
         .await?;

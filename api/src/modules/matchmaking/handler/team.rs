@@ -67,6 +67,12 @@ pub trait TeamHandler {
         winner_team_id: Uuid,
         loser_team_id: Uuid,
     ) -> HttpResult<ResolvedRotation>;
+
+    /// Re-runs the idle-court challenger fill on demand, with no match
+    /// result to react to — for when courts are stuck `missing_challenger`
+    /// and no match is running to trigger it (e.g. players arrived late and
+    /// the operator just added them to the session).
+    async fn refresh_idle_courts(&self, session_id: Uuid) -> HttpResult<ResolvedRotation>;
 }
 
 pub type DynTeamHandler = dyn TeamHandler + Send + Sync;
@@ -306,17 +312,21 @@ impl TeamHandler for TeamHandlerImpl {
 
         let court_cap = usize::from(*session.available_courts()) * 2;
         let mut created = Vec::new();
-        for group in groups
+        for (i, group) in groups
             .into_iter()
             .filter(|group| group.len() == usize::from(players_per_team))
             .take(court_cap)
+            .enumerate()
         {
+            // Pairs of opening drafts go to court 1, 2, … in order, so the
+            // operator sees which two face off where.
+            let court = (i / 2 + 1) as u8;
             self.session_queue_repository
                 .remove_players(&session_id, &group)
                 .await?;
             created.push(
                 self.team_repository
-                    .insert(Team::new(session_id, group))
+                    .insert(Team::new(session_id, group).assign_court(court))
                     .await?,
             );
         }
@@ -331,7 +341,6 @@ impl TeamHandler for TeamHandlerImpl {
         loser_team_id: Uuid,
     ) -> HttpResult<ResolvedRotation> {
         let session = self.load_session(session_id).await?;
-        let players_per_team = *session.settings().players_per_team();
 
         let session_teams = self.team_repository.list_by_session(&session_id).await?;
         let session_matches = self.match_repository.list_by_session(&session_id).await?;
@@ -373,14 +382,85 @@ impl TeamHandler for TeamHandlerImpl {
             .await?;
         queue_entries.extend(returned);
 
-        // Every court whose most recent match is finished needs a challenger.
-        // `session_teams` was read before the winner/loser mutations above,
-        // so it still shows them `Playing`; `winner_still_holding` is the
-        // authority for `winner_team_id` and `loser_team_id` is never
-        // holding — every other court's pair is untouched here and accurate
-        // in the snapshot.
+        let courts = self
+            .fill_idle_courts(
+                &session,
+                &session_teams,
+                &session_matches,
+                &history,
+                &session_players,
+                queue_entries,
+                Some(FinishedMatch {
+                    winner_team_id,
+                    loser_team_id,
+                    winner_still_holding,
+                }),
+            )
+            .await?;
+
+        Ok(ResolvedRotation { courts })
+    }
+
+    async fn refresh_idle_courts(&self, session_id: Uuid) -> HttpResult<ResolvedRotation> {
+        let session = self.load_session(session_id).await?;
+        let session_teams = self.team_repository.list_by_session(&session_id).await?;
+        let session_matches = self.match_repository.list_by_session(&session_id).await?;
+        let history = PartnerHistory::from_matches(&session_teams, &session_matches);
+        let session_players = self.session_players(&session).await?;
+        let queue_entries = self
+            .session_queue_repository
+            .list_by_session(&session_id)
+            .await?;
+
+        let courts = self
+            .fill_idle_courts(
+                &session,
+                &session_teams,
+                &session_matches,
+                &history,
+                &session_players,
+                queue_entries,
+                None,
+            )
+            .await?;
+
+        Ok(ResolvedRotation { courts })
+    }
+}
+
+/// The just-finished match, so `fill_idle_courts` can answer "is this
+/// court's winner still holding?" from the authoritative mutation instead
+/// of the pre-mutation `session_teams` snapshot.
+struct FinishedMatch {
+    winner_team_id: Uuid,
+    loser_team_id: Uuid,
+    winner_still_holding: bool,
+}
+
+impl TeamHandlerImpl {
+    /// Drafts a challenger for every court whose most recent match is
+    /// finished and that doesn't already have a pending `Draft` waiting for
+    /// the operator to confirm — oldest-idle first, so a result on one court
+    /// can unstick another. Each `next_challenger` pop removes its players
+    /// from the queue first (`DELETE ... RETURNING`); if a concurrent result
+    /// already took one, the claimed rows are put back and the slot is
+    /// skipped. Persists the drafts; starts no match.
+    #[allow(clippy::too_many_arguments)]
+    async fn fill_idle_courts(
+        &self,
+        session: &Session,
+        session_teams: &[Team],
+        session_matches: &[Match],
+        history: &PartnerHistory,
+        session_players: &[Player],
+        mut queue_entries: Vec<QueueEntry>,
+        finished: Option<FinishedMatch>,
+    ) -> HttpResult<Vec<CourtSuggestion>> {
+        let players_per_team = *session.settings().players_per_team();
+        let busy_team_ids = Match::busy_team_ids(session_matches);
+
         let mut latest_match_by_court: HashMap<u8, &Match> = HashMap::new();
-        for match_ in &session_matches {
+        for match_ in session_matches {
             latest_match_by_court
                 .entry(*match_.court())
                 .and_modify(|latest| {
@@ -391,29 +471,33 @@ impl TeamHandler for TeamHandlerImpl {
                 .or_insert(match_);
         }
 
-        let busy_team_ids = Match::busy_team_ids(&session_matches);
         let mut idle: Vec<(u8, DateTime<Utc>, Option<Uuid>)> = Vec::new();
         for (&court, latest) in &latest_match_by_court {
             if !latest.is_finished() {
+                continue;
+            }
+            // The court already has a challenger draft the operator hasn't
+            // started or discarded yet — don't stack a second one on the
+            // next result (that would drain the queue into dead drafts).
+            if session_teams
+                .iter()
+                .any(|team| team.is_draft_for_court(court))
+            {
                 continue;
             }
 
             let holding_team_id =
                 [*latest.team_a_id(), *latest.team_b_id()]
                     .into_iter()
-                    .find(|&team_id| {
-                        if team_id == winner_team_id {
-                            winner_still_holding
-                        } else if team_id == loser_team_id {
-                            false
-                        } else {
-                            session_teams
-                                .iter()
-                                .find(|team| *team.id() == team_id)
-                                .is_some_and(|team| {
-                                    team.is_holding() && !busy_team_ids.contains(team.id())
-                                })
-                        }
+                    .find(|&team_id| match &finished {
+                        Some(f) if team_id == f.winner_team_id => f.winner_still_holding,
+                        Some(f) if team_id == f.loser_team_id => false,
+                        _ => session_teams
+                            .iter()
+                            .find(|team| *team.id() == team_id)
+                            .is_some_and(|team| {
+                                team.is_holding() && !busy_team_ids.contains(team.id())
+                            }),
                     });
 
             idle.push((
@@ -436,7 +520,7 @@ impl TeamHandler for TeamHandlerImpl {
                     *session.game_mode(),
                     players_per_team,
                 );
-                let Some(suggestion) = queue.next_challenger(&session_players, &history) else {
+                let Some(suggestion) = queue.next_challenger(session_players, history) else {
                     missing_challenger = true;
                     break;
                 };
@@ -444,19 +528,20 @@ impl TeamHandler for TeamHandlerImpl {
                 queue_entries.retain(|entry| !suggestion.player_ids.contains(entry.player_id()));
                 let claimed = self
                     .session_queue_repository
-                    .remove_players(&session_id, &suggestion.player_ids)
+                    .remove_players(session.id(), &suggestion.player_ids)
                     .await?;
-                // Another court (a concurrent result on the same session)
-                // grabbed one of these players first: the `DELETE` took
-                // fewer rows than we asked for. Skip this slot rather than
-                // draft a player who's already reserved elsewhere.
                 if claimed.len() != suggestion.player_ids.len() {
+                    // A concurrent result on another court grabbed one of
+                    // these players first. Put the ones we did claim back on
+                    // the list and skip this slot.
+                    self.session_queue_repository.insert_many(&claimed).await?;
+                    queue_entries.extend(claimed);
                     missing_challenger = true;
                     break;
                 }
                 let draft = self
                     .team_repository
-                    .insert(Team::new(session_id, suggestion.player_ids))
+                    .insert(Team::new(*session.id(), suggestion.player_ids).assign_court(court))
                     .await?;
                 draft_team_ids.push(*draft.id());
             }
@@ -469,7 +554,7 @@ impl TeamHandler for TeamHandlerImpl {
             });
         }
 
-        Ok(ResolvedRotation { courts })
+        Ok(courts)
     }
 }
 

@@ -67,6 +67,14 @@ pub struct Team {
     player_ids: Vec<Uuid>,
     status: TeamStatus,
     consecutive_wins: u8,
+    /// The court this team is drafted as the next challenger for, if any.
+    /// `Some` only for a `Draft` the queue formed for a specific idle court
+    /// (or a seeded opening draft) — it's how `resolve_match_result` knows
+    /// that court already has a pending challenger and must not be filled
+    /// again on the next result. A manually assembled draft has `None` (the
+    /// operator picks the court when starting the match); once a team is
+    /// `Playing`/`Holding` the court lives on the `Match`, not here.
+    court: Option<u8>,
     created_at: DateTime<Utc>,
 }
 
@@ -75,8 +83,9 @@ impl Team {
     /// court, so other waiting teams get a turn.
     const MAX_CONSECUTIVE_WINS: u8 = 2;
 
-    /// A freshly drafted lineup for a court — the operator confirms (or
-    /// edits, or discards) it before it starts a match.
+    /// A freshly drafted lineup — the operator confirms (or edits, or
+    /// discards) it before it starts a match. Not yet tied to a court; use
+    /// `assign_court` for a draft the queue formed for a specific idle one.
     pub fn new(session_id: Uuid, player_ids: Vec<Uuid>) -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -84,12 +93,26 @@ impl Team {
             player_ids,
             status: TeamStatus::Draft,
             consecutive_wins: 0,
+            court: None,
             created_at: Utc::now(),
         }
     }
 
+    /// Marks this draft as the pending challenger for `court`, so the
+    /// court-fill in `resolve_match_result` won't draft a second challenger
+    /// for it before the operator confirms this one.
+    pub fn assign_court(mut self, court: u8) -> Self {
+        self.court = Some(court);
+        self
+    }
+
     pub fn is_draft(&self) -> bool {
         self.status == TeamStatus::Draft
+    }
+
+    /// Whether this team is a `Draft` still pending confirmation for `court`.
+    pub fn is_draft_for_court(&self, court: u8) -> bool {
+        self.is_draft() && self.court == Some(court)
     }
 
     pub fn is_holding(&self) -> bool {
@@ -152,6 +175,7 @@ getters! {
         player_ids: Vec<Uuid>,
         status: TeamStatus,
         consecutive_wins: u8,
+        court: Option<u8>,
         created_at: DateTime<Utc>,
     }
 }
@@ -166,6 +190,7 @@ impl From<&sqlx::postgres::PgRow> for Team {
             player_ids: row.get("player_ids"),
             status: row.get::<String, _>("status").into(),
             consecutive_wins: row.get::<i16, _>("consecutive_wins") as u8,
+            court: row.get::<Option<i16>, _>("court").map(|court| court as u8),
             created_at: row.get("created_at"),
         }
     }
