@@ -23,11 +23,10 @@ description: Regras de negócio do módulo de matchmaking — critérios de pare
   (`session_queue`) — ver "Fila e rotação de quadra". `next_challenger` pega
   os primeiros da lista sem tentar alternativas de pareamento; só **anota**
   (`repeats_partner`, nunca bloqueia) se os escolhidos já jogaram juntos na
-  mesma `Session`, via `PartnerHistory` (só conta `Team`s que de fato
-  entraram em algum `Match`). O `TeamDrawer::draw` só é usado no **seeding**
-  inicial (`queue/seed`), pra distribuir os jogadores de abertura entre as
-  quadras — nesse ponto o histórico está vazio, então é só embaralhamento
-  respeitando gênero.
+  mesma `Session`, via `PartnerHistory`
+  (`api/src/modules/matchmaking/domain/partner_history.rs`; só conta `Team`s
+  que de fato entraram em algum `Match`). Não há sorteio automático de
+  duplas — o arranque da `Session` é manual (ver "Arranque" abaixo).
 - Quem não entra num time agora (não é dos primeiros da lista, ou, em
   `Mixed`, é do gênero já esgotado na rodada) continua na `session_queue`,
   visível via `GET /matchmaking/sessions/{id}/queue`, e entra numa rodada
@@ -72,9 +71,10 @@ habilidade, histórico de parceria, aleatoriedade controlada, etc.
 - `Draft` — sugestão de time formada pra entrar numa quadra, ainda **não**
   em `Match`; editável (`PATCH /matchmaking/teams/{id}/players`) e
   descartável (`DELETE`). Seus jogadores já saíram da `session_queue`
-  (reservados). `Team.court` = a quadra que ele é desafiante (preenchido
-  pelo automático e pelo seeding; `NULL` num `Draft` manual — o operador
-  escolhe a quadra ao iniciar).
+  (reservados). `Team.court` = a quadra da qual ele é desafiante (preenchido
+  quando `resolve_match_result`/`fill_idle_courts` formam o `Draft` pra uma
+  quadra específica; `NULL` num `Draft` manual — o operador escolhe a quadra
+  ao iniciar).
 - `Playing` — em `Match` aberto (derivado por trigger, como antes).
 - `Holding` — venceu e está segurando a quadra.
 - `Disbanded` — perdeu, girou por bater o cap de vitórias, ou `Draft`
@@ -149,8 +149,8 @@ Orquestrado por `TeamHandlerImpl::resolve_match_result` (que reusa
 
 #### Montagem manual (contingência) vs. automático
 
-- O caminho **automático** (`next_challenger`, seeding) **respeita o
-  `GameMode`**: não monta dupla fora da composição de gênero.
+- O caminho **automático** (`next_challenger` no resultado / `fill`)
+  **respeita o `GameMode`**: não monta dupla fora da composição de gênero.
 - O caminho **manual** (criar `Draft` direto, ou editar o roster de um
   `Draft`) **não** valida gênero — o operador pode compor qualquer dupla
   (ex.: 2 homens numa `Session` `Mixed`). Mesmo princípio do antigo
@@ -171,14 +171,18 @@ Orquestrado por `TeamHandlerImpl::resolve_match_result` (que reusa
   vai pegar esses jogadores primeiro. Não há mais `Team::with_priority` nem
   `create_priority_team`.
 
-#### Seeding inicial
+#### Arranque (primeira rodada)
 
-- `POST /matchmaking/sessions/{id}/queue/seed` forma as `Team`s `Draft` de
-  abertura: `TeamDrawer::draw` distribui os jogadores da lista (respeitando
-  gênero, histórico vazio) em até `2 * available_courts` times; esses
-  jogadores saem da lista. Devolve os `Draft`s — mesmo fluxo "revisar →
-  confirmar". Só funciona enquanto a `Session` não tiver nenhum `Match`.
-  Substitui `draw_teams` (`TeamHandlerImpl::seed_queue`).
+- **Manual, não há sorteio.** Com todos na `session_queue` e nenhuma quadra
+  aberta, o operador abre cada quadra montando os dois times na mão:
+  `POST /matchmaking/teams/` (`create_team`) duas vezes — escolhe os
+  jogadores, forma um `Draft`, tira esses jogadores da fila, ignora gênero —
+  e `POST /matchmaking/matches/` pra iniciar. (O frontend junta as 3
+  chamadas num fluxo só.)
+- Não existe endpoint que forme os times de abertura automaticamente —
+  `TeamDrawer` e o antigo `queue/seed`/`draw_teams` foram removidos
+  (2026-08-30, ver "Histórico"). Depois da 1ª rodada a rotação segue por
+  resultado (`resolve_match_result`) + `fill` sob demanda.
 - **Trade-off aceito (preenchimento guloso):** quadras ociosas são
   preenchidas por ordem de espera, não maximizando o nº de quadras ativas —
   uma quadra que precisa de 2 times pode esvaziar a lista antes de uma
@@ -192,11 +196,8 @@ Orquestrado por `TeamHandlerImpl::resolve_match_result` (que reusa
   homens / metade mulheres por `Team`). Validado na criação/edição da
   `Session` (`GameMode::validate_players_per_team`, chamado por
   `Session::new`/`set_settings`/`set_game_mode`) e honrado pelo caminho
-  automático (`SessionQueue::next_challenger` e o seeding). A montagem
-  manual pode ignorar (ver "Montagem manual" em "Fila e rotação de quadra").
-- O seeding (`POST /matchmaking/sessions/{id}/queue/seed`) só forma
-  partidas de abertura enquanto a `Session` não tiver nenhum `Match`; depois
-  disso a rotação segue por resultado de partida. Não há re-seed.
+  automático (`SessionQueue::next_challenger`). A montagem manual pode
+  ignorar (ver "Montagem manual" em "Fila e rotação de quadra").
 - Um `Match` não pode ter as duas equipes iguais (`team_a_id != team_b_id`).
 - O resultado de um `Match` só pode ser reportado uma vez: reportar de novo
   um `Match` que já tem `winner_team_id` retorna `HttpError::conflict`.
@@ -287,7 +288,7 @@ Ex: balanceamento de nível tem prioridade sobre variar parceiros.
   lista já foram parceiros, a sugestão os repete; o operador troca no
   `Draft` se quiser. Aceito (o balanceamento de parceria é responsabilidade
   do operador nesse modelo, não da lista).
-- **Preenchimento guloso multi-quadra:** ver "Seeding inicial" em "Fila e
+- **Preenchimento guloso multi-quadra:** ver "Arranque (primeira rodada)" em "Fila e
   rotação de quadra" — quadras ociosas são servidas por ordem de espera,
   não maximizando o nº de quadras ativas.
 
