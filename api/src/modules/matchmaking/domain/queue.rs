@@ -127,19 +127,24 @@ impl SessionQueue {
         &self.entries
     }
 
-    /// The suggested next challenger: the players at the front of the queue
-    /// that satisfy `game_mode`'s gender composition for one team of
-    /// `players_per_team` — the first `players_per_team` in `Male`/`Female`/
-    /// `Open`, or `players_per_team / 2` of each gender (each in its own
-    /// order) in `Mixed`. Returns `None` when the queue doesn't hold enough
-    /// players of a required gender: the court stays idle and the operator
-    /// can still build the team manually (the manual path ignores
-    /// `game_mode` — see the matchmaking skill).
+    /// The suggested next challenger: `players_per_team` players taken from
+    /// the front of the queue, respecting `game_mode`'s gender composition
+    /// (the first `players_per_team` in `Male`/`Female`/`Open`, or
+    /// `players_per_team / 2` of each gender, each in its own order, in
+    /// `Mixed`). Returns `None` when the queue doesn't hold enough players
+    /// of a required gender: the court stays idle and the operator can still
+    /// build the team manually (the manual path ignores `game_mode` — see
+    /// the matchmaking skill).
     ///
-    /// The roster comes back in queue order; this is deliberately dumb — it
-    /// never reaches past the front of the list to find a fresher pairing.
-    /// `repeats_partner` just flags (never blocks) a pairing already played
-    /// this session, as a hint for the operator to swap.
+    /// One-deep partner avoidance: a slot skips a candidate who already
+    /// played with someone picked so far this session and takes the next in
+    /// line instead. Queue order (pinned, then fewest games, then longest
+    /// wait) still drives everything — the front of the list always plays,
+    /// only the partner slot moves to the next eligible person. If every
+    /// remaining candidate is a repeat the slot falls back to plain queue
+    /// order, so this can't stall. `repeats_partner` flags (never blocks) a
+    /// pairing that survived that fallback, as a hint for the operator to
+    /// swap.
     pub fn next_challenger(
         &self,
         players: &[Player],
@@ -151,29 +156,23 @@ impl SessionQueue {
         }
 
         let ordered = self.ordered();
+        let mut player_ids: Vec<Uuid> = Vec::with_capacity(per_team);
 
-        let player_ids: Vec<Uuid> = if self.game_mode.is_mixed() {
+        if self.game_mode.is_mixed() {
             let per_gender = per_team / 2;
-            let take = |gender: Gender| -> Option<Vec<Uuid>> {
-                let ids: Vec<Uuid> = ordered
+            for gender in [Gender::Male, Gender::Female] {
+                let pool: Vec<&QueueEntry> = ordered
                     .iter()
+                    .copied()
                     .filter(|entry| Self::gender_of(players, *entry.player_id()) == Some(gender))
-                    .take(per_gender)
-                    .map(|entry| *entry.player_id())
                     .collect();
-                (ids.len() == per_gender).then_some(ids)
-            };
-            let mut ids = take(Gender::Male)?;
-            ids.extend(take(Gender::Female)?);
-            ids
-        } else {
-            let ids: Vec<Uuid> = ordered
-                .iter()
-                .take(per_team)
-                .map(|entry| *entry.player_id())
-                .collect();
-            (ids.len() == per_team).then_some(ids)?
-        };
+                if !Self::take_avoiding_repeats(&pool, per_gender, &mut player_ids, history) {
+                    return None;
+                }
+            }
+        } else if !Self::take_avoiding_repeats(&ordered, per_team, &mut player_ids, history) {
+            return None;
+        }
 
         let repeats_partner = player_ids.iter().enumerate().any(|(i, a)| {
             player_ids[i + 1..]
@@ -185,6 +184,47 @@ impl SessionQueue {
             player_ids,
             repeats_partner,
         })
+    }
+
+    /// Appends up to `need` player ids from `pool` (already in queue order)
+    /// to `chosen`, preferring candidates who haven't partnered anyone
+    /// already in `chosen` this session. If fewer than `need` such
+    /// candidates exist, the remaining slots are filled from the front of
+    /// what's left, in order. Returns whether `need` ids were added.
+    fn take_avoiding_repeats(
+        pool: &[&QueueEntry],
+        need: usize,
+        chosen: &mut Vec<Uuid>,
+        history: &PartnerHistory,
+    ) -> bool {
+        let mut added = 0;
+        for entry in pool {
+            if added == need {
+                break;
+            }
+            let id = *entry.player_id();
+            if chosen.contains(&id) {
+                continue;
+            }
+            if chosen
+                .iter()
+                .all(|mate| !history.have_played_together(*mate, id))
+            {
+                chosen.push(id);
+                added += 1;
+            }
+        }
+        for entry in pool {
+            if added == need {
+                break;
+            }
+            let id = *entry.player_id();
+            if !chosen.contains(&id) {
+                chosen.push(id);
+                added += 1;
+            }
+        }
+        added == need
     }
 
     fn gender_of(players: &[Player], player_id: Uuid) -> Option<Gender> {
@@ -420,5 +460,97 @@ mod tests {
             .next_challenger(&players, &PartnerHistory::empty())
             .unwrap();
         assert_eq!(suggestion.player_ids[0], *pinned.id());
+    }
+
+    /// One-deep partner avoidance: when the two players at the front of the
+    /// queue already played together, the second slot moves to the next
+    /// player in queue order who is a fresh partner. The front player still
+    /// plays; wait-time order is otherwise untouched.
+    #[test]
+    fn test_next_challenger_swaps_partner_when_front_pair_already_played() {
+        let a = player(Gender::Male);
+        let b = player(Gender::Male);
+        let c = player(Gender::Male);
+        let players = vec![a.clone(), b.clone(), c.clone()];
+
+        // a already partnered b this session; a and c have not played.
+        let ab = Team::new(Uuid::new_v4(), vec![*a.id(), *b.id()]);
+        let played = Match::new(Uuid::new_v4(), 1, *ab.id(), Uuid::new_v4()).unwrap();
+        let history = PartnerHistory::from_matches(&[ab], &[played]);
+
+        // queue order a, b, c (a waited longest).
+        let queue = SessionQueue::new(
+            vec![
+                entry_for(*a.id(), 1, 90),
+                entry_for(*b.id(), 1, 60),
+                entry_for(*c.id(), 1, 30),
+            ],
+            GameMode::Male,
+            2,
+        );
+
+        let suggestion = queue.next_challenger(&players, &history).unwrap();
+        assert_eq!(suggestion.player_ids, vec![*a.id(), *c.id()]);
+        assert!(!suggestion.repeats_partner);
+    }
+
+    /// When every remaining candidate is a repeat partner, the slot falls
+    /// back to plain queue order and `repeats_partner` is set — the draft
+    /// is still produced (deadlock-proof).
+    #[test]
+    fn test_next_challenger_falls_back_to_queue_order_when_all_candidates_repeat() {
+        let a = player(Gender::Male);
+        let b = player(Gender::Male);
+        let c = player(Gender::Male);
+        let players = vec![a.clone(), b.clone(), c.clone()];
+
+        let ab = Team::new(Uuid::new_v4(), vec![*a.id(), *b.id()]);
+        let ac = Team::new(Uuid::new_v4(), vec![*a.id(), *c.id()]);
+        let m1 = Match::new(Uuid::new_v4(), 1, *ab.id(), Uuid::new_v4()).unwrap();
+        let m2 = Match::new(Uuid::new_v4(), 1, *ac.id(), Uuid::new_v4()).unwrap();
+        let history = PartnerHistory::from_matches(&[ab, ac], &[m1, m2]);
+
+        let queue = SessionQueue::new(
+            vec![
+                entry_for(*a.id(), 1, 90),
+                entry_for(*b.id(), 1, 60),
+                entry_for(*c.id(), 1, 30),
+            ],
+            GameMode::Male,
+            2,
+        );
+
+        let suggestion = queue.next_challenger(&players, &history).unwrap();
+        assert_eq!(suggestion.player_ids, vec![*a.id(), *b.id()]);
+        assert!(suggestion.repeats_partner);
+    }
+
+    /// `Mixed`: the cross-gender partner is chosen the same way — the first
+    /// woman in queue order who hasn't partnered the picked man.
+    #[test]
+    fn test_next_challenger_avoids_repeated_mixed_pairing() {
+        let m1 = player(Gender::Male);
+        let f1 = player(Gender::Female);
+        let f2 = player(Gender::Female);
+        let players = vec![m1.clone(), f1.clone(), f2.clone()];
+
+        let paired = Team::new(Uuid::new_v4(), vec![*m1.id(), *f1.id()]);
+        let played = Match::new(Uuid::new_v4(), 1, *paired.id(), Uuid::new_v4()).unwrap();
+        let history = PartnerHistory::from_matches(&[paired], &[played]);
+
+        // queue order m1, f1, f2.
+        let queue = SessionQueue::new(
+            vec![
+                entry_for(*m1.id(), 1, 90),
+                entry_for(*f1.id(), 1, 60),
+                entry_for(*f2.id(), 1, 30),
+            ],
+            GameMode::Mixed,
+            2,
+        );
+
+        let suggestion = queue.next_challenger(&players, &history).unwrap();
+        assert_eq!(suggestion.player_ids, vec![*m1.id(), *f2.id()]);
+        assert!(!suggestion.repeats_partner);
     }
 }

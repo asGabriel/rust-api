@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     sync::Arc,
 };
 
@@ -98,24 +98,21 @@ impl TeamHandlerImpl {
             .collect())
     }
 
-    /// How many finished matches each player has taken part in this session,
-    /// derived straight from the teams that entered a `Match` — the same
-    /// source `PartnerHistory` uses, so "games played" can never drift from
-    /// the record.
+    /// How many finished matches each player has taken part in this session.
+    /// Counted per finished match, not per team: a team that wins and holds
+    /// the court is one row in `teams` but plays several matches.
     fn games_played_by_player(teams: &[Team], matches: &[Match]) -> HashMap<Uuid, u16> {
-        let played_team_ids: HashSet<Uuid> = matches
+        let roster_by_team: HashMap<Uuid, &[Uuid]> = teams
             .iter()
-            .filter(|match_| match_.is_finished())
-            .flat_map(|match_| [*match_.team_a_id(), *match_.team_b_id()])
+            .map(|team| (*team.id(), team.player_ids().as_slice()))
             .collect();
 
         let mut games: HashMap<Uuid, u16> = HashMap::new();
-        for team in teams
-            .iter()
-            .filter(|team| played_team_ids.contains(team.id()))
-        {
-            for player_id in team.player_ids() {
-                *games.entry(*player_id).or_insert(0) += 1;
+        for match_ in matches.iter().filter(|match_| match_.is_finished()) {
+            for team_id in [match_.team_a_id(), match_.team_b_id()] {
+                for player_id in roster_by_team.get(team_id).copied().unwrap_or(&[]) {
+                    *games.entry(*player_id).or_insert(0) += 1;
+                }
             }
         }
         games
