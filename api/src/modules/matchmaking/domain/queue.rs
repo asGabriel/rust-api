@@ -4,9 +4,9 @@ use util::getters;
 use uuid::Uuid;
 
 use crate::modules::matchmaking::domain::{
+    partner_history::PartnerHistory,
     player::{Gender, Player},
     session::GameMode,
-    team_drawer::PartnerHistory,
 };
 
 /// One waiting player in a session's queue (`matchmaking.session_queue`).

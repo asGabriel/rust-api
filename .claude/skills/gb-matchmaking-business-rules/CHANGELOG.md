@@ -4,6 +4,20 @@
 > Não é recarregado automaticamente com o `SKILL.md` — só ler quando for
 > preciso entender o motivo/contexto histórico de uma regra específica.
 
+- 2026-08-30 — **arranque da `Session` vira 100% manual; `TeamDrawer`
+  removido.** Logo depois do redesenho da fila (entrada abaixo), o endpoint
+  `POST /sessions/{id}/queue/seed` (`TeamHandlerImpl::seed_queue`) — que
+  formava as duplas de abertura automaticamente via `TeamDrawer::draw` — foi
+  descartado a pedido do dono: com a gestão pela lista, o começo pode ser
+  igual ao resto (operador abre a quadra escolhendo os jogadores). O
+  arranque passa a ser `create_team` × 2 + `create_match`, e o frontend
+  junta isso num fluxo só. Com o seed fora, `TeamDrawer` (todo o
+  `domain/team_drawer.rs`, ~420 linhas de pareamento greedy
+  most-constrained-first) ficou sem nenhum uso — `next_challenger` nunca
+  usou — e foi **deletado**. `PartnerHistory` (que vivia no mesmo arquivo e
+  ainda é usado por `next_challenger` pra anotar `repeats_partner`) foi
+  movido pra `domain/partner_history.rs`. Sem mudança de schema. A rotação
+  do meio da sessão (`resolve_match_result` + `fill`) fica igual.
 - 2026-08-30 — **redesenho da fila: de fila de `Team`s pra lista de
   jogadores.** A fila deixou de ser uma coleção de `Team`s pré-formadas
   (`TeamQueueManager::release_players`, regras 1/2 de 2026-08-23) e passou a
