@@ -1,7 +1,7 @@
 use axum::{
     extract::{Path, State},
     response::IntoResponse,
-    routing::{delete, get, patch, post},
+    routing::{get, patch, post},
     Json, Router,
 };
 use http_error::HttpResult;
@@ -17,9 +17,8 @@ pub fn configure_routes() -> Router<AppState> {
         "/teams",
         Router::new()
             .route("/", post(create_team))
-            .route("/{session_id}", get(list_teams_by_session))
-            .route("/{team_id}/players", patch(update_team))
-            .route("/{team_id}", delete(discard_draft)),
+            .route("/{id}", get(list_teams_by_session).delete(discard_draft))
+            .route("/{id}/players", patch(update_team)),
     )
 }
 
