@@ -165,6 +165,39 @@ impl Session {
         self.player_ids = player_ids;
         self.updated_at = Some(Utc::now());
     }
+
+    /// Whether `player_id` is confirmed (checked in) for this session.
+    pub fn has_player(&self, player_id: &Uuid) -> bool {
+        self.player_ids.contains(player_id)
+    }
+
+    /// Checks a player in: adds them to the roster unless they are already
+    /// confirmed. Returns `true` when the roster changed, `false` on a
+    /// no-op (already checked in), so the caller only touches the queue
+    /// when something actually changed.
+    pub fn check_in_player(&mut self, player_id: Uuid) -> bool {
+        if self.has_player(&player_id) {
+            return false;
+        }
+
+        self.player_ids.push(player_id);
+        self.updated_at = Some(Utc::now());
+        true
+    }
+
+    /// Checks a player out: removes them from the roster if present.
+    /// Returns `true` when the roster changed, `false` on a no-op (was not
+    /// checked in).
+    pub fn check_out_player(&mut self, player_id: &Uuid) -> bool {
+        let before = self.player_ids.len();
+        self.player_ids.retain(|id| id != player_id);
+
+        let changed = self.player_ids.len() != before;
+        if changed {
+            self.updated_at = Some(Utc::now());
+        }
+        changed
+    }
 }
 
 getters! {
@@ -253,5 +286,36 @@ mod tests {
         let err = session.set_settings(odd_settings).unwrap_err();
 
         assert_eq!(err.kind, HttpErrorKind::BadRequest);
+    }
+
+    #[test]
+    fn test_check_in_player_adds_to_roster_once_and_is_idempotent() {
+        let mut session =
+            Session::new(date(), None, SessionSettings::default(), 2, GameMode::Open).unwrap();
+        let player_id = Uuid::new_v4();
+
+        assert!(session.check_in_player(player_id));
+        assert!(session.has_player(&player_id));
+        assert_eq!(session.player_ids(), &vec![player_id]);
+        assert!(session.updated_at().is_some());
+
+        // second check-in is a no-op
+        assert!(!session.check_in_player(player_id));
+        assert_eq!(session.player_ids(), &vec![player_id]);
+    }
+
+    #[test]
+    fn test_check_out_player_removes_from_roster_and_is_idempotent() {
+        let mut session =
+            Session::new(date(), None, SessionSettings::default(), 2, GameMode::Open).unwrap();
+        let player_id = Uuid::new_v4();
+        session.check_in_player(player_id);
+
+        assert!(session.check_out_player(&player_id));
+        assert!(!session.has_player(&player_id));
+        assert!(session.player_ids().is_empty());
+
+        // checking a stranger out is a no-op
+        assert!(!session.check_out_player(&Uuid::new_v4()));
     }
 }

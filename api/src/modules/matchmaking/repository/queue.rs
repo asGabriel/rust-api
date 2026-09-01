@@ -12,8 +12,11 @@ pub trait SessionQueueRepository {
     async fn list_by_session(&self, session_id: &Uuid) -> HttpResult<Vec<QueueEntry>>;
 
     /// Adds `entries` to the queue in one statement. Used when a session is
-    /// created (all confirmed players) and when players come back off a
-    /// court. New entries are never pinned.
+    /// created (all confirmed players), when a player checks in, and when
+    /// players come back off a court. New entries are never pinned. A player
+    /// who already has a queue row in the session is left as-is — the insert
+    /// is a no-op for them, so a redundant check-in or a stale row can never
+    /// raise a `UNIQUE (session_id, player_id)` error.
     async fn insert_many(&self, entries: &[QueueEntry]) -> HttpResult<()>;
 
     /// Removes `player_ids` from the session's queue in one statement (they
@@ -73,6 +76,7 @@ impl SessionQueueRepository for SessionQueueRepositoryImpl {
             INSERT INTO matchmaking.session_queue
                 (id, session_id, player_id, games_played, enqueued_at)
             SELECT * FROM UNNEST($1::uuid[], $2::uuid[], $3::uuid[], $4::smallint[], $5::timestamptz[])
+            ON CONFLICT (session_id, player_id) DO NOTHING
             "#,
         )
         .bind(&ids)

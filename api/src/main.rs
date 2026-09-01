@@ -137,7 +137,7 @@ fn build_matchmaking_state(pool: &Pool<Postgres>) -> MatchmakingState {
     let session_queue_repository = Arc::new(SessionQueueRepositoryImpl::new(pool));
 
     let team_handler = Arc::new(TeamHandlerImpl {
-        team_repository,
+        team_repository: team_repository.clone(),
         session_repository: session_repository.clone(),
         player_repository: player_repository.clone(),
         match_repository: match_repository.clone(),
@@ -145,10 +145,15 @@ fn build_matchmaking_state(pool: &Pool<Postgres>) -> MatchmakingState {
     });
 
     MatchmakingState {
-        player_handler: Arc::new(PlayerHandlerImpl { player_repository }),
+        player_handler: Arc::new(PlayerHandlerImpl {
+            player_repository: player_repository.clone(),
+        }),
         session_handler: Arc::new(SessionHandlerImpl {
             session_repository: session_repository.clone(),
             session_queue_repository,
+            player_repository: player_repository.clone(),
+            team_repository,
+            match_repository: match_repository.clone(),
         }),
         team_handler: team_handler.clone(),
         match_handler: Arc::new(MatchHandlerImpl {

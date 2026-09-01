@@ -14,9 +14,10 @@ use crate::modules::matchmaking::domain::{
 /// The queue is a flat list of individuals — teams are only formed when a
 /// player is about to enter a court (see the matchmaking skill,
 /// "Fila e rotação de quadra"). `games_played` is the number of matches this
-/// player has finished in the session; it is maintained on every result,
-/// never derived. It carries over when the player leaves the list for a
-/// court and comes back.
+/// player has finished in the session. The column is persisted, but its
+/// value is always recomputed from the finished-match record (`GamesPlayed`)
+/// at every point a player is (re-)enqueued — coming off a court, out of a
+/// broken draft, or on a check-in — so it can never drift from the record.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueueEntry {
@@ -31,8 +32,10 @@ pub struct QueueEntry {
 
 impl QueueEntry {
     /// A player (re-)entering the queue now: `enqueued_at = now`, not pinned.
-    /// `games_played` is 0 on the session's first fill and the player's
-    /// prior count + 1 when they come back off a court.
+    /// `games_played` is the caller's derived finished-match count for the
+    /// player — 0 before they have played any, their running total once they
+    /// have (the just-finished match is already counted when a loser or a
+    /// capped winner comes back off a court).
     pub fn new(session_id: Uuid, player_id: Uuid, games_played: u16) -> Self {
         Self {
             id: Uuid::new_v4(),

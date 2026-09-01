@@ -4,6 +4,29 @@
 > Não é recarregado automaticamente com o `SKILL.md` — só ler quando for
 > preciso entender o motivo/contexto histórico de uma regra específica.
 
+- 2026-09-01 — **check-in / check-out de jogador + `games_played` derivado
+  na (re)entrada na lista.** Adicionados `POST` / `DELETE
+  /matchmaking/sessions/{id}/check-in/{player_id}` como via dedicada de um
+  jogador só pra confirmar/tirar da `Session` (era só `PATCH .../{id}` com
+  `playerIds`, o roster inteiro). "Check-in" = entrar em
+  `Session::player_ids` — sem conceito de presença separado. Junto,
+  fechados dois gaps que a revisão do guardião apontou: (1) `insert_many`
+  da `session_queue` ganhou `ON CONFLICT (session_id, player_id) DO
+  NOTHING` — um re-check-in com linha órfã na lista (roster/fila fora de
+  sincronia) não estoura mais 500; (2) a contagem de `games_played` de
+  quem entra na lista deixou de ser hardcoded `0` e passou a ser derivada
+  do registro de `Match`es finalizados, via o novo tipo de domínio
+  `GamesPlayed` (irmão de `PartnerHistory`, mesma fonte "times que
+  entraram num `Match`"). Motivo: com o check-out virando ação de rotina,
+  um jogador que jogou N partidas, saiu e voltou reentrava com
+  `games_played = 0` e furava a ordenação por jogos — o caso-limite antes
+  "aceito por ser raro" deixou de ser raro. A derivação vale pros dois
+  caminhos de escrita de roster (endpoint dedicado e `playerIds`), ambos
+  passam por `SessionHandlerImpl::sync_queue_to_roster`. `TeamHandlerImpl`
+  foi refatorado pra usar `GamesPlayed` também (removida a fn privada
+  `games_played_by_player`; `return_players_to_queue` recebe `&GamesPlayed`)
+  — mesma contagem, uma implementação. Ver "Check-in / check-out" em "Fila
+  e rotação de quadra" no `SKILL.md`.
 - 2026-08-30 — **redesenho da fila: de fila de `Team`s pra lista de
   jogadores.** A fila deixou de ser uma coleção de `Team`s pré-formadas
   (`TeamQueueManager::release_players`, regras 1/2 de 2026-08-23) e passou a

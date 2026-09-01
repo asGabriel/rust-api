@@ -15,7 +15,7 @@ use crate::modules::matchmaking::{
         queue::{QueueEntry, SessionQueue},
         session::Session,
         team::{Team, TeamValidator},
-        team_drawer::{PartnerHistory, TeamDrawer},
+        team_drawer::{GamesPlayed, PartnerHistory, TeamDrawer},
     },
     handler::team::use_cases::{
         CourtSuggestion, CreateTeamRequest, ResolvedRotation, UpdateTeamRequest,
@@ -104,29 +104,6 @@ impl TeamHandlerImpl {
             .collect())
     }
 
-    /// How many finished matches each player has taken part in this session,
-    /// derived straight from the teams that entered a `Match` — the same
-    /// source `PartnerHistory` uses, so "games played" can never drift from
-    /// the record.
-    fn games_played_by_player(teams: &[Team], matches: &[Match]) -> HashMap<Uuid, u16> {
-        let played_team_ids: HashSet<Uuid> = matches
-            .iter()
-            .filter(|match_| match_.is_finished())
-            .flat_map(|match_| [*match_.team_a_id(), *match_.team_b_id()])
-            .collect();
-
-        let mut games: HashMap<Uuid, u16> = HashMap::new();
-        for team in teams
-            .iter()
-            .filter(|team| played_team_ids.contains(team.id()))
-        {
-            for player_id in team.player_ids() {
-                *games.entry(*player_id).or_insert(0) += 1;
-            }
-        }
-        games
-    }
-
     /// Returns `player_ids` to the session queue, each with its current
     /// games-played count and a fresh `enqueued_at` (so they sink behind
     /// everyone who has played less / waited longer).
@@ -134,16 +111,12 @@ impl TeamHandlerImpl {
         &self,
         session_id: Uuid,
         player_ids: &[Uuid],
-        games_played: &HashMap<Uuid, u16>,
+        games_played: &GamesPlayed,
     ) -> HttpResult<Vec<QueueEntry>> {
         let entries: Vec<QueueEntry> = player_ids
             .iter()
             .map(|player_id| {
-                QueueEntry::new(
-                    session_id,
-                    *player_id,
-                    games_played.get(player_id).copied().unwrap_or(0),
-                )
+                QueueEntry::new(session_id, *player_id, games_played.for_player(*player_id))
             })
             .collect();
         self.session_queue_repository.insert_many(&entries).await?;
@@ -241,7 +214,7 @@ impl TeamHandler for TeamHandlerImpl {
 
         if !returning_player_ids.is_empty() {
             let session_teams = self.team_repository.list_by_session(session.id()).await?;
-            let games = Self::games_played_by_player(&session_teams, &session_matches);
+            let games = GamesPlayed::from_matches(&session_teams, &session_matches);
             self.return_players_to_queue(*session.id(), &returning_player_ids, &games)
                 .await?;
         }
@@ -272,7 +245,7 @@ impl TeamHandler for TeamHandlerImpl {
             .match_repository
             .list_by_session(team.session_id())
             .await?;
-        let games = Self::games_played_by_player(&session_teams, &session_matches);
+        let games = GamesPlayed::from_matches(&session_teams, &session_matches);
         self.return_players_to_queue(*team.session_id(), team.player_ids(), &games)
             .await?;
 
@@ -345,7 +318,7 @@ impl TeamHandler for TeamHandlerImpl {
         let session_teams = self.team_repository.list_by_session(&session_id).await?;
         let session_matches = self.match_repository.list_by_session(&session_id).await?;
         let history = PartnerHistory::from_matches(&session_teams, &session_matches);
-        let games_played = Self::games_played_by_player(&session_teams, &session_matches);
+        let games_played = GamesPlayed::from_matches(&session_teams, &session_matches);
         let session_players = self.session_players(&session).await?;
 
         let mut winner = self
@@ -762,7 +735,15 @@ mod tests {
                 .collect())
         }
         async fn insert_many(&self, entries: &[QueueEntry]) -> HttpResult<()> {
-            self.0.lock().unwrap().extend(entries.iter().cloned());
+            let mut rows = self.0.lock().unwrap();
+            for entry in entries {
+                let exists = rows.iter().any(|row| {
+                    row.session_id() == entry.session_id() && row.player_id() == entry.player_id()
+                });
+                if !exists {
+                    rows.push(entry.clone());
+                }
+            }
             Ok(())
         }
         async fn remove_players(

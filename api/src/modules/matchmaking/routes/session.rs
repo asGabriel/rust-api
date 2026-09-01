@@ -19,6 +19,10 @@ pub fn configure_routes() -> Router<AppState> {
         Router::new()
             .route("/", get(list_sessions).post(create_session))
             .route("/{id}", get(get_session).patch(update_session))
+            .route(
+                "/{id}/check-in/{player_id}",
+                post(check_in).delete(check_out),
+            )
             .route("/{id}/queue", get(list_queue))
             .route("/{id}/queue/seed", post(seed_queue))
             .route("/{id}/queue/fill", post(fill_idle_courts))
@@ -77,6 +81,32 @@ async fn update_session(
         .matchmaking_state
         .session_handler
         .update_session(id, request)
+        .await?;
+
+    Ok(Json(session))
+}
+
+async fn check_in(
+    state: State<AppState>,
+    Path((id, player_id)): Path<(Uuid, Uuid)>,
+) -> HttpResult<impl IntoResponse> {
+    let session = state
+        .matchmaking_state
+        .session_handler
+        .check_in(id, player_id)
+        .await?;
+
+    Ok(Json(session))
+}
+
+async fn check_out(
+    state: State<AppState>,
+    Path((id, player_id)): Path<(Uuid, Uuid)>,
+) -> HttpResult<impl IntoResponse> {
+    let session = state
+        .matchmaking_state
+        .session_handler
+        .check_out(id, player_id)
         .await?;
 
     Ok(Json(session))

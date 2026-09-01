@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use http_error::{HttpError, HttpResult};
 use rand::{seq::SliceRandom, thread_rng};
@@ -58,6 +58,44 @@ impl PartnerHistory {
         } else {
             (b, a)
         }
+    }
+}
+
+/// How many finished matches each player has taken part in this session,
+/// derived from the teams that actually entered a `Match` — the same source
+/// `PartnerHistory` uses, so a player's game count can never drift from the
+/// record. Used to re-seat a player in the queue at their true standing
+/// (coming off a court, out of a broken draft, or on a re-check-in) rather
+/// than at 0, which would jump them ahead of everyone in the fair ordering.
+pub struct GamesPlayed {
+    by_player: HashMap<Uuid, u16>,
+}
+
+impl GamesPlayed {
+    pub fn from_matches(teams: &[Team], matches: &[Match]) -> Self {
+        let played_team_ids: HashSet<Uuid> = matches
+            .iter()
+            .filter(|match_| match_.is_finished())
+            .flat_map(|match_| [*match_.team_a_id(), *match_.team_b_id()])
+            .collect();
+
+        let mut by_player: HashMap<Uuid, u16> = HashMap::new();
+        for team in teams
+            .iter()
+            .filter(|team| played_team_ids.contains(team.id()))
+        {
+            for player_id in team.player_ids() {
+                *by_player.entry(*player_id).or_insert(0) += 1;
+            }
+        }
+
+        Self { by_player }
+    }
+
+    /// The player's finished-match count this session, `0` if they have not
+    /// played yet.
+    pub fn for_player(&self, player_id: Uuid) -> u16 {
+        self.by_player.get(&player_id).copied().unwrap_or(0)
     }
 }
 

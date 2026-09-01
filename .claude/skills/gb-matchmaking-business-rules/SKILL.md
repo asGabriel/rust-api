@@ -51,8 +51,10 @@ habilidade, histórico de parceria, aleatoriedade controlada, etc.
 #### A lista (`session_queue`)
 
 - Uma linha por jogador da `Session` que **não** está em quadra nem
-  `Holding`. Colunas: `player_id`, `games_played` (nº de `Match`es que o
-  jogador já terminou — mantido na escrita, não derivado), `enqueued_at`
+  `Holding`. Colunas: `player_id`, `games_played` (nº de `Match`es
+  finalizados em que o jogador entrou — a coluna é persistida, mas o
+  **valor é sempre re-derivado do registro de `Match`es** via `GamesPlayed`
+  a cada (re)entrada na lista, nunca incrementado no lugar), `enqueued_at`
   (vira `now()` toda vez que o jogador (re)entra na lista) e `pinned` /
   `pinned_at` (prioridade manual).
 - **Ordem de quem entra primeiro:**
@@ -62,10 +64,18 @@ habilidade, histórico de parceria, aleatoriedade controlada, etc.
 - "Ninguém volta na hora" é consequência da ordem, não uma regra à parte:
   quem sai de uma partida entra na lista com `games_played + 1` **e**
   `enqueued_at = now()` — afunda nos dois critérios.
-- Quando jogadores são confirmados na `Session` (`PATCH
-  /matchmaking/sessions/{id}` com `playerIds`), entram na lista com
-  `games_played = 0`; jogadores tirados da `Session` saem da lista (um que
-  esteja em quadra fica jogando, só perde a linha da lista).
+- **Check-in / check-out** — confirmar ou tirar um jogador da `Session` é o
+  mesmo que entrar/sair de `Session::player_ids` (não há conceito de
+  presença separado). Duas vias, mesmo efeito na lista:
+  `POST` / `DELETE /matchmaking/sessions/{id}/check-in/{player_id}` (um
+  jogador, idempotente) e `PATCH /matchmaking/sessions/{id}` com `playerIds`
+  (o roster inteiro). Quem entra é adicionado à `session_queue` com
+  `games_played` derivado do histórico (`0` no primeiro check-in, a
+  contagem real num re-check-in — não fura a ordenação por jogos) e
+  `enqueued_at = now()`; quem sai perde a linha da lista (se estiver em
+  quadra, continua jogando — ver caso-limite). Check-in de `player_id`
+  inexistente → 404 (só na via de endpoint dedicado; `playerIds` não
+  valida).
 
 #### `Team` — status
 
@@ -266,17 +276,18 @@ Ex: balanceamento de nível tem prioridade sobre variar parceiros.
   (`create_match` check + insert, `update_session`, etc.) segue TOCTOU
   teórico, aceito por não haver operadores simultâneos de fato. Envolver
   `remove`+`insert` numa `sqlx::Transaction` de verdade é follow-up.
-- **Jogador tirado da `Session` que está num `Draft` ou `Holding`:**
-  `update_session` só apaga a linha da `session_queue` dele — o `Draft`/
-  `Holding` fica com o roster de então. `MatchStartValidator` barra iniciar
-  um `Match` com esse time (checa `Session::player_ids`), então o time fica
-  "morto" até o operador editar/descartar. Aceito; a via limpa é o operador
-  não tirar da sessão quem está prestes a jogar.
-- **Re-adicionar um jogador tirado da `Session` no meio:** ele volta pra
-  `session_queue` com `games_played = 0` (o `update_session` não deriva do
-  histórico), então fura a fila na ordenação por jogos. Aceito — tirar e
-  re-adicionar alguém no meio da sessão é caso raro; se incomodar, derivar
-  `games_played` no `update_session` igual `resolve_match_result` faz.
+- **Jogador tirado da `Session` que está num `Draft` ou `Holding`:** o
+  check-out (endpoint dedicado ou `playerIds`) só apaga a linha da
+  `session_queue` dele — o `Draft`/`Holding` fica com o roster de então.
+  `MatchStartValidator` barra iniciar um `Match` com esse time (checa
+  `Session::player_ids`), então o time fica "morto" até o operador editar/
+  descartar. Aceito; a via limpa é o operador não tirar da sessão quem está
+  prestes a jogar.
+- **Re-adicionar um jogador tirado da `Session` no meio:** volta pra
+  `session_queue` com o `games_played` real derivado do histórico de
+  `Match`es (não `0`), então **não** fura a ordenação por jogos. Vale tanto
+  pro check-in de um jogador quanto pro `update_session` com `playerIds`
+  (ambos passam pelo mesmo `sync_queue_to_roster` → `GamesPlayed`).
 - **`next_challenger` sem gente suficiente do gênero necessário** (`Mixed`
   desbalanceado, ou lista quase vazia): não forma `Draft` pra aquela quadra,
   ela fica ociosa e a resposta sinaliza. O operador monta manualmente
