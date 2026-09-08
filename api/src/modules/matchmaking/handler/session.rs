@@ -27,17 +27,19 @@ pub trait SessionHandler {
 
     async fn update_session(&self, id: Uuid, request: UpdateSessionRequest) -> HttpResult<Session>;
 
-    /// Confirms a player for the session ("check-in"): adds them to the
-    /// roster and puts them on the waiting queue at their games-played
-    /// standing (0 for a first check-in, their prior count on a re-check-in,
-    /// derived from the match record), so they become eligible for the next
-    /// court draw without jumping the fair ordering. Idempotent — checking
-    /// in an already-confirmed player just returns the session.
+    /// Confirms a rostered player for the session ("check-in"): adds them to
+    /// the checked-in list (`player_ids`) and puts them on the waiting queue
+    /// at their games-played standing (0 for a first check-in, their prior
+    /// count on a re-check-in, derived from the match record), so they become
+    /// eligible for the next court draw without jumping the fair ordering.
+    /// Requires the player to be on the session roster — returns `409` if
+    /// not, `404` if the player does not exist. Idempotent — checking in an
+    /// already-confirmed player just returns the session.
     async fn check_in(&self, session_id: Uuid, player_id: Uuid) -> HttpResult<Session>;
 
-    /// Reverses a check-in: removes the player from the roster and from the
-    /// waiting queue. Idempotent — checking out a player who is not on the
-    /// roster just returns the session.
+    /// Reverses a check-in: removes the player from the checked-in list and
+    /// from the waiting queue. They stay on the roster. Idempotent —
+    /// checking out a player who is not checked in just returns the session.
     async fn check_out(&self, session_id: Uuid, player_id: Uuid) -> HttpResult<Session>;
 
     /// The session's waiting list, in "who enters next" order.
@@ -65,14 +67,15 @@ pub struct SessionHandlerImpl {
 }
 
 impl SessionHandlerImpl {
-    /// Brings the session's waiting queue in step with a roster change:
-    /// players in `next` but not `previous` join the queue, players in
-    /// `previous` but not `next` leave it. Joining players re-enter at their
-    /// games-played standing derived from the session's match record (so a
-    /// re-check-in doesn't reset them to 0 and jump the fair ordering); a
-    /// player who has not played yet enters at 0. A dropped player who is
-    /// mid-game stays on their court — only their queue row goes.
-    async fn sync_queue_to_roster(
+    /// Brings the session's waiting queue in step with a change to the
+    /// checked-in list (`player_ids`): players in `next` but not `previous`
+    /// join the queue, players in `previous` but not `next` leave it.
+    /// Joining players re-enter at their games-played standing derived from
+    /// the session's match record (so a re-check-in doesn't reset them to 0
+    /// and jump the fair ordering); a player who has not played yet enters at
+    /// 0. A dropped player who is mid-game stays on their court — only their
+    /// queue row goes.
+    async fn sync_queue_to_checked_in(
         &self,
         session_id: Uuid,
         previous: &[Uuid],
@@ -162,11 +165,15 @@ impl SessionHandler for SessionHandlerImpl {
             session.set_game_mode(game_mode)?;
         }
 
-        if let Some(new_player_ids) = request.player_ids {
-            let previous: Vec<Uuid> = session.player_ids().clone();
-            session.set_player_ids(new_player_ids.clone());
-            self.sync_queue_to_roster(*session.id(), &previous, &new_player_ids)
-                .await?;
+        if let Some(new_roster) = request.roster_player_ids {
+            // Dropping a still-checked-in player from the roster also checks
+            // them out (`Session::set_roster_player_ids` keeps that
+            // invariant); their waiting-queue rows go with them.
+            let checked_out = session.set_roster_player_ids(new_roster);
+            if !checked_out.is_empty() {
+                self.sync_queue_to_checked_in(*session.id(), &checked_out, &[])
+                    .await?;
+            }
         }
 
         self.session_repository.update(session).await
@@ -176,13 +183,21 @@ impl SessionHandler for SessionHandlerImpl {
         let mut session = self.get_session(session_id).await?;
 
         // `matchmaking.session.player_ids` is a bare UUID[] with no FK, so
-        // an unknown id would otherwise sit silently in the roster.
+        // an unknown id would otherwise sit silently in the checked-in list.
         if self.player_repository.get(&player_id).await?.is_none() {
             return Err(Box::new(HttpError::not_found("Player", player_id)));
         }
 
+        // Check-in is a confirmation step layered on roster selection: the
+        // player must already be on the session roster (set via PATCH).
+        if !session.is_on_roster(&player_id) {
+            return Err(Box::new(HttpError::conflict(
+                "Player is not on the session roster",
+            )));
+        }
+
         if session.check_in_player(player_id) {
-            self.sync_queue_to_roster(*session.id(), &[], &[player_id])
+            self.sync_queue_to_checked_in(*session.id(), &[], &[player_id])
                 .await?;
             return self.session_repository.update(session).await;
         }
@@ -194,7 +209,7 @@ impl SessionHandler for SessionHandlerImpl {
         let mut session = self.get_session(session_id).await?;
 
         if session.check_out_player(&player_id) {
-            self.sync_queue_to_roster(*session.id(), &[player_id], &[])
+            self.sync_queue_to_checked_in(*session.id(), &[player_id], &[])
                 .await?;
             return self.session_repository.update(session).await;
         }
@@ -255,7 +270,12 @@ pub mod use_cases {
         pub available_courts: Option<u8>,
         pub game_mode: Option<GameMode>,
         pub settings: Option<SessionSettings>,
-        pub player_ids: Option<Vec<Uuid>>,
+        /// The session roster (players selected/expected for the session).
+        /// Replaces the list wholesale. Checking in / out is the only way to
+        /// move the checked-in list (`player_ids`); this only moves the
+        /// roster, except that dropping a still-checked-in player from the
+        /// roster also checks them out.
+        pub roster_player_ids: Option<Vec<Uuid>>,
     }
 }
 
@@ -473,6 +493,20 @@ mod tests {
     }
 
     impl World {
+        /// Puts a player on the session roster without checking them in — the
+        /// precondition a check-in now needs.
+        async fn add_to_roster(&self, player_id: Uuid) {
+            let mut session = self.handler.get_session(self.session_id).await.unwrap();
+            let mut roster = session.roster_player_ids().clone();
+            roster.push(player_id);
+            session.set_roster_player_ids(roster);
+            self.handler
+                .session_repository
+                .update(session)
+                .await
+                .unwrap();
+        }
+
         /// Records a finished match between two ad-hoc teams of the given
         /// players, so `GamesPlayed` credits each of them one game.
         async fn add_finished_game(&self, team_a: &[Uuid], team_b: &[Uuid]) {
@@ -486,7 +520,8 @@ mod tests {
         }
     }
 
-    /// A session with `players` already checked in.
+    /// A session with `players` already checked in (and, by the invariant,
+    /// on the roster).
     fn world(checked_in: &[Player]) -> World {
         let mut session = Session::new(
             NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
@@ -496,7 +531,9 @@ mod tests {
             GameMode::Open,
         )
         .unwrap();
-        session.set_player_ids(checked_in.iter().map(|p| *p.id()).collect());
+        let ids: Vec<Uuid> = checked_in.iter().map(|p| *p.id()).collect();
+        session.set_roster_player_ids(ids.clone());
+        session.set_player_ids(ids);
         let session_id = *session.id();
 
         let queue = Arc::new(FakeQueue::default());
@@ -534,7 +571,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_check_in_adds_to_roster_and_enqueues_with_zero_games() {
+    async fn test_check_in_adds_to_checked_in_list_and_enqueues_with_zero_games() {
         let newcomer = player();
         let w = world(&[]);
         w.handler
@@ -542,6 +579,7 @@ mod tests {
             .insert(newcomer.clone())
             .await
             .unwrap();
+        w.add_to_roster(*newcomer.id()).await;
 
         let session = w
             .handler
@@ -623,6 +661,7 @@ mod tests {
             .insert(returning.clone())
             .await
             .unwrap();
+        w.add_to_roster(*returning.id()).await;
         w.handler
             .session_queue_repository
             .insert_many(&[QueueEntry::new(w.session_id, *returning.id(), 2)])
@@ -707,6 +746,7 @@ mod tests {
             .insert(newcomer.clone())
             .await
             .unwrap();
+        w.add_to_roster(*newcomer.id()).await;
         w.add_finished_game(&[*veteran.id()], &[Uuid::new_v4()])
             .await;
 
@@ -731,5 +771,83 @@ mod tests {
             .unwrap();
 
         assert!(session.player_ids().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_check_in_rejects_player_not_on_roster() {
+        let outsider = player();
+        let w = world(&[]);
+        w.handler
+            .player_repository
+            .insert(outsider.clone())
+            .await
+            .unwrap();
+
+        let err = w
+            .handler
+            .check_in(w.session_id, *outsider.id())
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.kind, HttpErrorKind::Conflict);
+        assert!(queued_ids(&w.queue).is_empty());
+        let session = w.handler.get_session(w.session_id).await.unwrap();
+        assert!(!session.has_player(outsider.id()));
+    }
+
+    #[tokio::test]
+    async fn test_update_session_sets_roster_without_touching_checked_in_or_queue() {
+        let a = player();
+        let b = player();
+        let w = world(&[]);
+
+        let session = w
+            .handler
+            .update_session(
+                w.session_id,
+                UpdateSessionRequest {
+                    roster_player_ids: Some(vec![*a.id(), *b.id()]),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(session.is_on_roster(a.id()));
+        assert!(session.is_on_roster(b.id()));
+        assert!(session.player_ids().is_empty());
+        assert!(queued_ids(&w.queue).is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_update_session_dropping_checked_in_player_from_roster_checks_them_out() {
+        let leaving = player();
+        let staying = player();
+        let w = world(&[leaving.clone(), staying.clone()]);
+        w.handler
+            .session_queue_repository
+            .insert_many(&[
+                QueueEntry::new(w.session_id, *leaving.id(), 0),
+                QueueEntry::new(w.session_id, *staying.id(), 0),
+            ])
+            .await
+            .unwrap();
+
+        let session = w
+            .handler
+            .update_session(
+                w.session_id,
+                UpdateSessionRequest {
+                    roster_player_ids: Some(vec![*staying.id()]),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(!session.is_on_roster(leaving.id()));
+        assert!(!session.has_player(leaving.id()));
+        assert!(session.has_player(staying.id()));
+        assert_eq!(queued_ids(&w.queue), vec![*staying.id()]);
     }
 }

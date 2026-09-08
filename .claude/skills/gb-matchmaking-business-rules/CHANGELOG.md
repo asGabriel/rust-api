@@ -4,6 +4,23 @@
 > Não é recarregado automaticamente com o `SKILL.md` — só ler quando for
 > preciso entender o motivo/contexto histórico de uma regra específica.
 
+- 2026-09-07 — **roster da `Session` separado do check-in.** A `Session`
+  passou a ter **duas** listas de jogadores: `roster_player_ids` (quem foi
+  selecionado pra sessão — lista de planejamento, editada em bloco via
+  `PATCH .../sessions/{id}` com `rosterPlayerIds`) e `player_ids` (quem fez
+  check-in — presente e disponível, alimenta `session_queue` / sorteio /
+  início de `Match`). `player_ids` é sempre subconjunto de
+  `roster_player_ids`. Check-in (`POST .../check-in/{player_id}`) agora
+  exige o jogador estar no roster → **409** senão (o **404** de player
+  inexistente continua). Check-out tira só de `player_ids`; o jogador
+  fica no roster. Tirar do roster via `PATCH` arrasta o check-out junto
+  (o roster nunca fica menor que a lista de check-in). Motivo: o operador
+  quer montar a lista da sessão antes (quem é esperado) e, no dia, cada um
+  confirma presença — dois passos distintos, não um só. Reverte a decisão
+  de 2026-09-01 de que "check-in = entrar em `player_ids`, sem presença
+  separada". `PATCH` deixou de aceitar `playerIds` (só `rosterPlayerIds`);
+  `sync_queue_to_roster` virou `sync_queue_to_checked_in`. Ver "Roster vs.
+  check-in" em "Fila e rotação de quadra" no `SKILL.md`.
 - 2026-09-01 — **check-in / check-out de jogador + `games_played` derivado
   na (re)entrada na lista.** Adicionados `POST` / `DELETE
   /matchmaking/sessions/{id}/check-in/{player_id}` como via dedicada de um

@@ -33,15 +33,16 @@ impl SessionRepository for SessionRepositoryImpl {
     async fn insert(&self, session: Session) -> HttpResult<Session> {
         let game_mode: String = (*session.game_mode()).into();
         let player_ids = Vec::from_iter(session.player_ids().iter().copied());
+        let roster_player_ids = Vec::from_iter(session.roster_player_ids().iter().copied());
 
         let row = sqlx::query(
             r#"
             INSERT INTO matchmaking.session (
                 id, date, description, players_per_team, sets_to_win, points_per_set,
-                available_courts, game_mode, player_ids,
+                available_courts, game_mode, player_ids, roster_player_ids,
                 created_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             RETURNING *
             "#,
         )
@@ -54,6 +55,7 @@ impl SessionRepository for SessionRepositoryImpl {
         .bind(*session.available_courts() as i16)
         .bind(game_mode)
         .bind(player_ids)
+        .bind(roster_player_ids)
         .bind(*session.created_at())
         .bind(*session.updated_at())
         .fetch_one(&self.pool)
@@ -82,6 +84,7 @@ impl SessionRepository for SessionRepositoryImpl {
     async fn update(&self, session: Session) -> HttpResult<Session> {
         let game_mode: String = (*session.game_mode()).into();
         let player_ids = Vec::from_iter(session.player_ids().iter().copied());
+        let roster_player_ids = Vec::from_iter(session.roster_player_ids().iter().copied());
 
         let row = sqlx::query(
             r#"
@@ -94,7 +97,8 @@ impl SessionRepository for SessionRepositoryImpl {
                 available_courts = $7,
                 game_mode = $8,
                 player_ids = $9,
-                updated_at = $10
+                roster_player_ids = $10,
+                updated_at = $11
             WHERE id = $1
             RETURNING *
             "#,
@@ -108,6 +112,7 @@ impl SessionRepository for SessionRepositoryImpl {
         .bind(*session.available_courts() as i16)
         .bind(game_mode)
         .bind(player_ids)
+        .bind(roster_player_ids)
         .bind(*session.updated_at())
         .fetch_one(&self.pool)
         .await?;
