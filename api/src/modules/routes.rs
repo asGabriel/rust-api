@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::modules::{
     auth::{self, AuthState},
+    finance::{self, FinanceState},
     finance_manager::{self, FinanceManagerState},
     matchmaking::{self, MatchmakingState},
 };
@@ -14,12 +15,14 @@ use crate::modules::{
 #[derive(Clone)]
 pub struct AppState {
     pub finance_manager_state: Arc<FinanceManagerState>,
+    pub finance_state: Arc<FinanceState>,
     pub auth_state: Arc<AuthState>,
     pub matchmaking_state: Arc<MatchmakingState>,
 }
 
 pub fn configure_services() -> Router<AppState> {
     let finance_manager_routes = finance_manager::configure_service_routes();
+    let finance_routes = finance::configure_service_routes();
     let auth_routes = auth::configure_service_routes();
     let matchmaking_routes = matchmaking::configure_service_routes();
 
@@ -27,6 +30,7 @@ pub fn configure_services() -> Router<AppState> {
         "/api",
         Router::new()
             .merge(finance_manager_routes)
+            .merge(finance_routes)
             .merge(auth_routes)
             .merge(matchmaking_routes)
             .route("/status", get(api_status)),
