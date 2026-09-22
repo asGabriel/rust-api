@@ -14,7 +14,7 @@ pub struct Debt {
     client_id: Uuid,
     category: DebtCategory,
     expense_type: ExpenseType,
-    tags: Vec<String>,
+    list_id: Option<Uuid>,
     identification: String,
     description: String,
     total_amount: Decimal,
@@ -47,7 +47,7 @@ impl Debt {
         due_date: NaiveDate,
         category: Option<DebtCategory>,
         expense_type: Option<ExpenseType>,
-        tags: Option<Vec<String>>,
+        list_id: Option<Uuid>,
         installment_count: Option<i32>,
     ) -> Self {
         let paid_amount = paid_amount.unwrap_or(Decimal::ZERO);
@@ -63,7 +63,7 @@ impl Debt {
             client_id,
             category: category.unwrap_or_default(),
             expense_type: expense_type.unwrap_or_default(),
-            tags: tags.unwrap_or_default(),
+            list_id,
             identification: String::new(),
             description,
             total_amount,
@@ -126,7 +126,7 @@ impl Debt {
                 client_id: self.client_id,
                 category: self.category.clone(),
                 expense_type: self.expense_type.clone(),
-                tags: self.tags.clone(),
+                list_id: self.list_id,
                 identification: String::new(),
                 description: self.description.clone(),
                 total_amount: amount,
@@ -282,7 +282,7 @@ getters!(
         client_id: Uuid,
         category: DebtCategory,
         expense_type: ExpenseType,
-        tags: Vec<String>,
+        list_id: Option<Uuid>,
         identification: String,
         description: String,
         total_amount: Decimal,
@@ -310,8 +310,8 @@ impl Debt {
         self.updated_at = Some(Utc::now());
     }
 
-    pub fn set_tags(&mut self, tags: Vec<String>) {
-        self.tags = tags;
+    pub fn set_list_id(&mut self, list_id: Option<Uuid>) {
+        self.list_id = list_id;
         self.updated_at = Some(Utc::now());
     }
 
@@ -332,7 +332,7 @@ from_row_constructor! {
         client_id: Uuid,
         category: DebtCategory,
         expense_type: ExpenseType,
-        tags: Vec<String>,
+        list_id: Option<Uuid>,
         identification: String,
         description: String,
         total_amount: Decimal,
@@ -358,6 +358,7 @@ pub struct DebtFilters {
     start_date: Option<NaiveDate>,
     end_date: Option<NaiveDate>,
     category_names: Option<Vec<String>>,
+    list_id: Option<Uuid>,
     /// `None` = só dívidas de nível-topo (`parent_id IS NULL`, default).
     /// `Some(id)` = lista as filhas (parcelas) da dívida `id`.
     parent_id: Option<Uuid>,
@@ -375,6 +376,7 @@ getters!(
         start_date: Option<NaiveDate>,
         end_date: Option<NaiveDate>,
         category_names: Option<Vec<String>>,
+        list_id: Option<Uuid>,
         parent_id: Option<Uuid>,
         include_children: bool,
     }
@@ -415,6 +417,11 @@ impl DebtFilters {
                 .map(|name| name.to_uppercase())
                 .collect(),
         );
+        self
+    }
+
+    pub fn with_list_id(mut self, list_id: Uuid) -> Self {
+        self.list_id = Some(list_id);
         self
     }
 
@@ -466,6 +473,13 @@ impl DebtFilters {
     pub fn with_optional_parent_id(mut self, parent_id: Option<Uuid>) -> Self {
         if let Some(id) = parent_id {
             self.parent_id = Some(id);
+        }
+        self
+    }
+
+    pub fn with_optional_list_id(mut self, list_id: Option<Uuid>) -> Self {
+        if let Some(id) = list_id {
+            self.list_id = Some(id);
         }
         self
     }

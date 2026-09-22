@@ -54,7 +54,7 @@ impl DebtRepository for DebtRepositoryImpl {
             UPDATE finance.debt SET
                 category = $2,
                 expense_type = $3,
-                tags = $4,
+                list_id = $4,
                 description = $5,
                 total_amount = $6,
                 paid_amount = $7,
@@ -70,7 +70,7 @@ impl DebtRepository for DebtRepositoryImpl {
         .bind(debt_dto.id)
         .bind(&debt_dto.category)
         .bind(&debt_dto.expense_type)
-        .bind(&debt_dto.tags)
+        .bind(debt_dto.list_id)
         .bind(&debt_dto.description)
         .bind(debt_dto.total_amount)
         .bind(debt_dto.paid_amount)
@@ -213,6 +213,11 @@ impl DebtRepository for DebtRepositoryImpl {
             builder.push_bind(end_date);
         }
 
+        if let Some(list_id) = filters.list_id() {
+            builder.push(" AND list_id = ");
+            builder.push_bind(list_id);
+        }
+
         if let Some(category_names) = filters.category_names() {
             builder.push(" AND category = ANY(");
             builder.push_bind(category_names);
@@ -253,7 +258,7 @@ async fn insert_one(tx: &mut sqlx::Transaction<'_, Postgres>, debt: Debt) -> Htt
             client_id,
             category,
             expense_type,
-            tags,
+            list_id,
             description,
             total_amount,
             paid_amount,
@@ -274,7 +279,7 @@ async fn insert_one(tx: &mut sqlx::Transaction<'_, Postgres>, debt: Debt) -> Htt
     .bind(debt_dto.client_id)
     .bind(&debt_dto.category)
     .bind(&debt_dto.expense_type)
-    .bind(&debt_dto.tags)
+    .bind(debt_dto.list_id)
     .bind(&debt_dto.description)
     .bind(debt_dto.total_amount)
     .bind(debt_dto.paid_amount)
@@ -313,7 +318,7 @@ pub mod entity {
         pub identification: String,
         pub category: String,
         pub expense_type: String,
-        pub tags: Vec<String>,
+        pub list_id: Option<Uuid>,
         pub description: String,
         pub total_amount: Decimal,
         pub paid_amount: Decimal,
@@ -336,7 +341,7 @@ pub mod entity {
                 identification: row.get::<i32, _>("identification").to_string(),
                 category: row.get::<String, _>("category"),
                 expense_type: row.get::<String, _>("expense_type"),
-                tags: row.get::<Vec<String>, _>("tags"),
+                list_id: row.get("list_id"),
                 description: row.get("description"),
                 total_amount: row.get("total_amount"),
                 paid_amount: row.get("paid_amount"),
@@ -363,7 +368,7 @@ pub mod entity {
                 identification: debt.identification().to_string(),
                 category: String::from(debt.category().clone()),
                 expense_type: debt.expense_type().as_str().to_string(),
-                tags: debt.tags().clone(),
+                list_id: *debt.list_id(),
                 description: debt.description().clone(),
                 total_amount: *debt.total_amount(),
                 paid_amount: *debt.paid_amount(),
@@ -387,7 +392,7 @@ pub mod entity {
                 dto.client_id,
                 DebtCategory::from(dto.category),
                 ExpenseType::from_str(&dto.expense_type),
-                dto.tags,
+                dto.list_id,
                 dto.identification,
                 dto.description,
                 dto.total_amount,

@@ -61,7 +61,7 @@ impl DebtHandler for DebtHandlerImpl {
             request.due_date,
             request.category,
             request.expense_type,
-            request.tags,
+            request.list_id,
             request.installment_count,
         );
 
@@ -86,6 +86,7 @@ impl DebtHandler for DebtHandlerImpl {
             .with_optional_start_date(*filters.start_date())
             .with_optional_end_date(*filters.end_date())
             .with_optional_category_names(filters.category_names().clone())
+            .with_optional_list_id(*filters.list_id())
             .with_optional_parent_id(*filters.parent_id())
             .with_include_children(*filters.include_children());
 
@@ -122,8 +123,8 @@ impl DebtHandler for DebtHandlerImpl {
         if let Some(expense_type) = request.expense_type {
             debt.set_expense_type(expense_type);
         }
-        if let Some(tags) = request.tags {
-            debt.set_tags(tags);
+        if let Some(list_id) = request.list_id {
+            debt.set_list_id(Some(list_id));
         }
         if let Some(description) = request.description {
             debt.set_description(description);
@@ -164,6 +165,7 @@ pub mod use_cases {
     use http_error::{HttpError, HttpResult};
     use rust_decimal::Decimal;
     use serde::{Deserialize, Serialize};
+    use uuid::Uuid;
 
     use crate::modules::finance::domain::debt::{DebtCategory, ExpenseType};
 
@@ -172,7 +174,7 @@ pub mod use_cases {
     pub struct CreateDebtRequest {
         pub category: Option<DebtCategory>,
         pub expense_type: Option<ExpenseType>,
-        pub tags: Option<Vec<String>>,
+        pub list_id: Option<Uuid>,
         pub description: String,
         pub due_date: NaiveDate,
         pub total_amount: Decimal,
@@ -218,7 +220,7 @@ pub mod use_cases {
     pub struct UpdateDebtRequest {
         pub category: Option<DebtCategory>,
         pub expense_type: Option<ExpenseType>,
-        pub tags: Option<Vec<String>>,
+        pub list_id: Option<Uuid>,
         pub description: Option<String>,
         pub due_date: Option<NaiveDate>,
     }
