@@ -3,8 +3,15 @@ use std::sync::Arc;
 use api::modules::{
     auth::{handler::AuthHandlerImpl, repository::user::UserRepositoryImpl, AuthState},
     finance::{
-        handler::debt::DebtHandlerImpl as FinanceDebtHandlerImpl,
-        repository::debt::DebtRepositoryImpl as FinanceDebtRepositoryImpl, FinanceState,
+        handler::{
+            debt::DebtHandlerImpl as FinanceDebtHandlerImpl,
+            list::ListHandlerImpl as FinanceListHandlerImpl,
+        },
+        repository::{
+            debt::DebtRepositoryImpl as FinanceDebtRepositoryImpl,
+            list::ListRepositoryImpl as FinanceListRepositoryImpl,
+        },
+        FinanceState,
     },
     finance_manager::{
         handler::{
@@ -68,8 +75,10 @@ async fn main() {
     };
 
     let finance_debt_handler = build_finance_debt_handler(pool);
+    let finance_list_handler = build_finance_list_handler(pool);
     let finance_state = FinanceState {
         debt_handler: Arc::new(finance_debt_handler),
+        list_handler: Arc::new(finance_list_handler),
     };
 
     let auth_handler = build_auth_handler(pool);
@@ -124,6 +133,12 @@ fn build_debt_handler(pool: &Pool<Postgres>) -> DebtHandlerImpl {
 fn build_finance_debt_handler(pool: &Pool<Postgres>) -> FinanceDebtHandlerImpl {
     FinanceDebtHandlerImpl {
         debt_repository: Arc::new(FinanceDebtRepositoryImpl::new(pool)),
+    }
+}
+
+fn build_finance_list_handler(pool: &Pool<Postgres>) -> FinanceListHandlerImpl {
+    FinanceListHandlerImpl {
+        list_repository: Arc::new(FinanceListRepositoryImpl::new(pool)),
     }
 }
 
