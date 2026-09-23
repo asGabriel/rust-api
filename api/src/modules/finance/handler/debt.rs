@@ -123,14 +123,24 @@ impl DebtHandler for DebtHandlerImpl {
         if let Some(expense_type) = request.expense_type {
             debt.set_expense_type(expense_type);
         }
+        let list_changed = request.list_id.is_some();
         if let Some(list_id) = request.list_id {
-            debt.set_list_id(Some(list_id));
+            debt.set_list_id(list_id);
         }
         if let Some(description) = request.description {
             debt.set_description(description);
         }
         if let Some(due_date) = request.due_date {
             debt.set_due_date(due_date);
+        }
+
+        // The list is only a grouping, so unlike the other copied fields it
+        // follows the parent: installments are what show up month by month.
+        if list_changed && debt.is_installment_parent() {
+            return self
+                .debt_repository
+                .update_with_children_list_id(debt)
+                .await;
         }
 
         self.debt_repository.update(debt).await
@@ -164,7 +174,7 @@ pub mod use_cases {
     use chrono::NaiveDate;
     use http_error::{HttpError, HttpResult};
     use rust_decimal::Decimal;
-    use serde::{Deserialize, Serialize};
+    use serde::{Deserialize, Deserializer, Serialize};
     use uuid::Uuid;
 
     use crate::modules::finance::domain::debt::{DebtCategory, ExpenseType};
@@ -220,8 +230,46 @@ pub mod use_cases {
     pub struct UpdateDebtRequest {
         pub category: Option<DebtCategory>,
         pub expense_type: Option<ExpenseType>,
-        pub list_id: Option<Uuid>,
+        /// Absent = keep the current list, `null` = unlink, uuid = link.
+        #[serde(default, deserialize_with = "deserialize_nullable")]
+        pub list_id: Option<Option<Uuid>>,
         pub description: Option<String>,
         pub due_date: Option<NaiveDate>,
+    }
+
+    /// Paired with `#[serde(default)]`: an absent field falls back to `None`,
+    /// while an explicit `null` becomes `Some(None)`.
+    fn deserialize_nullable<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: Deserialize<'de>,
+    {
+        Option::<T>::deserialize(deserializer).map(Some)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn parse(json: &str) -> UpdateDebtRequest {
+            serde_json::from_str(json).unwrap()
+        }
+
+        #[test]
+        fn list_id_absent_keeps_current() {
+            assert_eq!(parse(r#"{}"#).list_id, None);
+        }
+
+        #[test]
+        fn list_id_null_unlinks() {
+            assert_eq!(parse(r#"{"listId": null}"#).list_id, Some(None));
+        }
+
+        #[test]
+        fn list_id_value_links() {
+            let id = Uuid::new_v4();
+            let request = parse(&format!(r#"{{"listId": "{id}"}}"#));
+            assert_eq!(request.list_id, Some(Some(id)));
+        }
     }
 }

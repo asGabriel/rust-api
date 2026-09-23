@@ -23,6 +23,10 @@ pub trait DebtRepository {
 
     async fn update(&self, debt: Debt) -> HttpResult<Debt>;
 
+    /// Updates the debt and copies its `list_id` to its installment children,
+    /// atomically.
+    async fn update_with_children_list_id(&self, debt: Debt) -> HttpResult<Debt>;
+
     async fn soft_delete_cascade(
         &self,
         client_id: Uuid,
@@ -47,43 +51,31 @@ impl DebtRepositoryImpl {
 #[async_trait]
 impl DebtRepository for DebtRepositoryImpl {
     async fn update(&self, debt: Debt) -> HttpResult<Debt> {
-        let debt_dto = entity::DebtEntity::from(debt);
+        let mut tx = self.pool.begin().await?;
+        let updated = update_one(&mut tx, debt).await?;
+        tx.commit().await?;
+        Ok(updated)
+    }
 
-        let row = sqlx::query(
+    async fn update_with_children_list_id(&self, debt: Debt) -> HttpResult<Debt> {
+        let mut tx = self.pool.begin().await?;
+        let updated = update_one(&mut tx, debt).await?;
+
+        sqlx::query(
             r#"
-            UPDATE finance.debt SET
-                category = $2,
-                expense_type = $3,
-                list_id = $4,
-                description = $5,
-                total_amount = $6,
-                paid_amount = $7,
-                remaining_amount = $8,
-                due_date = $9,
-                status = $10,
-                installment_count = $11,
-                updated_at = $12
-            WHERE id = $1
-            RETURNING *
+            UPDATE finance.debt
+            SET list_id = $1, updated_at = $2
+            WHERE parent_id = $3 AND deleted_by IS NULL
             "#,
         )
-        .bind(debt_dto.id)
-        .bind(&debt_dto.category)
-        .bind(&debt_dto.expense_type)
-        .bind(debt_dto.list_id)
-        .bind(&debt_dto.description)
-        .bind(debt_dto.total_amount)
-        .bind(debt_dto.paid_amount)
-        .bind(debt_dto.remaining_amount)
-        .bind(debt_dto.due_date)
-        .bind(&debt_dto.status)
-        .bind(debt_dto.installment_count)
-        .bind(debt_dto.updated_at)
-        .fetch_optional(&self.pool)
-        .await?
-        .or_not_found("debt", debt_dto.id.to_string())?;
+        .bind(updated.list_id())
+        .bind(Utc::now().naive_utc())
+        .bind(updated.id())
+        .execute(&mut *tx)
+        .await?;
 
-        Ok(Debt::from(entity::DebtEntity::from(&row)))
+        tx.commit().await?;
+        Ok(updated)
     }
 
     async fn soft_delete_cascade(
@@ -246,6 +238,46 @@ impl DebtRepository for DebtRepositoryImpl {
             .collect();
         Ok(debts)
     }
+}
+
+async fn update_one(tx: &mut sqlx::Transaction<'_, Postgres>, debt: Debt) -> HttpResult<Debt> {
+    let debt_dto = entity::DebtEntity::from(debt);
+
+    let row = sqlx::query(
+        r#"
+        UPDATE finance.debt SET
+            category = $2,
+            expense_type = $3,
+            list_id = $4,
+            description = $5,
+            total_amount = $6,
+            paid_amount = $7,
+            remaining_amount = $8,
+            due_date = $9,
+            status = $10,
+            installment_count = $11,
+            updated_at = $12
+        WHERE id = $1
+        RETURNING *
+        "#,
+    )
+    .bind(debt_dto.id)
+    .bind(&debt_dto.category)
+    .bind(&debt_dto.expense_type)
+    .bind(debt_dto.list_id)
+    .bind(&debt_dto.description)
+    .bind(debt_dto.total_amount)
+    .bind(debt_dto.paid_amount)
+    .bind(debt_dto.remaining_amount)
+    .bind(debt_dto.due_date)
+    .bind(&debt_dto.status)
+    .bind(debt_dto.installment_count)
+    .bind(debt_dto.updated_at)
+    .fetch_optional(&mut **tx)
+    .await?
+    .or_not_found("debt", debt_dto.id.to_string())?;
+
+    Ok(Debt::from(entity::DebtEntity::from(&row)))
 }
 
 async fn insert_one(tx: &mut sqlx::Transaction<'_, Postgres>, debt: Debt) -> HttpResult<Debt> {
