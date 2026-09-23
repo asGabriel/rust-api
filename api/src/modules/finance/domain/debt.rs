@@ -88,6 +88,12 @@ impl Debt {
         self.parent_id.is_some()
     }
 
+    /// Top-level debt split into installments. Children also carry a copy of
+    /// `installment_count` (for display), hence the `parent_id` check.
+    pub fn is_installment_parent(&self) -> bool {
+        !self.is_installment_child() && self.has_installment_count()
+    }
+
     /// Gera as N dívidas-filhas a partir desta dívida-pai e zera o
     /// `due_date` do pai (que passa a não ter significado).
     /// Só deve ser chamado quando `has_installment_count()` é `true`.
