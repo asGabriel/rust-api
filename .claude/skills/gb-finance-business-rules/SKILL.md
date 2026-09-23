@@ -1,6 +1,6 @@
 ---
 name: gb-finance-business-rules
-description: Regras de negócio do módulo finance_manager — invariantes de domínio e validação de dívida, pagamento, parcela, recorrência, fatura, receita e instrumento financeiro.
+description: Regras de negócio do módulo finance_manager — invariantes de domínio e validação de dívida, pagamento, parcela, recorrência, fatura e receita.
 ---
 
 # Regras de negócio — finance_manager
@@ -33,6 +33,12 @@ responsabilidade de review geral, não deste skill.
 - `0 <= remaining_amount <= total_amount`.
 - Nenhum dos três valores pode ser negativo.
 - `total_amount > 0` na criação.
+- **Precisão:** todo valor monetário recebido pela API (`totalAmount`,
+  `paidAmount` na criação, `amount` do pagamento) tem no máximo **2 casas
+  decimais** (zeros à direita não contam: `10.500` vale). Mais que isso é
+  **rejeitado com 400**, nunca arredondado — o banco guarda
+  `DECIMAL(10,2)` e arredondaria cada coluna de forma independente,
+  quebrando `remaining_amount = total_amount - paid_amount`.
 - `remaining_amount` é sempre **recalculado** a partir de `total_amount` e
   `paid_amount` (a cada pagamento/estorno); nunca é setado diretamente pela
   API nem persistido de forma independente.
@@ -92,9 +98,10 @@ separada. `debt.debt_installment` deixa de existir.
   do mês.
 - `pai.due_date = NULL` — não significa nada no fluxo de parcelamento.
 - **Pagamento:** só as filhas são pagáveis. `POST /payment` contra uma
-  dívida que tem filhas é rejeitado. `pai.paid_amount` / `pai.remaining_amount`
-  são derivados da soma das filhas na leitura (não persistidos de forma
-  independente — _a definir_ se persiste em sync).
+  dívida que tem filhas é rejeitado. `pai.paid_amount`,
+  `pai.remaining_amount` e `pai.status` são **persistidos em sync**:
+  cada pagamento/estorno numa filha recalcula o pai (soma das filhas) na
+  mesma transação.
 - **Sem ordem obrigatória:** qualquer filha pode ser paga a qualquer
   momento; não há regra de "parcela k só depois da k-1".
 - **Filhas congeladas:** não há rota de edição de filha. `due_date` e
@@ -133,25 +140,47 @@ separada. `debt.debt_installment` deixa de existir.
 
 ## Pagamento (`Payment`)
 
+Um `Payment` pertence a exatamente uma dívida (`debt_id`) e carrega
+`amount` e `payment_date`. Não há vínculo com conta/instrumento. A soma dos
+pagamentos ativos de uma dívida é sempre igual ao seu `paid_amount`.
+
 ### Validação do valor
 
-_A definir._ (valor mínimo/máximo aceito, relação com o remaining da dívida
-ou com o valor da parcela, pagamento parcial permitido ou não.)
+- `0 < amount <= remaining_amount` da dívida. Pagamento **parcial é
+  permitido**; valor acima do saldo é **rejeitado** (não há ajuste de
+  total nem crédito do excedente).
+- `amount` omitido na requisição = paga o `remaining_amount` inteiro.
+- Rejeitado em **dívida-pai** (só filhas são pagáveis) e em dívida já
+  `Settled` (saldo zero).
+- `payment_date` omitido = data de hoje.
 
 ### Quitação
 
-_A definir._ (quando a dívida é considerada quitada, pagamento que excede o
-saldo.)
+- A dívida vira `Settled` quando o pagamento leva `paid_amount ==
+  total_amount` (ver Status e transições).
+- `paid_amount`, `remaining_amount` e `status` de qualquer dívida **só se
+  movem via pagamento/estorno** — a edição da dívida (PATCH) nunca os
+  altera.
+- **Valor pago na criação:** criar dívida com `paidAmount > 0` gera um
+  `Payment` automático na mesma transação (`payment_date = due_date`),
+  sujeito às mesmas validações (`paidAmount <= totalAmount`). Parcelamento
+  não aceita `paidAmount` (ver Parcelamento).
 
 ### Conciliação (`reconcile`)
 
-_A definir._ (o que "reconcile" deve significar como regra de negócio, o que
-pode ser sobrescrito na dívida, se validação se aplica nesse caminho.)
+- **Não existe** no módulo novo. Pagar valor diferente do devido e
+  ajustar a dívida ao valor real não é suportado; se voltar, será por
+  decisão explícita com regra própria.
 
 ### Estorno (`refund`)
 
-_A definir._ (o que pode ser estornado, efeito na dívida e nas parcelas,
-soft-delete vs. hard-delete como decisão de negócio, estorno parcial.)
+- Estorno = **soft-delete** do pagamento (`deleted_by`). Estorno total
+  do pagamento; não há estorno parcial.
+- Efeito: `paid_amount -= amount`, `remaining_amount` recalculado e
+  `Settled -> Open` se ficar saldo. Em filha, o pai é recalculado na
+  mesma transação.
+- Pagamento já estornado ou de dívida removida não pode ser estornado
+  (not found).
 
 ---
 
@@ -181,13 +210,6 @@ vínculo quando a dívida é removida, propriedade/ownership.)
 ## Receita (`Income`)
 
 _A definir._
-
----
-
-## Instrumento financeiro (`FinancialInstrument`)
-
-_A definir._ (tipos e o que cada um exige, configuração obrigatória por
-tipo, o que significa `default_due_date`, edição.)
 
 ---
 

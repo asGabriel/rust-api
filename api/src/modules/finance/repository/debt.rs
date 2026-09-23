@@ -7,13 +7,20 @@ use uuid::Uuid;
 
 use util::DeletedBy;
 
-use crate::modules::finance::domain::debt::{Debt, DebtFilters};
+use crate::modules::finance::{
+    domain::{
+        debt::{Debt, DebtFilters},
+        payment::Payment,
+    },
+    repository::payment::insert_payment,
+};
 
 #[async_trait]
 pub trait DebtRepository {
     async fn list(&self, filters: &DebtFilters) -> HttpResult<Vec<Debt>>;
 
-    async fn insert(&self, debt: Debt) -> HttpResult<Debt>;
+    /// Inserts `debt`, plus its `initial_payment` (if any) in the same transaction.
+    async fn insert(&self, debt: Debt, initial_payment: Option<Payment>) -> HttpResult<Debt>;
 
     async fn insert_many(&self, debts: Vec<Debt>) -> HttpResult<Vec<Debt>>;
 
@@ -120,6 +127,20 @@ impl DebtRepository for DebtRepositoryImpl {
         .execute(&mut *tx)
         .await?;
 
+        sqlx::query(
+            r#"
+            UPDATE finance.payment
+            SET deleted_by = $1, updated_at = $2
+            WHERE deleted_by IS NULL
+              AND debt_id IN (SELECT id FROM finance.debt WHERE id = $3 OR parent_id = $3)
+            "#,
+        )
+        .bind(&meta)
+        .bind(now)
+        .bind(debt_id)
+        .execute(&mut *tx)
+        .await?;
+
         tx.commit().await?;
         Ok(())
     }
@@ -151,9 +172,12 @@ impl DebtRepository for DebtRepositoryImpl {
         Ok(row.map(|r| Debt::from(entity::DebtEntity::from(&r))))
     }
 
-    async fn insert(&self, debt: Debt) -> HttpResult<Debt> {
+    async fn insert(&self, debt: Debt, initial_payment: Option<Payment>) -> HttpResult<Debt> {
         let mut tx = self.pool.begin().await?;
         let inserted = insert_one(&mut tx, debt).await?;
+        if let Some(payment) = initial_payment {
+            insert_payment(&mut tx, payment).await?;
+        }
         tx.commit().await?;
         Ok(inserted)
     }
@@ -240,6 +264,8 @@ impl DebtRepository for DebtRepositoryImpl {
     }
 }
 
+/// Updates the editable fields only. Amounts and status are never written
+/// here — they only move through payments/refunds.
 async fn update_one(tx: &mut sqlx::Transaction<'_, Postgres>, debt: Debt) -> HttpResult<Debt> {
     let debt_dto = entity::DebtEntity::from(debt);
 
@@ -250,13 +276,8 @@ async fn update_one(tx: &mut sqlx::Transaction<'_, Postgres>, debt: Debt) -> Htt
             expense_type = $3,
             list_id = $4,
             description = $5,
-            total_amount = $6,
-            paid_amount = $7,
-            remaining_amount = $8,
-            due_date = $9,
-            status = $10,
-            installment_count = $11,
-            updated_at = $12
+            due_date = $6,
+            updated_at = $7
         WHERE id = $1
         RETURNING *
         "#,
@@ -266,12 +287,7 @@ async fn update_one(tx: &mut sqlx::Transaction<'_, Postgres>, debt: Debt) -> Htt
     .bind(&debt_dto.expense_type)
     .bind(debt_dto.list_id)
     .bind(&debt_dto.description)
-    .bind(debt_dto.total_amount)
-    .bind(debt_dto.paid_amount)
-    .bind(debt_dto.remaining_amount)
     .bind(debt_dto.due_date)
-    .bind(&debt_dto.status)
-    .bind(debt_dto.installment_count)
     .bind(debt_dto.updated_at)
     .fetch_optional(&mut **tx)
     .await?
