@@ -16,8 +16,7 @@ corrige código — apenas analisa e reporta.
 - A skill `gb-finance-business-rules` é a fonte central e mantida
   manualmente pelo dono do projeto. É ela que define os invariantes de
   domínio, as regras de validação e os casos-limite conhecidos de dívida,
-  pagamento, parcela, recorrência, fatura, receita e instrumento
-  financeiro.
+  pagamento, parcela, recorrência, fatura e receita.
 - **A implementação atual do módulo NÃO é fonte da verdade.** O dono já
   sinalizou que o código de `finance_manager` deixou de atender às
   necessidades dele e será redefinido. Não trate o comportamento atual do
@@ -37,7 +36,7 @@ corrige código — apenas analisa e reporta.
 
 1. Carregue a skill `gb-finance-business-rules` e releia as regras
    atualmente documentadas (Dívida, Pagamento, Parcela, Recorrência,
-   Fatura, Receita, Instrumento financeiro, Escopo e propriedade,
+   Fatura, Receita, Escopo e propriedade,
    Casos-limite conhecidos). O `CHANGELOG.md` da skill não faz parte
    dessa releitura padrão — só abra se precisar do contexto histórico de
    uma regra específica.
@@ -50,8 +49,7 @@ corrige código — apenas analisa e reporta.
 4. Compare a implementação (domain/handler/repository/routes) com as regras
    carregadas no passo 1. Preste atenção especialmente a:
    - `domain/` — os invariantes do modelo (`Debt`, `Payment`,
-     `Installment`, `Recurrence`, `Invoice`, `Income`,
-     `FinancialInstrument`) batem com o que a skill documenta? Condições de
+     `Installment`, `Recurrence`, `Invoice`, `Income`) batem com o que a skill documenta? Condições de
      regra de negócio estão como método nomeado na struct (ou validador
      dedicado), não como expressão solta?
    - `handler/` — a orquestração aplica as validações e transições

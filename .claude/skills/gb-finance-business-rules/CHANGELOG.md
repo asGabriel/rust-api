@@ -43,3 +43,8 @@
   `includeChildren` é mais neutro: só remove a restrição de nível-topo,
   devolvendo pais e parcelas numa lista plana. Mantida a cópia de
   `installment_count` nas filhas.
+- 2026-09-23 — **Removido instrumento financeiro do escopo.** O módulo
+  novo `finance` não tem (nem reserva campo para) instrumento financeiro
+  por ora — `Payment` e `Debt` não referenciam conta/instrumento. A seção
+  "Instrumento financeiro" sai do skill e das áreas validadas pelo
+  guardian; volta só se o conceito for reintroduzido por decisão explícita.

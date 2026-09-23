@@ -1,6 +1,6 @@
 ---
 name: gb-finance-business-rules
-description: Regras de negócio do módulo finance_manager — invariantes de domínio e validação de dívida, pagamento, parcela, recorrência, fatura, receita e instrumento financeiro.
+description: Regras de negócio do módulo finance_manager — invariantes de domínio e validação de dívida, pagamento, parcela, recorrência, fatura e receita.
 ---
 
 # Regras de negócio — finance_manager
@@ -181,13 +181,6 @@ vínculo quando a dívida é removida, propriedade/ownership.)
 ## Receita (`Income`)
 
 _A definir._
-
----
-
-## Instrumento financeiro (`FinancialInstrument`)
-
-_A definir._ (tipos e o que cada um exige, configuração obrigatória por
-tipo, o que significa `default_due_date`, edição.)
 
 ---
 
