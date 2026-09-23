@@ -6,7 +6,10 @@ use uuid::Uuid;
 use util::DeletedBy;
 
 use crate::modules::finance::{
-    domain::debt::{Debt, DebtFilters},
+    domain::{
+        debt::{Debt, DebtFilters},
+        payment::Payment,
+    },
     handler::debt::use_cases::{CreateDebtRequest, UpdateDebtRequest},
     repository::debt::DynDebtRepository,
 };
@@ -52,12 +55,12 @@ impl DebtHandler for DebtHandlerImpl {
         request: CreateDebtRequest,
     ) -> HttpResult<Debt> {
         request.validate()?;
+        let initial_paid_amount = request.initial_paid_amount();
 
         let mut debt = Debt::new(
             client_id,
             request.description,
             request.total_amount,
-            request.paid_amount,
             request.due_date,
             request.category,
             request.expense_type,
@@ -75,7 +78,15 @@ impl DebtHandler for DebtHandlerImpl {
             let mut inserted = self.debt_repository.insert_many(group).await?;
             Ok(inserted.remove(0))
         } else {
-            self.debt_repository.insert(debt).await
+            let initial_payment = match initial_paid_amount {
+                Some(amount) => {
+                    debt.apply_payment(amount)?;
+                    Some(Payment::new(&debt, amount, request.due_date))
+                }
+                None => None,
+            };
+
+            self.debt_repository.insert(debt, initial_payment).await
         }
     }
 
@@ -200,6 +211,15 @@ pub mod use_cases {
                 )));
             }
 
+            if self
+                .paid_amount
+                .is_some_and(|amount| amount < Decimal::ZERO)
+            {
+                return Err(Box::new(HttpError::bad_request(
+                    "Paid amount cannot be negative",
+                )));
+            }
+
             if let Some(installment_count) = self.installment_count {
                 if installment_count < 2 {
                     return Err(Box::new(HttpError::bad_request(
@@ -218,6 +238,11 @@ pub mod use_cases {
             }
 
             Ok(())
+        }
+
+        /// Amount already paid at creation, registered as an initial payment.
+        pub fn initial_paid_amount(&self) -> Option<Decimal> {
+            self.paid_amount.filter(|amount| *amount > Decimal::ZERO)
         }
 
         fn invalid_total_amount(&self) -> bool {

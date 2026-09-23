@@ -6,10 +6,12 @@ use api::modules::{
         handler::{
             debt::DebtHandlerImpl as FinanceDebtHandlerImpl,
             list::ListHandlerImpl as FinanceListHandlerImpl,
+            payment::PaymentHandlerImpl as FinancePaymentHandlerImpl,
         },
         repository::{
             debt::DebtRepositoryImpl as FinanceDebtRepositoryImpl,
             list::ListRepositoryImpl as FinanceListRepositoryImpl,
+            payment::PaymentRepositoryImpl as FinancePaymentRepositoryImpl,
         },
         FinanceState,
     },
@@ -76,9 +78,11 @@ async fn main() {
 
     let finance_debt_handler = build_finance_debt_handler(pool);
     let finance_list_handler = build_finance_list_handler(pool);
+    let finance_payment_handler = build_finance_payment_handler(pool);
     let finance_state = FinanceState {
         debt_handler: Arc::new(finance_debt_handler),
         list_handler: Arc::new(finance_list_handler),
+        payment_handler: Arc::new(finance_payment_handler),
     };
 
     let auth_handler = build_auth_handler(pool);
@@ -139,6 +143,13 @@ fn build_finance_debt_handler(pool: &Pool<Postgres>) -> FinanceDebtHandlerImpl {
 fn build_finance_list_handler(pool: &Pool<Postgres>) -> FinanceListHandlerImpl {
     FinanceListHandlerImpl {
         list_repository: Arc::new(FinanceListRepositoryImpl::new(pool)),
+    }
+}
+
+fn build_finance_payment_handler(pool: &Pool<Postgres>) -> FinancePaymentHandlerImpl {
+    FinancePaymentHandlerImpl {
+        debt_repository: Arc::new(FinanceDebtRepositoryImpl::new(pool)),
+        payment_repository: Arc::new(FinancePaymentRepositoryImpl::new(pool)),
     }
 }
 

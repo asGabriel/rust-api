@@ -7,6 +7,8 @@ use uuid::Uuid;
 
 use util::DeletedBy;
 
+use crate::modules::finance::domain::payment::PaymentValidator;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Debt {
@@ -43,21 +45,12 @@ impl Debt {
         client_id: Uuid,
         description: String,
         total_amount: Decimal,
-        paid_amount: Option<Decimal>,
         due_date: NaiveDate,
         category: Option<DebtCategory>,
         expense_type: Option<ExpenseType>,
         list_id: Option<Uuid>,
         installment_count: Option<i32>,
     ) -> Self {
-        let paid_amount = paid_amount.unwrap_or(Decimal::ZERO);
-        let remaining_amount = total_amount - paid_amount;
-        let status = if paid_amount >= total_amount {
-            DebtStatus::Settled
-        } else {
-            DebtStatus::Open
-        };
-
         Self {
             id: Uuid::new_v4(),
             client_id,
@@ -67,10 +60,10 @@ impl Debt {
             identification: String::new(),
             description,
             total_amount,
-            paid_amount,
-            remaining_amount,
+            paid_amount: Decimal::ZERO,
+            remaining_amount: total_amount,
             due_date: Some(due_date),
-            status,
+            status: DebtStatus::Open,
             installment_count,
             parent_id: None,
             installment_number: None,
@@ -92,6 +85,63 @@ impl Debt {
     /// `installment_count` (for display), hence the `parent_id` check.
     pub fn is_installment_parent(&self) -> bool {
         !self.is_installment_child() && self.has_installment_count()
+    }
+
+    pub fn is_settled(&self) -> bool {
+        self.status == DebtStatus::Settled
+    }
+
+    pub fn exceeds_remaining(&self, amount: Decimal) -> bool {
+        amount > self.remaining_amount
+    }
+
+    pub fn exceeds_paid(&self, amount: Decimal) -> bool {
+        amount > self.paid_amount
+    }
+
+    /// Registers `amount` as paid, after validating it against this debt.
+    pub fn apply_payment(&mut self, amount: Decimal) -> HttpResult<()> {
+        PaymentValidator::new(self).validate(amount)?;
+
+        self.paid_amount += amount;
+        self.recompute_balance();
+        Ok(())
+    }
+
+    /// Reverts a previously applied payment of `amount` (refund).
+    pub fn revert_payment(&mut self, amount: Decimal) -> HttpResult<()> {
+        if self.is_installment_parent() {
+            return Err(Box::new(HttpError::bad_request(
+                "An installment parent debt has no payments of its own to revert",
+            )));
+        }
+
+        if self.exceeds_paid(amount) {
+            return Err(Box::new(HttpError::conflict(
+                "Refund amount is greater than the debt's paid amount",
+            )));
+        }
+
+        self.paid_amount -= amount;
+        self.recompute_balance();
+        Ok(())
+    }
+
+    /// Recomputes an installment parent's `paid_amount`, `remaining_amount`
+    /// and `status` from its (active) children.
+    pub fn sync_with_children(&mut self, children: &[Debt]) {
+        self.paid_amount = children.iter().map(|child| child.paid_amount).sum();
+        self.recompute_balance();
+    }
+
+    fn recompute_balance(&mut self) {
+        self.remaining_amount = self.total_amount - self.paid_amount;
+        self.status = if self.paid_amount == self.total_amount {
+            DebtStatus::Settled
+        } else {
+            DebtStatus::Open
+        };
+        self.updated_at = Some(Utc::now());
     }
 
     /// Gera as N dívidas-filhas a partir desta dívida-pai e zera o

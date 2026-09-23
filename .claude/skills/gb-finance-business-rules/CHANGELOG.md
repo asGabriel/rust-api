@@ -48,3 +48,10 @@
   por ora — `Payment` e `Debt` não referenciam conta/instrumento. A seção
   "Instrumento financeiro" sai do skill e das áreas validadas pelo
   guardian; volta só se o conceito for reintroduzido por decisão explícita.
+- 2026-09-23 — **Pagamento definido.** Parcial permitido, excedente
+  rejeitado (`0 < amount <= remaining`); pai persiste
+  paid/remaining/status em sync com as filhas (em vez de derivar na
+  leitura, para o filtro por status seguir em SQL); `reconcile` removido;
+  `paidAmount` na criação gera `Payment` automático para a soma dos
+  pagamentos sempre bater com `paid_amount`; estorno = soft-delete do
+  pagamento com reversão da dívida e do pai.
