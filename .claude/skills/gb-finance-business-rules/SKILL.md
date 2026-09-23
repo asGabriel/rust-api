@@ -33,6 +33,12 @@ responsabilidade de review geral, não deste skill.
 - `0 <= remaining_amount <= total_amount`.
 - Nenhum dos três valores pode ser negativo.
 - `total_amount > 0` na criação.
+- **Precisão:** todo valor monetário recebido pela API (`totalAmount`,
+  `paidAmount` na criação, `amount` do pagamento) tem no máximo **2 casas
+  decimais** (zeros à direita não contam: `10.500` vale). Mais que isso é
+  **rejeitado com 400**, nunca arredondado — o banco guarda
+  `DECIMAL(10,2)` e arredondaria cada coluna de forma independente,
+  quebrando `remaining_amount = total_amount - paid_amount`.
 - `remaining_amount` é sempre **recalculado** a partir de `total_amount` e
   `paid_amount` (a cada pagamento/estorno); nunca é setado diretamente pela
   API nem persistido de forma independente.

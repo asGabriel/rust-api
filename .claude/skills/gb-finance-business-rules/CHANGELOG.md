@@ -55,3 +55,9 @@
   `paidAmount` na criação gera `Payment` automático para a soma dos
   pagamentos sempre bater com `paid_amount`; estorno = soft-delete do
   pagamento com reversão da dívida e do pai.
+- 2026-09-23 — **Valores monetários limitados a 2 casas decimais.**
+  `totalAmount`, `paidAmount` e `amount` do pagamento com mais de 2 casas
+  são rejeitados com 400 em vez de arredondados: o Postgres arredonda
+  `paid_amount` e `remaining_amount` separadamente (`DECIMAL(10,2)`), o
+  que quebrava o invariante por um centavo e deixava a dívida impossível
+  de quitar pelo saldo exibido (CHECK `paid <= total` → 500).

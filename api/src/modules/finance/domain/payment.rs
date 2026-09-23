@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use util::{from_row_constructor, getters, DeletedBy};
 use uuid::Uuid;
 
-use crate::modules::finance::domain::debt::Debt;
+use crate::modules::finance::domain::{debt::Debt, money::MoneyExt};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -86,6 +86,12 @@ impl<'a> PaymentValidator<'a> {
         if amount <= Decimal::ZERO {
             return Err(Box::new(HttpError::bad_request(
                 "Payment amount must be greater than zero",
+            )));
+        }
+
+        if amount.exceeds_money_scale() {
+            return Err(Box::new(HttpError::bad_request(
+                "Payment amount must have at most 2 decimal places",
             )));
         }
 
@@ -225,6 +231,14 @@ mod tests {
 
         assert!(debt.apply_payment(Decimal::ZERO).is_err());
         assert!(debt.apply_payment(d("-1")).is_err());
+    }
+
+    #[test]
+    fn payment_with_more_than_two_decimal_places_is_rejected() {
+        let mut debt = debt(d("100"));
+
+        assert!(debt.apply_payment(d("33.335")).is_err());
+        assert_eq!(*debt.paid_amount(), Decimal::ZERO);
     }
 
     #[test]

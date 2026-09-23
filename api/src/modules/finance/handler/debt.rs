@@ -188,7 +188,10 @@ pub mod use_cases {
     use serde::{Deserialize, Deserializer, Serialize};
     use uuid::Uuid;
 
-    use crate::modules::finance::domain::debt::{DebtCategory, ExpenseType};
+    use crate::modules::finance::domain::{
+        debt::{DebtCategory, ExpenseType},
+        money::MoneyExt,
+    };
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -208,6 +211,21 @@ pub mod use_cases {
             if self.invalid_total_amount() {
                 return Err(Box::new(HttpError::bad_request(
                     "Total amount must be greater than zero",
+                )));
+            }
+
+            if self.total_amount.exceeds_money_scale() {
+                return Err(Box::new(HttpError::bad_request(
+                    "Total amount must have at most 2 decimal places",
+                )));
+            }
+
+            if self
+                .paid_amount
+                .is_some_and(|amount| amount.exceeds_money_scale())
+            {
+                return Err(Box::new(HttpError::bad_request(
+                    "Paid amount must have at most 2 decimal places",
                 )));
             }
 
