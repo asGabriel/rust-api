@@ -30,9 +30,10 @@ pub trait DebtRepository {
 
     async fn update(&self, debt: Debt) -> HttpResult<Debt>;
 
-    /// Updates the debt and copies its `list_id` to its installment children,
+    /// Updates the debt and copies its shared fields (`category`,
+    /// `expense_type`, `list_id`, `description`) to its installment children,
     /// atomically.
-    async fn update_with_children_list_id(&self, debt: Debt) -> HttpResult<Debt>;
+    async fn update_with_children(&self, debt: Debt) -> HttpResult<Debt>;
 
     async fn soft_delete_cascade(
         &self,
@@ -64,20 +65,28 @@ impl DebtRepository for DebtRepositoryImpl {
         Ok(updated)
     }
 
-    async fn update_with_children_list_id(&self, debt: Debt) -> HttpResult<Debt> {
+    async fn update_with_children(&self, debt: Debt) -> HttpResult<Debt> {
         let mut tx = self.pool.begin().await?;
         let updated = update_one(&mut tx, debt).await?;
+        let updated_dto = entity::DebtEntity::from(updated.clone());
 
         sqlx::query(
             r#"
-            UPDATE finance.debt
-            SET list_id = $1, updated_at = $2
-            WHERE parent_id = $3 AND deleted_by IS NULL
+            UPDATE finance.debt SET
+                category = $1,
+                expense_type = $2,
+                list_id = $3,
+                description = $4,
+                updated_at = $5
+            WHERE parent_id = $6 AND deleted_by IS NULL
             "#,
         )
-        .bind(updated.list_id())
+        .bind(&updated_dto.category)
+        .bind(&updated_dto.expense_type)
+        .bind(updated_dto.list_id)
+        .bind(&updated_dto.description)
         .bind(Utc::now().naive_utc())
-        .bind(updated.id())
+        .bind(updated_dto.id)
         .execute(&mut *tx)
         .await?;
 

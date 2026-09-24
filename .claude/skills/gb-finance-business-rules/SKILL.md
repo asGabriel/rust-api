@@ -110,11 +110,16 @@ separada. `debt.debt_installment` deixa de existir.
   pagamento/estorno. Restruturar um plano = cancelar o pai (cascade) e
   criar outro.
 - Filhas **copiam** do pai na criação: `client_id`, `category`, `list_id`,
-  `expense_type`, `description`. Edições posteriores no pai **não**
-  propagam para as filhas — **exceto `list_id`**: a lista é só um
-  agrupador (não é dado financeiro), e são as filhas que aparecem mês a
-  mês, então vincular/desvincular o pai a uma lista propaga para todas as
-  filhas não-deletadas, na mesma transação.
+  `expense_type`, `description`. Editar esses campos no pai (`PATCH`)
+  **propaga** para todas as filhas não-deletadas, na mesma transação — são
+  as filhas que aparecem mês a mês, então precisam refletir o nome,
+  categoria, tipo e lista do plano. Dados financeiros e datas das filhas
+  (`total_amount`, `due_date`, `installment_number`) **não** são tocados.
+- **`due_date` do pai não é editável:** `PATCH` com `dueDate` numa
+  dívida-pai é **rejeitado com 400** (o pai tem `due_date = NULL`; cada
+  filha tem a sua, congelada na geração).
+- **`expense_type`** (`FIXED`/`VARIABLE`) é, por ora, **só um rótulo de
+  filtro**: não gera lançamentos recorrentes nem muda nenhum cálculo.
 - **Lista (`list_id`):** no `PATCH` da dívida, campo ausente = mantém,
   `null` = desvincula, uuid = vincula. Filha continua não-editável
   diretamente (o vínculo de uma parcela muda pelo pai).

@@ -376,9 +376,18 @@ impl Debt {
         self.updated_at = Some(Utc::now());
     }
 
-    pub fn set_due_date(&mut self, due_date: NaiveDate) {
+    /// An installment parent has no due date of its own (each installment
+    /// carries its own), so setting one is rejected.
+    pub fn set_due_date(&mut self, due_date: NaiveDate) -> HttpResult<()> {
+        if self.is_installment_parent() {
+            return Err(Box::new(HttpError::bad_request(
+                "An installment parent debt has no due date — each installment keeps its own",
+            )));
+        }
+
         self.due_date = Some(due_date);
         self.updated_at = Some(Utc::now());
+        Ok(())
     }
 }
 
@@ -538,5 +547,46 @@ impl DebtFilters {
             self.list_id = Some(id);
         }
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn due_date() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 1, 31).unwrap()
+    }
+
+    fn new_debt(installment_count: Option<i32>) -> Debt {
+        Debt::new(
+            Uuid::nil(),
+            "debt".to_string(),
+            Decimal::from(300),
+            due_date(),
+            None,
+            None,
+            None,
+            installment_count,
+        )
+    }
+
+    #[test]
+    fn set_due_date_updates_regular_debt() {
+        let mut debt = new_debt(None);
+        let new_due_date = NaiveDate::from_ymd_opt(2026, 3, 10).unwrap();
+
+        debt.set_due_date(new_due_date).unwrap();
+
+        assert_eq!(debt.due_date(), &Some(new_due_date));
+    }
+
+    #[test]
+    fn set_due_date_rejects_installment_parent() {
+        let mut parent = new_debt(Some(3));
+        parent.generate_installment_children(31).unwrap();
+
+        assert!(parent.set_due_date(due_date()).is_err());
+        assert_eq!(parent.due_date(), &None);
     }
 }
