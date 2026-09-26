@@ -61,3 +61,11 @@
   `paid_amount` e `remaining_amount` separadamente (`DECIMAL(10,2)`), o
   que quebrava o invariante por um centavo e deixava a dívida impossível
   de quitar pelo saldo exibido (CHECK `paid <= total` → 500).
+- 2026-09-24 — **Edição do pai propaga para as parcelas.** `PATCH` numa
+  dívida-pai agora copia `description`, `category`, `expense_type` e
+  `list_id` para as filhas não-deletadas na mesma transação (antes só
+  `list_id` propagava): renomear/recategorizar um parcelado deixava as
+  parcelas — que são o que aparece mês a mês — com os valores antigos.
+  `dueDate` numa dívida-pai passa a ser rejeitado com 400 (antes era
+  gravado, quebrando `pai.due_date = NULL`). `expense_type` fica
+  documentado como rótulo de filtro apenas, até a recorrência voltar.

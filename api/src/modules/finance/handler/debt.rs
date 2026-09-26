@@ -134,7 +134,6 @@ impl DebtHandler for DebtHandlerImpl {
         if let Some(expense_type) = request.expense_type {
             debt.set_expense_type(expense_type);
         }
-        let list_changed = request.list_id.is_some();
         if let Some(list_id) = request.list_id {
             debt.set_list_id(list_id);
         }
@@ -142,16 +141,13 @@ impl DebtHandler for DebtHandlerImpl {
             debt.set_description(description);
         }
         if let Some(due_date) = request.due_date {
-            debt.set_due_date(due_date);
+            debt.set_due_date(due_date)?;
         }
 
-        // The list is only a grouping, so unlike the other copied fields it
-        // follows the parent: installments are what show up month by month.
-        if list_changed && debt.is_installment_parent() {
-            return self
-                .debt_repository
-                .update_with_children_list_id(debt)
-                .await;
+        // Installments are what show up month by month, so they must follow
+        // the parent's descriptive fields.
+        if debt.is_installment_parent() {
+            return self.debt_repository.update_with_children(debt).await;
         }
 
         self.debt_repository.update(debt).await
