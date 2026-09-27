@@ -214,7 +214,31 @@ vínculo quando a dívida é removida, propriedade/ownership.)
 
 ## Receita (`Income`)
 
-_A definir._
+Receita é dinheiro que **efetivamente entrou**. Não existe receita
+prevista/"a receber" (sem status, sem recebimento parcial): se não entrou,
+não existe. Receita é uma linha isolada — não tem saldo, não se vincula a
+dívida, pagamento, lista nem instrumento financeiro.
+
+- Campos: `description`, `category`, `amount`, `received_date`.
+- **Valor:** `amount > 0`, no máximo **2 casas decimais** (mesma regra dos
+  demais valores monetários — rejeitado com 400, nunca arredondado).
+- **`received_date`:** o dia real em que o dinheiro entrou. O mês em que a
+  receita conta (competência) é derivado dessa data — não há campo de
+  competência separado.
+- **Categoria (`IncomeCategory`):** `Unknown` (default), `Salary`,
+  `Freelance`, `Investment`, `Refund`.
+- **Edição (`PATCH`):** todos os campos são editáveis (`description`,
+  `category`, `amount`, `received_date`); campo ausente = mantém. Editar
+  `amount` passa pela mesma validação da criação.
+- **Soft-delete** via `deleted_by`; receita removida some da listagem e não
+  pode ser editada nem removida de novo (not found).
+- **Listagem:** filtro por intervalo de `received_date` (`startDate`/
+  `endDate`) e por `categories`; ordenada por `received_date`.
+- _A definir:_ receita recorrente (ex: salário). Deve reaproveitar o
+  mecanismo de Recorrência compartilhado com a dívida, não uma recorrência
+  exclusiva de receita.
+- Receitas do módulo legado (`finance_manager.income`) **não** são
+  migradas.
 
 ---
 
