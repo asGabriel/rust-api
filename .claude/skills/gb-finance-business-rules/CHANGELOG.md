@@ -69,3 +69,12 @@
   `dueDate` numa dívida-pai passa a ser rejeitado com 400 (antes era
   gravado, quebrando `pai.due_date = NULL`). `expense_type` fica
   documentado como rótulo de filtro apenas, até a recorrência voltar.
+- 2026-09-27 — **Receita (`Income`) definida no módulo novo.** Só receita
+  realizada (sem prevista/"a receber" por ora), com `received_date` (dia
+  real; competência derivada dele) em vez do `reference` ambíguo do legado.
+  Removido o vínculo obrigatório com instrumento financeiro (o módulo novo
+  não tem instrumentos). Adicionada `IncomeCategory` com default `Unknown`
+  (padrão do `DebtCategory`), CRUD completo com soft-delete e validação de
+  valor (> 0, 2 casas). Motivo: o legado só permitia criar/listar, não
+  validava valor e amarrava a receita a uma conta. Sem migração dos dados
+  legados. Recorrência de receita fica para a Recorrência compartilhada.

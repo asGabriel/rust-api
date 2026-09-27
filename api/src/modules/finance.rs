@@ -3,7 +3,10 @@ use std::sync::Arc;
 use axum::Router;
 
 use crate::modules::{
-    finance::handler::{debt::DynDebtHandler, list::DynListHandler, payment::DynPaymentHandler},
+    finance::handler::{
+        debt::DynDebtHandler, income::DynIncomeHandler, list::DynListHandler,
+        payment::DynPaymentHandler,
+    },
     routes::AppState,
 };
 
@@ -14,6 +17,7 @@ pub mod routes;
 
 pub struct FinanceState {
     pub debt_handler: Arc<DynDebtHandler>,
+    pub income_handler: Arc<DynIncomeHandler>,
     pub list_handler: Arc<DynListHandler>,
     pub payment_handler: Arc<DynPaymentHandler>,
 }
@@ -23,6 +27,7 @@ pub fn configure_service_routes() -> Router<AppState> {
         "/finance",
         Router::new()
             .merge(routes::debt::configure_routes())
+            .merge(routes::income::configure_routes())
             .merge(routes::list::configure_routes())
             .merge(routes::payment::configure_routes()),
     )

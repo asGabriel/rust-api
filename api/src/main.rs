@@ -5,11 +5,13 @@ use api::modules::{
     finance::{
         handler::{
             debt::DebtHandlerImpl as FinanceDebtHandlerImpl,
+            income::IncomeHandlerImpl as FinanceIncomeHandlerImpl,
             list::ListHandlerImpl as FinanceListHandlerImpl,
             payment::PaymentHandlerImpl as FinancePaymentHandlerImpl,
         },
         repository::{
             debt::DebtRepositoryImpl as FinanceDebtRepositoryImpl,
+            income::IncomeRepositoryImpl as FinanceIncomeRepositoryImpl,
             list::ListRepositoryImpl as FinanceListRepositoryImpl,
             payment::PaymentRepositoryImpl as FinancePaymentRepositoryImpl,
         },
@@ -77,10 +79,12 @@ async fn main() {
     };
 
     let finance_debt_handler = build_finance_debt_handler(pool);
+    let finance_income_handler = build_finance_income_handler(pool);
     let finance_list_handler = build_finance_list_handler(pool);
     let finance_payment_handler = build_finance_payment_handler(pool);
     let finance_state = FinanceState {
         debt_handler: Arc::new(finance_debt_handler),
+        income_handler: Arc::new(finance_income_handler),
         list_handler: Arc::new(finance_list_handler),
         payment_handler: Arc::new(finance_payment_handler),
     };
@@ -137,6 +141,12 @@ fn build_debt_handler(pool: &Pool<Postgres>) -> DebtHandlerImpl {
 fn build_finance_debt_handler(pool: &Pool<Postgres>) -> FinanceDebtHandlerImpl {
     FinanceDebtHandlerImpl {
         debt_repository: Arc::new(FinanceDebtRepositoryImpl::new(pool)),
+    }
+}
+
+fn build_finance_income_handler(pool: &Pool<Postgres>) -> FinanceIncomeHandlerImpl {
+    FinanceIncomeHandlerImpl {
+        income_repository: Arc::new(FinanceIncomeRepositoryImpl::new(pool)),
     }
 }
 
