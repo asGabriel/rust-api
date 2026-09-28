@@ -2,6 +2,21 @@ use std::sync::Arc;
 
 use api::modules::{
     auth::{handler::AuthHandlerImpl, repository::user::UserRepositoryImpl, AuthState},
+    finance::{
+        handler::{
+            debt::DebtHandlerImpl as FinanceDebtHandlerImpl,
+            income::IncomeHandlerImpl as FinanceIncomeHandlerImpl,
+            list::ListHandlerImpl as FinanceListHandlerImpl,
+            payment::PaymentHandlerImpl as FinancePaymentHandlerImpl,
+        },
+        repository::{
+            debt::DebtRepositoryImpl as FinanceDebtRepositoryImpl,
+            income::IncomeRepositoryImpl as FinanceIncomeRepositoryImpl,
+            list::ListRepositoryImpl as FinanceListRepositoryImpl,
+            payment::PaymentRepositoryImpl as FinancePaymentRepositoryImpl,
+        },
+        FinanceState,
+    },
     finance_manager::{
         handler::{
             debt::{invoice::InvoiceHandlerImpl, DebtHandlerImpl},
@@ -63,6 +78,17 @@ async fn main() {
         income_handler: Arc::new(income_handler.clone()),
     };
 
+    let finance_debt_handler = build_finance_debt_handler(pool);
+    let finance_income_handler = build_finance_income_handler(pool);
+    let finance_list_handler = build_finance_list_handler(pool);
+    let finance_payment_handler = build_finance_payment_handler(pool);
+    let finance_state = FinanceState {
+        debt_handler: Arc::new(finance_debt_handler),
+        income_handler: Arc::new(finance_income_handler),
+        list_handler: Arc::new(finance_list_handler),
+        payment_handler: Arc::new(finance_payment_handler),
+    };
+
     let auth_handler = build_auth_handler(pool);
     let auth_state = AuthState {
         auth_handler: Arc::new(auth_handler),
@@ -72,6 +98,7 @@ async fn main() {
 
     let app_state = AppState {
         finance_manager_state: Arc::new(finance_manager_state),
+        finance_state: Arc::new(finance_state),
         auth_state: Arc::new(auth_state),
         matchmaking_state: Arc::new(matchmaking_state),
     };
@@ -108,6 +135,31 @@ fn build_debt_handler(pool: &Pool<Postgres>) -> DebtHandlerImpl {
         debt_repository: Arc::new(DebtRepositoryImpl::new(pool)),
         installment_repository: Arc::new(InstallmentRepositoryImpl::new(pool)),
         recurrence_repository: Arc::new(RecurrenceRepositoryImpl::new(pool)),
+    }
+}
+
+fn build_finance_debt_handler(pool: &Pool<Postgres>) -> FinanceDebtHandlerImpl {
+    FinanceDebtHandlerImpl {
+        debt_repository: Arc::new(FinanceDebtRepositoryImpl::new(pool)),
+    }
+}
+
+fn build_finance_income_handler(pool: &Pool<Postgres>) -> FinanceIncomeHandlerImpl {
+    FinanceIncomeHandlerImpl {
+        income_repository: Arc::new(FinanceIncomeRepositoryImpl::new(pool)),
+    }
+}
+
+fn build_finance_list_handler(pool: &Pool<Postgres>) -> FinanceListHandlerImpl {
+    FinanceListHandlerImpl {
+        list_repository: Arc::new(FinanceListRepositoryImpl::new(pool)),
+    }
+}
+
+fn build_finance_payment_handler(pool: &Pool<Postgres>) -> FinancePaymentHandlerImpl {
+    FinancePaymentHandlerImpl {
+        debt_repository: Arc::new(FinanceDebtRepositoryImpl::new(pool)),
+        payment_repository: Arc::new(FinancePaymentRepositoryImpl::new(pool)),
     }
 }
 

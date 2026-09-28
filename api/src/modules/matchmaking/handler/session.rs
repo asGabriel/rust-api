@@ -6,9 +6,9 @@ use uuid::Uuid;
 
 use crate::modules::matchmaking::{
     domain::{
+        games_played::GamesPlayed,
         queue::{QueueEntry, SessionQueue},
         session::Session,
-        team_drawer::GamesPlayed,
     },
     handler::session::use_cases::{CreateSessionRequest, UpdateSessionRequest},
     repository::{
