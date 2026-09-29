@@ -40,10 +40,15 @@ responsabilidade de review geral, não deste skill.
   `DECIMAL(10,2)` e arredondaria cada coluna de forma independente,
   quebrando `remaining_amount = total_amount - paid_amount`.
 - `remaining_amount` é sempre **recalculado** a partir de `total_amount` e
-  `paid_amount` (a cada pagamento/estorno); nunca é setado diretamente pela
-  API nem persistido de forma independente.
-- _A definir:_ editar `total_amount` de uma dívida comum depois que já
-  existe pagamento é permitido? (provável: proibido.)
+  `paid_amount` (a cada pagamento/estorno ou edição do total); nunca é
+  setado diretamente pela API nem persistido de forma independente.
+- **Editar `total_amount` (`PATCH totalAmount`):** permitido **só em dívida
+  comum** — pai e filha de parcelamento rejeitam com 400 (ver
+  Parcelamento). Mesmas validações da criação (`> 0`, no máximo 2 casas) e
+  mais `novo total >= paid_amount` (abaixo disso, 400: estornar antes).
+  Vale com ou sem pagamento: `paid_amount` não muda, `remaining_amount` e
+  `status` são recalculados — novo total == pago vira `Settled`; aumentar o
+  total de uma `Settled` a reabre (`Open`).
 
 ### Categoria (`DebtCategory`)
 
@@ -163,9 +168,11 @@ pagamentos ativos de uma dívida é sempre igual ao seu `paid_amount`.
 
 - A dívida vira `Settled` quando o pagamento leva `paid_amount ==
   total_amount` (ver Status e transições).
-- `paid_amount`, `remaining_amount` e `status` de qualquer dívida **só se
-  movem via pagamento/estorno** — a edição da dívida (PATCH) nunca os
-  altera.
+- `paid_amount` de qualquer dívida **só se move via pagamento/estorno** —
+  a edição da dívida (PATCH) nunca o altera. `remaining_amount` e `status`
+  também só se movem por pagamento/estorno, com uma exceção: a edição do
+  `total_amount` de uma dívida comum os recalcula (ver Invariantes de
+  valores).
 - **Valor pago na criação:** criar dívida com `paidAmount > 0` gera um
   `Payment` automático na mesma transação (`payment_date = due_date`),
   sujeito às mesmas validações (`paidAmount <= totalAmount`). Parcelamento

@@ -143,6 +143,9 @@ impl DebtHandler for DebtHandlerImpl {
         if let Some(due_date) = request.due_date {
             debt.set_due_date(due_date)?;
         }
+        if let Some(total_amount) = request.total_amount {
+            debt.set_total_amount(total_amount)?;
+        }
 
         // Installments are what show up month by month, so they must follow
         // the parent's descriptive fields.
@@ -274,6 +277,8 @@ pub mod use_cases {
         pub list_id: Option<Option<Uuid>>,
         pub description: Option<String>,
         pub due_date: Option<NaiveDate>,
+        /// Only accepted on regular debts; `paidAmount` is never editable.
+        pub total_amount: Option<Decimal>,
     }
 
     /// Paired with `#[serde(default)]`: an absent field falls back to `None`,
