@@ -78,3 +78,10 @@
   valor (> 0, 2 casas). Motivo: o legado só permitia criar/listar, não
   validava valor e amarrava a receita a uma conta. Sem migração dos dados
   legados. Recorrência de receita fica para a Recorrência compartilhada.
+- 2026-09-29 — **Dívida comum: `total_amount` editável via `PATCH`.**
+  Resolvido o "a definir" (a hipótese anterior era proibir após
+  pagamento). Permitido só em dívida comum, com ou sem pagamento, desde que
+  `novo total >= paid_amount`; `remaining_amount`/`status` recalculados
+  (pode quitar ou reabrir). Pai e filhas de parcelamento seguem imutáveis
+  (invariante da soma; reestruturar = cancelar e recriar). Motivo: o dono
+  precisa poder atualizar o valor ao editar uma dívida.

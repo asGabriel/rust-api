@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use util::DeletedBy;
 
-use crate::modules::finance::domain::payment::PaymentValidator;
+use crate::modules::finance::domain::{money::MoneyExt, payment::PaymentValidator};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -97,6 +97,10 @@ impl Debt {
 
     pub fn exceeds_paid(&self, amount: Decimal) -> bool {
         amount > self.paid_amount
+    }
+
+    pub fn is_below_paid(&self, amount: Decimal) -> bool {
+        amount < self.paid_amount
     }
 
     /// Registers `amount` as paid, after validating it against this debt.
@@ -389,6 +393,58 @@ impl Debt {
         self.updated_at = Some(Utc::now());
         Ok(())
     }
+
+    /// Changes the total of a regular debt, recomputing `remaining_amount`
+    /// and `status` from the unchanged `paid_amount`.
+    pub fn set_total_amount(&mut self, total_amount: Decimal) -> HttpResult<()> {
+        TotalAmountValidator::new(self).validate(total_amount)?;
+
+        self.total_amount = total_amount;
+        self.recompute_balance();
+        Ok(())
+    }
+}
+
+/// Validates a new `total_amount` for an existing debt. Only regular debts
+/// can have their total edited: an installment plan must keep
+/// `sum(children.total_amount) == parent.total_amount`, and installments are
+/// frozen at generation.
+pub struct TotalAmountValidator<'a> {
+    debt: &'a Debt,
+}
+
+impl<'a> TotalAmountValidator<'a> {
+    pub fn new(debt: &'a Debt) -> Self {
+        Self { debt }
+    }
+
+    pub fn validate(&self, total_amount: Decimal) -> HttpResult<()> {
+        if self.debt.is_installment_parent() || self.debt.is_installment_child() {
+            return Err(Box::new(HttpError::bad_request(
+                "Only regular debts can have their total amount edited — restructure an installment plan by deleting it and creating a new one",
+            )));
+        }
+
+        if total_amount <= Decimal::ZERO {
+            return Err(Box::new(HttpError::bad_request(
+                "Total amount must be greater than zero",
+            )));
+        }
+
+        if total_amount.exceeds_money_scale() {
+            return Err(Box::new(HttpError::bad_request(
+                "Total amount must have at most 2 decimal places",
+            )));
+        }
+
+        if self.debt.is_below_paid(total_amount) {
+            return Err(Box::new(HttpError::bad_request(
+                "Total amount cannot be lower than the debt's paid amount — refund payments first",
+            )));
+        }
+
+        Ok(())
+    }
 }
 
 from_row_constructor! {
@@ -588,5 +644,88 @@ mod tests {
 
         assert!(parent.set_due_date(due_date()).is_err());
         assert_eq!(parent.due_date(), &None);
+    }
+
+    fn d(value: &str) -> Decimal {
+        value.parse().unwrap()
+    }
+
+    #[test]
+    fn set_total_amount_updates_unpaid_debt() {
+        let mut debt = new_debt(None);
+
+        debt.set_total_amount(d("450.50")).unwrap();
+
+        assert_eq!(debt.total_amount(), &d("450.50"));
+        assert_eq!(debt.remaining_amount(), &d("450.50"));
+        assert_eq!(debt.status(), &DebtStatus::Open);
+    }
+
+    #[test]
+    fn set_total_amount_keeps_paid_and_recomputes_remaining() {
+        let mut debt = new_debt(None);
+        debt.apply_payment(d("100")).unwrap();
+
+        debt.set_total_amount(d("250")).unwrap();
+
+        assert_eq!(debt.paid_amount(), &d("100"));
+        assert_eq!(debt.remaining_amount(), &d("150"));
+        assert_eq!(debt.status(), &DebtStatus::Open);
+    }
+
+    #[test]
+    fn set_total_amount_equal_to_paid_settles_debt() {
+        let mut debt = new_debt(None);
+        debt.apply_payment(d("100")).unwrap();
+
+        debt.set_total_amount(d("100")).unwrap();
+
+        assert_eq!(debt.remaining_amount(), &Decimal::ZERO);
+        assert_eq!(debt.status(), &DebtStatus::Settled);
+    }
+
+    #[test]
+    fn set_total_amount_above_paid_reopens_settled_debt() {
+        let mut debt = new_debt(None);
+        debt.apply_payment(d("300")).unwrap();
+        assert!(debt.is_settled());
+
+        debt.set_total_amount(d("350")).unwrap();
+
+        assert_eq!(debt.remaining_amount(), &d("50"));
+        assert_eq!(debt.status(), &DebtStatus::Open);
+    }
+
+    #[test]
+    fn set_total_amount_rejects_value_below_paid() {
+        let mut debt = new_debt(None);
+        debt.apply_payment(d("100")).unwrap();
+
+        assert!(debt.set_total_amount(d("99.99")).is_err());
+        assert_eq!(debt.total_amount(), &d("300"));
+    }
+
+    #[test]
+    fn set_total_amount_rejects_non_positive_value() {
+        let mut debt = new_debt(None);
+
+        assert!(debt.set_total_amount(Decimal::ZERO).is_err());
+        assert!(debt.set_total_amount(d("-10")).is_err());
+    }
+
+    #[test]
+    fn set_total_amount_rejects_more_than_two_decimal_places() {
+        let mut debt = new_debt(None);
+
+        assert!(debt.set_total_amount(d("10.005")).is_err());
+    }
+
+    #[test]
+    fn set_total_amount_rejects_installment_parent_and_children() {
+        let mut parent = new_debt(Some(3));
+        let mut children = parent.generate_installment_children(31).unwrap();
+
+        assert!(parent.set_total_amount(d("600")).is_err());
+        assert!(children[0].set_total_amount(d("200")).is_err());
     }
 }

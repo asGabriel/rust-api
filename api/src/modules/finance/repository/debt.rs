@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use chrono::Utc;
-use http_error::{ext::OptionHttpExt, HttpError, HttpResult};
+use http_error::{HttpError, HttpResult};
 use sqlx::types::Json;
 use sqlx::{Pool, Postgres, QueryBuilder};
 use uuid::Uuid;
@@ -273,8 +273,11 @@ impl DebtRepository for DebtRepositoryImpl {
     }
 }
 
-/// Updates the editable fields only. Amounts and status are never written
-/// here — they only move through payments/refunds.
+/// Updates the editable fields plus the balance derived from `total_amount`.
+/// `paid_amount` is never written here — it only moves through
+/// payments/refunds — and the write fails with a conflict if it changed since
+/// the debt was read, so a concurrent payment/refund is never overwritten with
+/// a stale `remaining_amount`/`status`.
 async fn update_one(tx: &mut sqlx::Transaction<'_, Postgres>, debt: Debt) -> HttpResult<Debt> {
     let debt_dto = entity::DebtEntity::from(debt);
 
@@ -286,8 +289,11 @@ async fn update_one(tx: &mut sqlx::Transaction<'_, Postgres>, debt: Debt) -> Htt
             list_id = $4,
             description = $5,
             due_date = $6,
-            updated_at = $7
-        WHERE id = $1
+            total_amount = $7,
+            remaining_amount = $8,
+            status = $9,
+            updated_at = $10
+        WHERE id = $1 AND paid_amount = $11 AND deleted_by IS NULL
         RETURNING *
         "#,
     )
@@ -297,10 +303,18 @@ async fn update_one(tx: &mut sqlx::Transaction<'_, Postgres>, debt: Debt) -> Htt
     .bind(debt_dto.list_id)
     .bind(&debt_dto.description)
     .bind(debt_dto.due_date)
+    .bind(debt_dto.total_amount)
+    .bind(debt_dto.remaining_amount)
+    .bind(&debt_dto.status)
     .bind(debt_dto.updated_at)
+    .bind(debt_dto.paid_amount)
     .fetch_optional(&mut **tx)
     .await?
-    .or_not_found("debt", debt_dto.id.to_string())?;
+    .ok_or_else(|| {
+        Box::new(HttpError::conflict(
+            "Debt was modified concurrently, please retry",
+        ))
+    })?;
 
     Ok(Debt::from(entity::DebtEntity::from(&row)))
 }
