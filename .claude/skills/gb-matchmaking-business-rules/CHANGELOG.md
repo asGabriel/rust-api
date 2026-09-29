@@ -4,6 +4,46 @@
 > Não é recarregado automaticamente com o `SKILL.md` — só ler quando for
 > preciso entender o motivo/contexto histórico de uma regra específica.
 
+- 2026-09-07 — **roster da `Session` separado do check-in.** A `Session`
+  passou a ter **duas** listas de jogadores: `roster_player_ids` (quem foi
+  selecionado pra sessão — lista de planejamento, editada em bloco via
+  `PATCH .../sessions/{id}` com `rosterPlayerIds`) e `player_ids` (quem fez
+  check-in — presente e disponível, alimenta `session_queue` / sorteio /
+  início de `Match`). `player_ids` é sempre subconjunto de
+  `roster_player_ids`. Check-in (`POST .../check-in/{player_id}`) agora
+  exige o jogador estar no roster → **409** senão (o **404** de player
+  inexistente continua). Check-out tira só de `player_ids`; o jogador
+  fica no roster. Tirar do roster via `PATCH` arrasta o check-out junto
+  (o roster nunca fica menor que a lista de check-in). Motivo: o operador
+  quer montar a lista da sessão antes (quem é esperado) e, no dia, cada um
+  confirma presença — dois passos distintos, não um só. Reverte a decisão
+  de 2026-09-01 de que "check-in = entrar em `player_ids`, sem presença
+  separada". `PATCH` deixou de aceitar `playerIds` (só `rosterPlayerIds`);
+  `sync_queue_to_roster` virou `sync_queue_to_checked_in`. Ver "Roster vs.
+  check-in" em "Fila e rotação de quadra" no `SKILL.md`.
+- 2026-09-01 — **check-in / check-out de jogador + `games_played` derivado
+  na (re)entrada na lista.** Adicionados `POST` / `DELETE
+  /matchmaking/sessions/{id}/check-in/{player_id}` como via dedicada de um
+  jogador só pra confirmar/tirar da `Session` (era só `PATCH .../{id}` com
+  `playerIds`, o roster inteiro). "Check-in" = entrar em
+  `Session::player_ids` — sem conceito de presença separado. Junto,
+  fechados dois gaps que a revisão do guardião apontou: (1) `insert_many`
+  da `session_queue` ganhou `ON CONFLICT (session_id, player_id) DO
+  NOTHING` — um re-check-in com linha órfã na lista (roster/fila fora de
+  sincronia) não estoura mais 500; (2) a contagem de `games_played` de
+  quem entra na lista deixou de ser hardcoded `0` e passou a ser derivada
+  do registro de `Match`es finalizados, via o novo tipo de domínio
+  `GamesPlayed` (irmão de `PartnerHistory`, mesma fonte "times que
+  entraram num `Match`"). Motivo: com o check-out virando ação de rotina,
+  um jogador que jogou N partidas, saiu e voltou reentrava com
+  `games_played = 0` e furava a ordenação por jogos — o caso-limite antes
+  "aceito por ser raro" deixou de ser raro. A derivação vale pros dois
+  caminhos de escrita de roster (endpoint dedicado e `playerIds`), ambos
+  passam por `SessionHandlerImpl::sync_queue_to_roster`. `TeamHandlerImpl`
+  foi refatorado pra usar `GamesPlayed` também (removida a fn privada
+  `games_played_by_player`; `return_players_to_queue` recebe `&GamesPlayed`)
+  — mesma contagem, uma implementação. Ver "Check-in / check-out" em "Fila
+  e rotação de quadra" no `SKILL.md`.
 - 2026-08-30 — **arranque da `Session` vira 100% manual; `TeamDrawer`
   removido.** Logo depois do redesenho da fila (entrada abaixo), o endpoint
   `POST /sessions/{id}/queue/seed` (`TeamHandlerImpl::seed_queue`) — que

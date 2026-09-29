@@ -50,8 +50,10 @@ habilidade, histórico de parceria, aleatoriedade controlada, etc.
 #### A lista (`session_queue`)
 
 - Uma linha por jogador da `Session` que **não** está em quadra nem
-  `Holding`. Colunas: `player_id`, `games_played` (nº de `Match`es que o
-  jogador já terminou — mantido na escrita, não derivado), `enqueued_at`
+  `Holding`. Colunas: `player_id`, `games_played` (nº de `Match`es
+  finalizados em que o jogador entrou — a coluna é persistida, mas o
+  **valor é sempre re-derivado do registro de `Match`es** via `GamesPlayed`
+  a cada (re)entrada na lista, nunca incrementado no lugar), `enqueued_at`
   (vira `now()` toda vez que o jogador (re)entra na lista) e `pinned` /
   `pinned_at` (prioridade manual).
 - **Ordem de quem entra primeiro:**
@@ -61,10 +63,28 @@ habilidade, histórico de parceria, aleatoriedade controlada, etc.
 - "Ninguém volta na hora" é consequência da ordem, não uma regra à parte:
   quem sai de uma partida entra na lista com `games_played + 1` **e**
   `enqueued_at = now()` — afunda nos dois critérios.
-- Quando jogadores são confirmados na `Session` (`PATCH
-  /matchmaking/sessions/{id}` com `playerIds`), entram na lista com
-  `games_played = 0`; jogadores tirados da `Session` saem da lista (um que
-  esteja em quadra fica jogando, só perde a linha da lista).
+- **Roster vs. check-in** — a `Session` tem **duas** listas de jogadores:
+  - `roster_player_ids` — quem foi **selecionado** para a sessão (lista de
+    planejamento). Editado só em bloco via `PATCH /matchmaking/sessions/{id}`
+    com `rosterPlayerIds`. Não mexe na `session_queue` por si só.
+  - `player_ids` — quem fez **check-in** (está presente e disponível).
+    É o que alimenta a `session_queue`, o sorteio (`next_challenger`,
+    seeding) e o início de `Match` (`MatchStartValidator`). Sempre um
+    subconjunto de `roster_player_ids`.
+- **Check-in / check-out** — mexe só em `player_ids`, via
+  `POST` / `DELETE /matchmaking/sessions/{id}/check-in/{player_id}` (um
+  jogador, idempotente):
+  - Check-in exige o jogador estar em `roster_player_ids` → **409** senão;
+    **404** se o `player_id` não existe. Quem entra é adicionado à
+    `session_queue` com `games_played` derivado do histórico (`0` no
+    primeiro check-in, a contagem real num re-check-in — não fura a
+    ordenação por jogos) e `enqueued_at = now()`.
+  - Check-out tira de `player_ids` e da `session_queue`; o jogador
+    **continua no roster**. Se estiver em quadra, continua jogando (ver
+    caso-limite).
+  - Tirar um jogador **do roster** via `PATCH` (`rosterPlayerIds` sem ele)
+    também faz o check-out dele se ainda estava presente — o roster nunca
+    fica menor que a lista de check-in.
 
 #### `Team` — status
 
@@ -267,17 +287,19 @@ Ex: balanceamento de nível tem prioridade sobre variar parceiros.
   (`create_match` check + insert, `update_session`, etc.) segue TOCTOU
   teórico, aceito por não haver operadores simultâneos de fato. Envolver
   `remove`+`insert` numa `sqlx::Transaction` de verdade é follow-up.
-- **Jogador tirado da `Session` que está num `Draft` ou `Holding`:**
-  `update_session` só apaga a linha da `session_queue` dele — o `Draft`/
-  `Holding` fica com o roster de então. `MatchStartValidator` barra iniciar
-  um `Match` com esse time (checa `Session::player_ids`), então o time fica
-  "morto" até o operador editar/descartar. Aceito; a via limpa é o operador
-  não tirar da sessão quem está prestes a jogar.
-- **Re-adicionar um jogador tirado da `Session` no meio:** ele volta pra
-  `session_queue` com `games_played = 0` (o `update_session` não deriva do
-  histórico), então fura a fila na ordenação por jogos. Aceito — tirar e
-  re-adicionar alguém no meio da sessão é caso raro; se incomodar, derivar
-  `games_played` no `update_session` igual `resolve_match_result` faz.
+- **Jogador com check-out que está num `Draft` ou `Holding`:** o check-out
+  (endpoint dedicado, ou saída do roster via `PATCH` que arrasta o check-out
+  junto) só apaga a linha da `session_queue` dele — o `Draft`/`Holding` fica
+  com o roster de então. `MatchStartValidator` barra iniciar um `Match` com
+  esse time (checa `Session::player_ids`), então o time fica "morto" até o
+  operador editar/descartar. Aceito; a via limpa é o operador não tirar da
+  sessão quem está prestes a jogar.
+- **Re-check-in de um jogador tirado no meio:** volta pra `session_queue`
+  com o `games_played` real derivado do histórico de `Match`es (não `0`),
+  então **não** fura a ordenação por jogos. Via
+  `sync_queue_to_checked_in` → `GamesPlayed`. O `update_session` com
+  `rosterPlayerIds` **não** faz re-check-in (só mexe no roster); a única via
+  de check-in é o endpoint dedicado.
 - **`next_challenger` sem gente suficiente do gênero necessário** (`Mixed`
   desbalanceado, ou lista quase vazia): não forma `Draft` pra aquela quadra,
   ela fica ociosa e a resposta sinaliza. O operador monta manualmente

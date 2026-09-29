@@ -1,3 +1,4 @@
+pub mod games_played;
 pub mod matches;
 pub mod partner_history;
 pub mod player;
