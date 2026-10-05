@@ -11,7 +11,7 @@ use crate::modules::matchmaking::{
         matches::Match,
         partner_history::PartnerHistory,
         player::Player,
-        queue::{QueueEntry, SessionQueue},
+        queue::{ChallengerSuggestion, QueueEntry, SessionQueue},
         session::Session,
         team::{Team, TeamValidator},
     },
@@ -65,7 +65,19 @@ pub trait TeamHandler {
     /// and no match is running to trigger it (e.g. players arrived late and
     /// the operator just added them to the session).
     async fn refresh_idle_courts(&self, session_id: Uuid) -> HttpResult<ResolvedRotation>;
+
+    /// Read-only preview of the next challengers the queue would draft, in
+    /// order — up to `NEXT_CHALLENGERS_PREVIEW` teams, chained through
+    /// `SessionQueue::next_challengers` with the same `GameMode` and
+    /// partner-history rules the idle-court fill uses. Persists nothing.
+    async fn preview_next_challengers(
+        &self,
+        session_id: Uuid,
+    ) -> HttpResult<Vec<ChallengerSuggestion>>;
 }
+
+/// How many upcoming challenger teams `preview_next_challengers` returns.
+const NEXT_CHALLENGERS_PREVIEW: usize = 2;
 
 pub type DynTeamHandler = dyn TeamHandler + Send + Sync;
 
@@ -335,6 +347,28 @@ impl TeamHandler for TeamHandlerImpl {
             .await?;
 
         Ok(ResolvedRotation { courts })
+    }
+
+    async fn preview_next_challengers(
+        &self,
+        session_id: Uuid,
+    ) -> HttpResult<Vec<ChallengerSuggestion>> {
+        let session = self.load_session(session_id).await?;
+        let session_teams = self.team_repository.list_by_session(&session_id).await?;
+        let session_matches = self.match_repository.list_by_session(&session_id).await?;
+        let history = PartnerHistory::from_matches(&session_teams, &session_matches);
+        let session_players = self.session_players(&session).await?;
+        let queue_entries = self
+            .session_queue_repository
+            .list_by_session(&session_id)
+            .await?;
+
+        let queue = SessionQueue::new(
+            queue_entries,
+            *session.game_mode(),
+            *session.settings().players_per_team(),
+        );
+        Ok(queue.next_challengers(&session_players, &history, NEXT_CHALLENGERS_PREVIEW))
     }
 }
 
@@ -1087,5 +1121,57 @@ mod tests {
         let again = w.handler.refresh_idle_courts(w.session_id).await.unwrap();
         assert!(again.courts.is_empty());
         assert_eq!(w.drafts_by_court().len(), 2);
+    }
+
+    /// The preview persists nothing and names exactly the players the fill
+    /// then drafts, in order.
+    #[tokio::test]
+    async fn test_preview_matches_what_the_fill_drafts_without_consuming_the_queue() {
+        let players: Vec<Player> = (0..8).map(|_| male()).collect();
+        let w = world(GameMode::Male, 1, &players);
+
+        let mut ab = Team::new(w.session_id, vec![*players[0].id(), *players[1].id()]);
+        ab.register_win();
+        let cd = Team::new(w.session_id, vec![*players[2].id(), *players[3].id()]);
+        w.add_teams([ab.clone(), cd.clone()]);
+        w.add_finished_match(1, &ab, &cd, &ab).await;
+        w.enqueue(&[
+            (&players[4], 0),
+            (&players[5], 0),
+            (&players[6], 0),
+            (&players[7], 0),
+        ])
+        .await;
+
+        let preview = w
+            .handler
+            .preview_next_challengers(w.session_id)
+            .await
+            .unwrap();
+        assert_eq!(preview.len(), 2);
+        assert_eq!(w.queue.0.lock().unwrap().len(), 4);
+        assert!(w.drafts_by_court().is_empty());
+
+        // ab hits the win cap here, so the court opens with two drafts.
+        let rotation = w
+            .handler
+            .resolve_match_result(w.session_id, *ab.id(), *cd.id())
+            .await
+            .unwrap();
+        let teams = w.teams.0.lock().unwrap();
+        let drafted: Vec<Vec<Uuid>> = rotation.courts[0]
+            .draft_team_ids
+            .iter()
+            .map(|id| {
+                teams
+                    .iter()
+                    .find(|t| t.id() == id)
+                    .unwrap()
+                    .player_ids()
+                    .clone()
+            })
+            .collect();
+        let previewed: Vec<Vec<Uuid>> = preview.into_iter().map(|s| s.player_ids).collect();
+        assert_eq!(drafted, previewed);
     }
 }
