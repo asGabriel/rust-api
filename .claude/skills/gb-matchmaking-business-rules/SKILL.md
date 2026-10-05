@@ -139,6 +139,16 @@ Orquestrado por `TeamHandlerImpl::resolve_match_result` (que reusa
   não há partida em andamento pra disparar isso sozinho (ex.: jogadores
   chegaram atrasados e o operador acabou de confirmá-los na `Session`).
   Devolve as mesmas `CourtSuggestion`s.
+- **Prévia dos próximos:** `GET /matchmaking/sessions/{id}/queue/next` —
+  só leitura, não grava nada. Encadeia até 2 `next_challenger`
+  (`SessionQueue::next_challengers`), cada um sobre o que o anterior deixou
+  na fila, com as mesmas regras de `GameMode` e `PartnerHistory` do
+  preenchimento. Devolve `ChallengerSuggestion[]` (`playerIds`,
+  `repeatsPartner`). É a fonte da prévia "próximos a entrar" no frontend —
+  o front não monta dupla sozinho. Continua sendo uma foto da fila agora:
+  o resultado da partida em andamento devolve gente pra fila e muda o
+  histórico de parceiros, o que pode mexer na escolha quando a fila está
+  curta.
 
 #### `next_challenger` (sugestão automática)
 

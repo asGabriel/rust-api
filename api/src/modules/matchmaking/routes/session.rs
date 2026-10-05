@@ -25,6 +25,7 @@ pub fn configure_routes() -> Router<AppState> {
             )
             .route("/{id}/queue", get(list_queue))
             .route("/{id}/queue/fill", post(fill_idle_courts))
+            .route("/{id}/queue/next", get(next_challengers))
             .route("/{id}/queue/{player_id}", patch(set_pin)),
     )
 }
@@ -132,6 +133,19 @@ async fn fill_idle_courts(
         .await?;
 
     Ok(Json(rotation.courts))
+}
+
+async fn next_challengers(
+    state: State<AppState>,
+    Path(id): Path<Uuid>,
+) -> HttpResult<impl IntoResponse> {
+    let challengers = state
+        .matchmaking_state
+        .team_handler
+        .preview_next_challengers(id)
+        .await?;
+
+    Ok(Json(challengers))
 }
 
 async fn set_pin(

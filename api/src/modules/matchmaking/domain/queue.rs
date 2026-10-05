@@ -189,6 +189,29 @@ impl SessionQueue {
         })
     }
 
+    /// Up to `count` successive `next_challenger` picks, each drawn from
+    /// what the previous ones left in the queue — the same sequence the
+    /// idle-court fill would draft right now, without persisting anything.
+    /// Stops early when the queue can't supply another full team.
+    pub fn next_challengers(
+        &self,
+        players: &[Player],
+        history: &PartnerHistory,
+        count: usize,
+    ) -> Vec<ChallengerSuggestion> {
+        let mut remaining = self.entries.clone();
+        let mut suggestions = Vec::with_capacity(count);
+        while suggestions.len() < count {
+            let queue = SessionQueue::new(remaining.clone(), self.game_mode, self.players_per_team);
+            let Some(suggestion) = queue.next_challenger(players, history) else {
+                break;
+            };
+            remaining.retain(|entry| !suggestion.player_ids.contains(entry.player_id()));
+            suggestions.push(suggestion);
+        }
+        suggestions
+    }
+
     /// Appends up to `need` player ids from `pool` (already in queue order)
     /// to `chosen`, preferring candidates who haven't partnered anyone
     /// already in `chosen` this session. If fewer than `need` such
@@ -240,7 +263,8 @@ impl SessionQueue {
 
 /// The queue's suggestion for who enters a court next, for the operator to
 /// confirm or edit. `repeats_partner` is advisory only.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChallengerSuggestion {
     pub player_ids: Vec<Uuid>,
     pub repeats_partner: bool,
@@ -398,6 +422,62 @@ mod tests {
         assert!(queue
             .next_challenger(&players, &PartnerHistory::empty())
             .is_none());
+    }
+
+    /// `next_challengers` chains `next_challenger` picks: the second team
+    /// comes from what the first left behind, respecting `Mixed` gender
+    /// composition — not a plain slice of the queue order.
+    #[test]
+    fn test_next_challengers_chains_picks_respecting_mixed_mode() {
+        let m1 = player(Gender::Male);
+        let m2 = player(Gender::Male);
+        let m3 = player(Gender::Male);
+        let f1 = player(Gender::Female);
+        let f2 = player(Gender::Female);
+        let players = vec![m1.clone(), m2.clone(), m3.clone(), f1.clone(), f2.clone()];
+
+        // Queue order: m1, m2, m3, f1, f2 — a naive slice would pair m1+m2.
+        let queue = SessionQueue::new(
+            vec![
+                entry_for(*m1.id(), 0, 90),
+                entry_for(*m2.id(), 0, 80),
+                entry_for(*m3.id(), 0, 70),
+                entry_for(*f1.id(), 0, 60),
+                entry_for(*f2.id(), 0, 50),
+            ],
+            GameMode::Mixed,
+            2,
+        );
+
+        let picks = queue.next_challengers(&players, &PartnerHistory::empty(), 2);
+        let ids: Vec<Vec<Uuid>> = picks.into_iter().map(|s| s.player_ids).collect();
+        assert_eq!(
+            ids,
+            vec![vec![*m1.id(), *f1.id()], vec![*m2.id(), *f2.id()]]
+        );
+    }
+
+    /// `next_challengers` stops early once the queue can't fill a team.
+    #[test]
+    fn test_next_challengers_stops_when_queue_runs_out() {
+        let a = player(Gender::Male);
+        let b = player(Gender::Male);
+        let c = player(Gender::Male);
+        let players = vec![a.clone(), b.clone(), c.clone()];
+
+        let queue = SessionQueue::new(
+            vec![
+                entry_for(*a.id(), 0, 30),
+                entry_for(*b.id(), 0, 20),
+                entry_for(*c.id(), 0, 10),
+            ],
+            GameMode::Open,
+            2,
+        );
+
+        let picks = queue.next_challengers(&players, &PartnerHistory::empty(), 2);
+        assert_eq!(picks.len(), 1);
+        assert_eq!(picks[0].player_ids, vec![*a.id(), *b.id()]);
     }
 
     /// Fewer players in the queue than `players_per_team` → `None`.
