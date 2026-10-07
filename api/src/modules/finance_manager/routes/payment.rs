@@ -48,7 +48,7 @@ async fn list_payments(
     let payments = state
         .finance_manager_state
         .payment_handler
-        .list_payments(*user.client_id(), filters)
+        .list_payments(user.tenant_id(), filters)
         .await?;
 
     Ok(Json(payments))
@@ -63,7 +63,7 @@ async fn refund_payment(
     state
         .finance_manager_state
         .payment_handler
-        .refund_payment(*user.client_id(), id)
+        .refund_payment(user.tenant_id(), id)
         .await?;
 
     Ok(Json(

@@ -35,7 +35,7 @@ async fn create_invoice(
     let invoice = state
         .finance_manager_state
         .invoice_handler
-        .create_invoice(*user.client_id(), request)
+        .create_invoice(user.tenant_id(), request)
         .await?;
 
     Ok(Json(invoice))
@@ -51,7 +51,7 @@ async fn list_invoices(
     let invoices = state
         .finance_manager_state
         .invoice_handler
-        .list_invoices(*user.client_id(), request)
+        .list_invoices(user.tenant_id(), request)
         .await?;
 
     Ok(Json(invoices))
@@ -68,7 +68,7 @@ async fn manage_invoice(
     state
         .finance_manager_state
         .invoice_handler
-        .manage_invoice(*user.client_id(), invoice_id, request)
+        .manage_invoice(user.tenant_id(), invoice_id, request)
         .await?;
 
     Ok(StatusCode::OK)

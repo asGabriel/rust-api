@@ -8,97 +8,121 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::modules::auth::{
-    domain::user::{User, UserResponse},
-    repository::user::DynUserRepository,
+    domain::{
+        allowed_user::AllowedUser,
+        auth_user::AuthUser,
+        user::{User, UserResponse},
+    },
+    repository::{
+        allowed_user::DynAllowedUserRepository, google::DynGoogleTokenVerifier,
+        user::DynUserRepository,
+    },
 };
+
+const TOKEN_TTL_HOURS: i64 = 1;
 
 pub type DynAuthHandler = dyn AuthHandler + Send + Sync;
 
 #[async_trait]
 pub trait AuthHandler {
-    async fn register(&self, request: RegisterRequest) -> HttpResult<AuthResponse>;
-    async fn login(&self, request: LoginRequest) -> HttpResult<AuthResponse>;
-    async fn get_user_by_id(&self, id: Uuid) -> HttpResult<Option<User>>;
-    async fn authenticate(&self, headers: &HeaderMap) -> HttpResult<User>;
-    fn decode_token(&self, token: &str) -> HttpResult<JwtClaims>;
-    fn extract_token_from_header(&self, headers: &HeaderMap) -> HttpResult<String>;
+    async fn login_with_google(&self, request: GoogleLoginRequest) -> HttpResult<AuthResponse>;
+    async fn authenticate(&self, headers: &HeaderMap) -> HttpResult<AuthUser>;
+    async fn get_current_user(&self, auth_user: &AuthUser) -> HttpResult<UserResponse>;
 }
 
 #[derive(Clone)]
 pub struct AuthHandlerImpl {
     pub user_repository: Arc<DynUserRepository>,
+    pub allowed_user_repository: Arc<DynAllowedUserRepository>,
+    pub google_token_verifier: Arc<DynGoogleTokenVerifier>,
     pub jwt_secret: String,
 }
 
 #[async_trait]
 impl AuthHandler for AuthHandlerImpl {
-    async fn register(&self, request: RegisterRequest) -> HttpResult<AuthResponse> {
-        if self
+    async fn login_with_google(&self, request: GoogleLoginRequest) -> HttpResult<AuthResponse> {
+        let identity = self.google_token_verifier.verify(&request.id_token).await?;
+
+        // An existing identity keeps its allowlist entry even if the Google email changes;
+        // a new one is only accepted when its email is in the allowlist.
+        let (user, allowed_user) = match self
             .user_repository
-            .get_by_username(&request.username)
+            .get_by_google_sub(&identity.sub)
             .await?
-            .is_some()
         {
-            return Err(Box::new(HttpError::conflict("Username already exists")));
-        }
-
-        if self
-            .user_repository
-            .get_by_email(&request.email)
-            .await?
-            .is_some()
-        {
-            return Err(Box::new(HttpError::conflict("Email already registered")));
-        }
-
-        let password_hash = User::hash_password(&request.password)
-            .map_err(|_| Box::new(HttpError::internal("Failed to hash password")))?;
-
-        let user = User::new(
-            request.client_id,
-            request.username,
-            request.email,
-            password_hash,
-            request.name,
-        );
-        let user = self.user_repository.insert(user).await?;
-        let token = self.generate_token(&user)?;
+            Some(mut user) => {
+                let allowed_user = self.get_allowed_user(*user.allowed_user_id()).await?;
+                user.record_login(&identity);
+                (self.user_repository.update(user).await?, allowed_user)
+            }
+            None => {
+                let allowed_user = self
+                    .allowed_user_repository
+                    .get_by_email(&identity.normalized_email())
+                    .await?
+                    .ok_or_else(|| {
+                        Box::new(HttpError::forbidden("Email is not allowed to sign in"))
+                    })?;
+                let user = User::new(&allowed_user, &identity);
+                (self.user_repository.insert(user).await?, allowed_user)
+            }
+        };
 
         Ok(AuthResponse {
-            token,
-            user: user.into(),
+            token: self.generate_token(&user)?,
+            user: UserResponse::new(&user, &allowed_user),
         })
     }
 
-    async fn login(&self, request: LoginRequest) -> HttpResult<AuthResponse> {
-        let user = self
-            .user_repository
-            .get_by_username(&request.username)
-            .await?
-            .ok_or_else(|| Box::new(HttpError::unauthorized("Invalid username or password")))?;
+    async fn authenticate(&self, headers: &HeaderMap) -> HttpResult<AuthUser> {
+        let token = Self::extract_bearer_token(headers)?;
+        let claims = self.decode_token(token)?;
 
-        if !user.is_active() {
-            return Err(Box::new(HttpError::unauthorized(
-                "User account is deactivated",
-            )));
-        }
+        let user_id = Uuid::parse_str(&claims.sub)
+            .map_err(|_| Box::new(HttpError::unauthorized("Invalid token")))?;
 
-        if !user.verify_password(&request.password) {
-            return Err(Box::new(HttpError::unauthorized(
-                "Invalid username or password",
-            )));
-        }
+        // Loaded on every request so that removing an allowlist entry or changing
+        // its role takes effect immediately, without waiting for the token to expire.
+        let user = self.get_user(user_id).await?;
+        let allowed_user = self.get_allowed_user(*user.allowed_user_id()).await?;
 
-        let token = self.generate_token(&user)?;
-
-        Ok(AuthResponse {
-            token,
-            user: user.into(),
-        })
+        Ok(AuthUser::new(&user, &allowed_user))
     }
 
-    async fn get_user_by_id(&self, id: Uuid) -> HttpResult<Option<User>> {
-        self.user_repository.get_by_id(id).await
+    async fn get_current_user(&self, auth_user: &AuthUser) -> HttpResult<UserResponse> {
+        let user = self.get_user(auth_user.user_id()).await?;
+        let allowed_user = self.get_allowed_user(*user.allowed_user_id()).await?;
+
+        Ok(UserResponse::new(&user, &allowed_user))
+    }
+}
+
+impl AuthHandlerImpl {
+    async fn get_user(&self, user_id: Uuid) -> HttpResult<User> {
+        self.user_repository
+            .get_by_id(user_id)
+            .await?
+            .ok_or_else(|| Box::new(HttpError::unauthorized("User not found")))
+    }
+
+    async fn get_allowed_user(&self, allowed_user_id: Uuid) -> HttpResult<AllowedUser> {
+        self.allowed_user_repository
+            .get_by_id(allowed_user_id)
+            .await?
+            .ok_or_else(|| Box::new(HttpError::forbidden("Email is not allowed to sign in")))
+    }
+
+    fn extract_bearer_token(headers: &HeaderMap) -> HttpResult<&str> {
+        headers
+            .get(header::AUTHORIZATION)
+            .and_then(|h| h.to_str().ok())
+            .ok_or_else(|| Box::new(HttpError::unauthorized("Missing Authorization header")))?
+            .strip_prefix("Bearer ")
+            .ok_or_else(|| {
+                Box::new(HttpError::unauthorized(
+                    "Invalid Authorization header format",
+                ))
+            })
     }
 
     fn decode_token(&self, token: &str) -> HttpResult<JwtClaims> {
@@ -111,51 +135,12 @@ impl AuthHandler for AuthHandlerImpl {
         .map_err(|_| Box::new(HttpError::unauthorized("Invalid or expired token")))
     }
 
-    fn extract_token_from_header(&self, headers: &HeaderMap) -> HttpResult<String> {
-        let auth_header = headers
-            .get(header::AUTHORIZATION)
-            .and_then(|h| h.to_str().ok())
-            .ok_or_else(|| Box::new(HttpError::unauthorized("Missing Authorization header")))?;
-
-        if !auth_header.starts_with("Bearer ") {
-            return Err(Box::new(HttpError::unauthorized(
-                "Invalid Authorization header format",
-            )));
-        }
-
-        Ok(auth_header[7..].to_string())
-    }
-
-    async fn authenticate(&self, headers: &HeaderMap) -> HttpResult<User> {
-        let token = self.extract_token_from_header(headers)?;
-        let claims = self.decode_token(&token)?;
-
-        let user_id = Uuid::parse_str(&claims.sub)
-            .map_err(|_| Box::new(HttpError::unauthorized("Invalid token")))?;
-
-        let user = self
-            .get_user_by_id(user_id)
-            .await?
-            .ok_or_else(|| Box::new(HttpError::unauthorized("User not found")))?;
-
-        if !user.is_active() {
-            return Err(Box::new(HttpError::unauthorized(
-                "User account is deactivated",
-            )));
-        }
-
-        Ok(user)
-    }
-}
-
-impl AuthHandlerImpl {
     fn generate_token(&self, user: &User) -> HttpResult<String> {
+        let now = chrono::Utc::now();
         let claims = JwtClaims {
             sub: user.id().to_string(),
-            client_id: user.client_id().to_string(),
-            username: user.username().clone(),
-            exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
-            iat: chrono::Utc::now().timestamp() as usize,
+            exp: (now + chrono::Duration::hours(TOKEN_TTL_HOURS)).timestamp() as usize,
+            iat: now.timestamp() as usize,
         };
 
         encode(
@@ -169,23 +154,11 @@ impl AuthHandlerImpl {
 
 pub mod use_cases {
     use serde::{Deserialize, Serialize};
-    use uuid::Uuid;
 
     #[derive(Debug, Clone, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
-    pub struct RegisterRequest {
-        pub client_id: Uuid,
-        pub username: String,
-        pub email: String,
-        pub password: String,
-        pub name: String,
-    }
-
-    #[derive(Debug, Clone, Deserialize, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct LoginRequest {
-        pub username: String,
-        pub password: String,
+    pub struct GoogleLoginRequest {
+        pub id_token: String,
     }
 }
 
@@ -201,8 +174,6 @@ pub struct AuthResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JwtClaims {
     pub sub: String,
-    pub client_id: String,
-    pub username: String,
     pub exp: usize,
     pub iat: usize,
 }

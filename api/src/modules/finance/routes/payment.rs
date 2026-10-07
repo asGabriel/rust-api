@@ -9,12 +9,10 @@ use http_error::HttpResult;
 use uuid::Uuid;
 
 use crate::modules::{
+    auth::domain::auth_user::AuthUser,
     finance::{domain::payment::PaymentFilters, handler::payment::use_cases::CreatePaymentRequest},
     routes::AppState,
 };
-
-// Routes are unauthenticated for now, so every request acts as this single client/user.
-const ANONYMOUS_ID: Uuid = Uuid::nil();
 
 pub fn configure_routes() -> Router<AppState> {
     Router::new().nest(
@@ -28,12 +26,13 @@ pub fn configure_routes() -> Router<AppState> {
 
 async fn create_payment(
     state: State<AppState>,
+    auth_user: AuthUser,
     Json(request): Json<CreatePaymentRequest>,
 ) -> HttpResult<impl IntoResponse> {
     let payment = state
         .finance_state
         .payment_handler
-        .create_payment(ANONYMOUS_ID, request)
+        .create_payment(auth_user.tenant_id(), request)
         .await?;
 
     Ok(Json(payment))
@@ -41,12 +40,13 @@ async fn create_payment(
 
 async fn list_payments(
     state: State<AppState>,
+    auth_user: AuthUser,
     Json(filters): Json<PaymentFilters>,
 ) -> HttpResult<impl IntoResponse> {
     let payments = state
         .finance_state
         .payment_handler
-        .list_payments(ANONYMOUS_ID, &filters)
+        .list_payments(auth_user.tenant_id(), &filters)
         .await?;
 
     Ok(Json(payments))
@@ -54,12 +54,13 @@ async fn list_payments(
 
 async fn refund_payment(
     state: State<AppState>,
+    auth_user: AuthUser,
     Path(payment_id): Path<Uuid>,
 ) -> HttpResult<impl IntoResponse> {
     state
         .finance_state
         .payment_handler
-        .refund_payment(ANONYMOUS_ID, ANONYMOUS_ID, payment_id)
+        .refund_payment(auth_user.tenant_id(), auth_user.user_id(), payment_id)
         .await?;
 
     Ok(StatusCode::OK)

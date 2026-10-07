@@ -15,9 +15,9 @@ uuid = { workspace = true }
 async-trait = { workspace = true }
 serde_plain = { workspace = true }
 rand = { workspace = true }
+reqwest = { workspace = true }
 
 ## Auth
-bcrypt = { workspace = true }
 jsonwebtoken = { workspace = true }
 
 ## libs

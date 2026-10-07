@@ -9,15 +9,13 @@ use http_error::HttpResult;
 use uuid::Uuid;
 
 use crate::modules::{
+    auth::domain::auth_user::AuthUser,
     finance::{
         domain::income::IncomeFilters,
         handler::income::use_cases::{CreateIncomeRequest, UpdateIncomeRequest},
     },
     routes::AppState,
 };
-
-// Routes are unauthenticated for now, so every request acts as this single client/user.
-const ANONYMOUS_ID: Uuid = Uuid::nil();
 
 pub fn configure_routes() -> Router<AppState> {
     let main_income_routes = Router::new()
@@ -39,12 +37,13 @@ pub fn configure_routes() -> Router<AppState> {
 
 async fn create_income(
     state: State<AppState>,
+    auth_user: AuthUser,
     Json(request): Json<CreateIncomeRequest>,
 ) -> HttpResult<impl IntoResponse> {
     let income = state
         .finance_state
         .income_handler
-        .register_new_income(ANONYMOUS_ID, request)
+        .register_new_income(auth_user.tenant_id(), request)
         .await?;
 
     Ok(Json(income))
@@ -52,12 +51,13 @@ async fn create_income(
 
 async fn list_incomes(
     state: State<AppState>,
+    auth_user: AuthUser,
     Json(filters): Json<IncomeFilters>,
 ) -> HttpResult<impl IntoResponse> {
     let incomes = state
         .finance_state
         .income_handler
-        .list_incomes(ANONYMOUS_ID, &filters)
+        .list_incomes(auth_user.tenant_id(), &filters)
         .await?;
 
     Ok(Json(incomes))
@@ -65,13 +65,14 @@ async fn list_incomes(
 
 async fn update_income(
     state: State<AppState>,
+    auth_user: AuthUser,
     Path(income_id): Path<Uuid>,
     Json(request): Json<UpdateIncomeRequest>,
 ) -> HttpResult<impl IntoResponse> {
     let income = state
         .finance_state
         .income_handler
-        .update_income(ANONYMOUS_ID, income_id, request)
+        .update_income(auth_user.tenant_id(), income_id, request)
         .await?;
 
     Ok(Json(income))
@@ -79,12 +80,13 @@ async fn update_income(
 
 async fn soft_delete_income(
     state: State<AppState>,
+    auth_user: AuthUser,
     Path(income_id): Path<Uuid>,
 ) -> HttpResult<impl IntoResponse> {
     state
         .finance_state
         .income_handler
-        .soft_delete_income(ANONYMOUS_ID, ANONYMOUS_ID, income_id)
+        .soft_delete_income(auth_user.tenant_id(), auth_user.user_id(), income_id)
         .await?;
 
     Ok(StatusCode::OK)

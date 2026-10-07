@@ -28,7 +28,6 @@ rust_decimal = { version = "1.36", features = ["serde"] }
 uuid = { version = "1.15.0", features = ["v4", "serde"] }
 
 # Auth
-bcrypt = { version = "0.16" }
 jsonwebtoken = { version = "9.3" }
 
 ## libs

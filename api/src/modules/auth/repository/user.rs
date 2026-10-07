@@ -8,10 +8,9 @@ use crate::modules::auth::domain::user::User;
 #[async_trait]
 pub trait UserRepository {
     async fn get_by_id(&self, id: Uuid) -> HttpResult<Option<User>>;
-    async fn get_by_username(&self, username: &str) -> HttpResult<Option<User>>;
-    async fn get_by_email(&self, email: &str) -> HttpResult<Option<User>>;
+    async fn get_by_google_sub(&self, google_sub: &str) -> HttpResult<Option<User>>;
     async fn insert(&self, user: User) -> HttpResult<User>;
-    async fn update(&self, user: User) -> HttpResult<()>;
+    async fn update(&self, user: User) -> HttpResult<User>;
 }
 
 pub type DynUserRepository = dyn UserRepository + Send + Sync;
@@ -37,18 +36,9 @@ impl UserRepository for UserRepositoryImpl {
         Ok(row.map(|r| User::from(entity::UserEntity::from(&r))))
     }
 
-    async fn get_by_username(&self, username: &str) -> HttpResult<Option<User>> {
-        let row = sqlx::query(r#"SELECT * FROM auth.users WHERE username = $1"#)
-            .bind(username)
-            .fetch_optional(&self.pool)
-            .await?;
-
-        Ok(row.map(|r| User::from(entity::UserEntity::from(&r))))
-    }
-
-    async fn get_by_email(&self, email: &str) -> HttpResult<Option<User>> {
-        let row = sqlx::query(r#"SELECT * FROM auth.users WHERE email = $1"#)
-            .bind(email)
+    async fn get_by_google_sub(&self, google_sub: &str) -> HttpResult<Option<User>> {
+        let row = sqlx::query(r#"SELECT * FROM auth.users WHERE google_sub = $1"#)
+            .bind(google_sub)
             .fetch_optional(&self.pool)
             .await?;
 
@@ -60,54 +50,54 @@ impl UserRepository for UserRepositoryImpl {
 
         let row = sqlx::query(
             r#"
-            INSERT INTO auth.users (id, client_id, username, email, password_hash, name, is_active, created_at, updated_at)
+            INSERT INTO auth.users (
+                id, allowed_user_id, google_sub, email, name, avatar_url,
+                created_at, updated_at, last_login_at
+            )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING *
             "#,
         )
         .bind(entity.id)
-        .bind(entity.client_id)
-        .bind(&entity.username)
+        .bind(entity.allowed_user_id)
+        .bind(&entity.google_sub)
         .bind(&entity.email)
-        .bind(&entity.password_hash)
         .bind(&entity.name)
-        .bind(entity.is_active)
+        .bind(&entity.avatar_url)
         .bind(entity.created_at)
         .bind(entity.updated_at)
+        .bind(entity.last_login_at)
         .fetch_one(&self.pool)
         .await?;
 
         Ok(User::from(entity::UserEntity::from(&row)))
     }
 
-    async fn update(&self, user: User) -> HttpResult<()> {
+    async fn update(&self, user: User) -> HttpResult<User> {
         let entity = entity::UserEntity::from(user);
 
-        sqlx::query(
+        let row = sqlx::query(
             r#"
-            UPDATE auth.users SET 
-                client_id = $2,
-                username = $3,
-                email = $4,
-                password_hash = $5,
-                name = $6,
-                is_active = $7,
-                updated_at = $8
+            UPDATE auth.users SET
+                email = $2,
+                name = $3,
+                avatar_url = $4,
+                updated_at = $5,
+                last_login_at = $6
             WHERE id = $1
+            RETURNING *
             "#,
         )
         .bind(entity.id)
-        .bind(entity.client_id)
-        .bind(&entity.username)
         .bind(&entity.email)
-        .bind(&entity.password_hash)
         .bind(&entity.name)
-        .bind(entity.is_active)
-        .bind(chrono::Utc::now().naive_utc())
-        .execute(&self.pool)
+        .bind(&entity.avatar_url)
+        .bind(entity.updated_at)
+        .bind(entity.last_login_at)
+        .fetch_one(&self.pool)
         .await?;
 
-        Ok(())
+        Ok(User::from(entity::UserEntity::from(&row)))
     }
 }
 
@@ -120,28 +110,28 @@ pub mod entity {
 
     pub struct UserEntity {
         pub id: Uuid,
-        pub client_id: Uuid,
-        pub username: String,
+        pub allowed_user_id: Uuid,
+        pub google_sub: String,
         pub email: String,
-        pub password_hash: String,
         pub name: String,
-        pub is_active: bool,
+        pub avatar_url: Option<String>,
         pub created_at: NaiveDateTime,
         pub updated_at: Option<NaiveDateTime>,
+        pub last_login_at: NaiveDateTime,
     }
 
     impl From<&PgRow> for UserEntity {
         fn from(row: &PgRow) -> Self {
             Self {
                 id: row.get("id"),
-                client_id: row.get("client_id"),
-                username: row.get("username"),
+                allowed_user_id: row.get("allowed_user_id"),
+                google_sub: row.get("google_sub"),
                 email: row.get("email"),
-                password_hash: row.get("password_hash"),
                 name: row.get("name"),
-                is_active: row.get("is_active"),
+                avatar_url: row.get("avatar_url"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
+                last_login_at: row.get("last_login_at"),
             }
         }
     }
@@ -150,14 +140,14 @@ pub mod entity {
         fn from(user: User) -> Self {
             Self {
                 id: *user.id(),
-                client_id: *user.client_id(),
-                username: user.username().clone(),
+                allowed_user_id: *user.allowed_user_id(),
+                google_sub: user.google_sub().clone(),
                 email: user.email().clone(),
-                password_hash: user.password_hash().clone(),
                 name: user.name().clone(),
-                is_active: *user.is_active(),
+                avatar_url: user.avatar_url().clone(),
                 created_at: user.created_at().naive_utc(),
                 updated_at: user.updated_at().map(|dt| dt.naive_utc()),
+                last_login_at: user.last_login_at().naive_utc(),
             }
         }
     }
@@ -166,14 +156,14 @@ pub mod entity {
         fn from(entity: UserEntity) -> Self {
             User::from_row(
                 entity.id,
-                entity.client_id,
-                entity.username,
+                entity.allowed_user_id,
+                entity.google_sub,
                 entity.email,
-                entity.password_hash,
                 entity.name,
-                entity.is_active,
+                entity.avatar_url,
                 entity.created_at.and_utc(),
                 entity.updated_at.map(|dt| dt.and_utc()),
+                entity.last_login_at.and_utc(),
             )
         }
     }

@@ -1,7 +1,14 @@
 use std::sync::Arc;
 
 use api::modules::{
-    auth::{handler::AuthHandlerImpl, repository::user::UserRepositoryImpl, AuthState},
+    auth::{
+        handler::AuthHandlerImpl,
+        repository::{
+            allowed_user::AllowedUserRepositoryImpl, google::GoogleTokenVerifierImpl,
+            user::UserRepositoryImpl,
+        },
+        AuthState,
+    },
     finance::{
         handler::{
             debt::DebtHandlerImpl as FinanceDebtHandlerImpl,
@@ -218,9 +225,12 @@ fn build_matchmaking_state(pool: &Pool<Postgres>) -> MatchmakingState {
 
 fn build_auth_handler(pool: &Pool<Postgres>) -> AuthHandlerImpl {
     let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
+    let google_client_id = std::env::var("GOOGLE_CLIENT_ID").expect("GOOGLE_CLIENT_ID must be set");
 
     AuthHandlerImpl {
         user_repository: Arc::new(UserRepositoryImpl::new(pool)),
+        allowed_user_repository: Arc::new(AllowedUserRepositoryImpl::new(pool)),
+        google_token_verifier: Arc::new(GoogleTokenVerifierImpl::new(google_client_id)),
         jwt_secret,
     }
 }

@@ -5,6 +5,7 @@ use axum::Router;
 use crate::modules::{auth::handler::DynAuthHandler, routes::AppState};
 
 pub mod domain;
+pub mod extractor;
 pub mod handler;
 pub mod repository;
 pub mod routes;
