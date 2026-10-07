@@ -6,7 +6,7 @@ Workspace Cargo com um serviço web (`api`) e libs compartilhadas. Hoje só há 
 
 ```
 rust-api/
-  api/            # único serviço Axum: módulos auth (JWT/bcrypt), finance_manager (debt, income, payment, invoice, financial_instrument) e matchmaking
+  api/            # único serviço Axum: módulos auth (login Google + JWT próprio), finance_manager (debt, income, payment, invoice, financial_instrument) e matchmaking
   lib/
     database/      # DbPool (sqlx Postgres), macro push_filter! para query builder
     http-error/     # HttpError/HttpResult padronizado (RFC 7807), features: http/axum/sqlx/reqwest
@@ -27,6 +27,15 @@ Contexto de negócio e regras específicas de cada módulo (complementa a seçã
 Responsável por organizar sorteio de equipes para partidas de esportes. Hoje roda como módulo dentro do serviço `api` (não como processo separado), pela limitação de infraestrutura descrita no topo deste arquivo.
 
 Caso de uso atual: sorteio para um grupo de vôlei de praia (beach volley) — jogadores (`Player`), dias de jogo (`Session`, com configurações padrão e quadras disponíveis), duplas (`Team`) e partidas registradas (`Match`). Repositórios são persistidos em Postgres (schema `matchmaking`, migrations em `migrations/matchmaking`), no mesmo padrão dos demais módulos. As regras de sorteio (critérios de balanceamento de times, restrições, etc.) ainda serão definidas e documentadas aqui conforme forem implementadas nos próximos PRs.
+
+### auth
+
+Não há cadastro nem senha: a identidade vem do Google (ID token validado contra as chaves públicas do Google em `POST /api/auth/google`) e a API emite o próprio JWT (HS256, `JWT_SECRET`, 1h).
+
+- `auth.tenant` — dono dos dados; é o `client_id` usado pelos módulos de finance.
+- `auth.allowed_users` — allowlist de e-mails (minúsculos), cada um vinculado a um `tenant_id` e a um `role` (`ADMIN`/`MEMBER`). Só e-mails nessa tabela conseguem entrar (403 caso contrário). Hoje é gerenciada via SQL; o `role` existe para o futuro painel de administração.
+- `auth.users` — identidade Google (`google_sub`), criada no primeiro login de um e-mail permitido. Apagar a linha de `allowed_users` apaga o usuário em cascata e revoga o acesso na hora (o `authenticate` relê usuário + allowlist a cada request).
+- Rotas protegidas recebem o extractor `AuthUser` como argumento e usam `auth_user.tenant_id()` como `client_id` — nunca um `client_id` vindo da request.
 
 ## Comandos
 
@@ -77,7 +86,8 @@ Ver `env.example` para a lista completa.
 |---|---|
 | `DATABASE_URL` | Postgres compartilhado por todos os módulos |
 | `PORT` | porta do serviço, default 8080 |
-| `JWT_SECRET` | usado pelo módulo `auth`; `matchmaking` ainda não valida token |
+| `JWT_SECRET` | assina o JWT emitido pelo módulo `auth`; `matchmaking` ainda não valida token |
+| `GOOGLE_CLIENT_ID` | OAuth Client ID do Google; o `auth` só aceita ID tokens emitidos para ele |
 | `TELEGRAM_API_URL` / `TELEGRAM_API_TOKEN` | usado via lib `telegram_api` |
 
 ## Git workflow

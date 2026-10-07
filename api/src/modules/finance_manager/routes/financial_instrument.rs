@@ -34,7 +34,7 @@ async fn update_financial_instrument(
     let instrument = state
         .finance_manager_state
         .financial_instrument_handler
-        .update_financial_instrument(*user.client_id(), request)
+        .update_financial_instrument(user.tenant_id(), request)
         .await?;
 
     Ok(Json(instrument))
@@ -49,7 +49,7 @@ async fn create_financial_instrument(
     let instrument = state
         .finance_manager_state
         .financial_instrument_handler
-        .create_financial_instrument(*user.client_id(), request)
+        .create_financial_instrument(user.tenant_id(), request)
         .await?;
 
     Ok(Json(instrument))
@@ -64,7 +64,7 @@ async fn list_financial_instruments(
     let instruments = state
         .finance_manager_state
         .financial_instrument_handler
-        .list_financial_instruments(*user.client_id(), filters)
+        .list_financial_instruments(user.tenant_id(), filters)
         .await?;
 
     Ok(Json(instruments))

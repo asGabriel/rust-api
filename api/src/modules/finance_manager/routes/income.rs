@@ -24,7 +24,7 @@ async fn create_income(
     let income = state
         .finance_manager_state
         .income_handler
-        .create_income(*user.client_id(), request)
+        .create_income(user.tenant_id(), request)
         .await?;
 
     Ok(Json(income))
@@ -39,7 +39,7 @@ async fn list_incomes(
     let incomes = state
         .finance_manager_state
         .income_handler
-        .list_incomes(*user.client_id(), filters)
+        .list_incomes(user.tenant_id(), filters)
         .await?;
 
     Ok(Json(incomes))

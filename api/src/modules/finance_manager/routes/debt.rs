@@ -80,7 +80,7 @@ async fn list_recurrences(
     let recurrences = state
         .finance_manager_state
         .debt_handler
-        .list_debt_recurrences(*user.client_id(), &filters)
+        .list_debt_recurrences(user.tenant_id(), &filters)
         .await?;
 
     Ok(Json(recurrences))
@@ -96,7 +96,7 @@ async fn create_recurrence(
     let recurrence = state
         .finance_manager_state
         .debt_handler
-        .create_debt_recurrence(*user.client_id(), request)
+        .create_debt_recurrence(user.tenant_id(), request)
         .await?;
 
     Ok(Json(recurrence))
@@ -113,7 +113,7 @@ async fn update_recurrence(
     let recurrence = state
         .finance_manager_state
         .debt_handler
-        .update_debt_recurrence(*user.client_id(), recurrence_id, request)
+        .update_debt_recurrence(user.tenant_id(), recurrence_id, request)
         .await?;
 
     Ok(Json(recurrence))
@@ -129,7 +129,7 @@ async fn update_debt(
     let debt = state
         .finance_manager_state
         .debt_handler
-        .update_debt(*user.client_id(), debt_id, request)
+        .update_debt(user.tenant_id(), debt_id, request)
         .await?;
     Ok(Json(debt))
 }
@@ -143,7 +143,7 @@ async fn soft_delete_debt(
     state
         .finance_manager_state
         .debt_handler
-        .soft_delete_debt(*user.client_id(), *user.id(), debt_id)
+        .soft_delete_debt(user.tenant_id(), user.user_id(), debt_id)
         .await?;
 
     Ok(StatusCode::OK)
@@ -159,7 +159,7 @@ async fn list_debt_installments(
     let installments = state
         .finance_manager_state
         .debt_handler
-        .list_debt_installments(*user.client_id(), &request)
+        .list_debt_installments(user.tenant_id(), &request)
         .await?;
 
     Ok(Json(installments))
@@ -174,7 +174,7 @@ async fn create_debt(
     let debt = state
         .finance_manager_state
         .debt_handler
-        .register_new_debt(*user.client_id(), request)
+        .register_new_debt(user.tenant_id(), request)
         .await?;
 
     Ok(Json(debt))
@@ -189,7 +189,7 @@ pub async fn list_debts(
     let debts = state
         .finance_manager_state
         .debt_handler
-        .list_debts(*user.client_id(), &filters)
+        .list_debts(user.tenant_id(), &filters)
         .await?;
 
     Ok(Json(debts))
