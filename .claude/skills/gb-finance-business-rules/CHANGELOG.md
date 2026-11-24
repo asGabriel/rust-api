@@ -85,3 +85,8 @@
   (pode quitar ou reabrir). Pai e filhas de parcelamento seguem imutáveis
   (invariante da soma; reestruturar = cancelar e recriar). Motivo: o dono
   precisa poder atualizar o valor ao editar uma dívida.
+- 2026-11-23 — **Parcelamento: mínimo de parcelas cai de 2 para 1.**
+  `installment_count = 1` gera pai + uma filha com o valor cheio. Motivo:
+  compras à vista precisam ser registradas como parcelamento (1x). Mantida
+  a regra de não aceitar `paidAmount` em parcelamento, inclusive no 1x —
+  a filha é paga depois (decisão do dono, evita mexer no `insert_many`).

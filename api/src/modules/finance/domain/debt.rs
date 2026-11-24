@@ -646,6 +646,24 @@ mod tests {
         assert_eq!(parent.due_date(), &None);
     }
 
+    #[test]
+    fn generate_installment_children_supports_single_installment() {
+        let mut parent = new_debt(Some(1));
+
+        let children = parent.generate_installment_children(31).unwrap();
+
+        assert_eq!(children.len(), 1);
+        let child = &children[0];
+        assert_eq!(child.total_amount(), parent.total_amount());
+        assert_eq!(child.remaining_amount(), parent.total_amount());
+        assert_eq!(child.installment_number(), &Some(1));
+        assert_eq!(child.installment_count(), &Some(1));
+        assert_eq!(child.parent_id(), &Some(*parent.id()));
+        assert_eq!(child.due_date(), &Some(due_date()));
+        assert_eq!(parent.due_date(), &None);
+        assert!(parent.is_installment_parent());
+    }
+
     fn d(value: &str) -> Decimal {
         value.parse().unwrap()
     }

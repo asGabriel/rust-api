@@ -88,6 +88,10 @@ separada. `debt.debt_installment` deixa de existir.
   valor cheio, `installment_count = N`) + **N dívidas-filhas**
   (`parent_id = <pai>`), cada uma uma dívida completa com `due_date`,
   `total_amount`, `paid_amount`, `remaining_amount` e `status` próprios.
+- `N >= 1`: parcelamento em **1x** é válido (pai + uma única filha com o
+  valor cheio) — é como uma compra à vista entra como parcelamento.
+  `N < 1` é rejeitado com 400. Como qualquer parcelamento, o 1x não aceita
+  `paidAmount` na criação: a filha é paga depois pelo fluxo normal.
 - `installment_count` fica **na dívida-pai** (mantido explicitamente, não
   derivado de `count(filhos)`). As filhas também o **recebem copiado** na
   geração, só para exibição ("k/N"); é imutável e não é fonte da verdade.
