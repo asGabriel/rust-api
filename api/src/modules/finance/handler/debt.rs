@@ -238,9 +238,9 @@ pub mod use_cases {
             }
 
             if let Some(installment_count) = self.installment_count {
-                if installment_count < 2 {
+                if installment_count < 1 {
                     return Err(Box::new(HttpError::bad_request(
-                        "Installment count must be at least 2",
+                        "Installment count must be at least 1",
                     )));
                 }
 
